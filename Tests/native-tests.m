@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 #import "StatusQuota.h"
 #import "StatusAwake.h"
+#import "StatusKeyboardLock.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
 
 static int gFailures = 0;
@@ -254,6 +255,33 @@ static void TestAwake(void) {
     Check(!TMOurSleepAssertionPresent(), @"IOKit ne voit plus d'assertion");
 }
 
+static void TestHoldFraction(void) {
+    printf("\n\033[1mTMHoldFraction\033[0m\n");
+    Check(TMHoldFraction(0.0, 1.0) == 0.0, @"rien de maintenu = 0");
+    Check(TMHoldFraction(0.5, 1.0) == 0.5, @"moitié du temps = 0,5");
+    Check(TMHoldFraction(1.0, 1.0) == 1.0, @"temps atteint = 1");
+    Check(TMHoldFraction(9.0, 1.0) == 1.0, @"borné à 1 : l'anneau ne déborde pas");
+    Check(TMHoldFraction(-3.0, 1.0) == 0.0, @"borné à 0 : une horloge qui recule ne casse rien");
+    Check(TMHoldFraction(0.5, 0.0) == 1.0, @"durée nulle : pas de division par zéro");
+}
+
+static void TestLockStateMachine(void) {
+    printf("\n\033[1mTMLockStateAfterToggle\033[0m\n");
+    Check(TMLockStateAfterToggle(TMLockStateUnlocked, YES) == TMLockStateLocked,
+          @"permission accordée : verrouille");
+    Check(TMLockStateAfterToggle(TMLockStateUnlocked, NO) == TMLockStateBlocked,
+          @"permission absente : bloqué, pas de faux verrou");
+    Check(TMLockStateAfterToggle(TMLockStateBlocked, YES) == TMLockStateLocked,
+          @"permission accordée après coup : verrouille");
+    Check(TMLockStateAfterToggle(TMLockStateBlocked, NO) == TMLockStateBlocked,
+          @"toujours pas de permission : reste bloqué");
+    Check(TMLockStateAfterToggle(TMLockStateLocked, YES) == TMLockStateUnlocked,
+          @"verrouillé : déverrouille");
+    // Le cas qui compte : la permission est révoquée pendant le verrou. On doit pouvoir sortir.
+    Check(TMLockStateAfterToggle(TMLockStateLocked, NO) == TMLockStateUnlocked,
+          @"permission révoquée pendant le verrou : on sort quand même");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -268,6 +296,8 @@ int main(void) {
         TestWindowClassification();
         TestHistory();
         TestAwake();
+        TestHoldFraction();
+        TestLockStateMachine();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

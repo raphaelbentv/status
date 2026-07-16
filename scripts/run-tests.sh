@@ -7,8 +7,9 @@ BUILD="${ROOT}/work"
 mkdir -p "$BUILD"
 
 echo "── Tests natifs (StatusQuota) ──"
-clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit \
+clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit -framework Cocoa \
   "$ROOT/Tests/native-tests.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAwake.m" \
+  "$ROOT/Native/StatusKeyboardLock.m" \
   -o "$BUILD/native-tests"
 "$BUILD/native-tests"
 native_status=$?
