@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Status — alternatives de design</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; background:#0e1117; color:#f5f6f8; }
+    body { margin:0; padding:48px; }
+    header { max-width:920px; margin:0 auto 42px; }
+    h1 { font-size:42px; margin:0 0 10px; letter-spacing:-.035em; }
+    header p { color:#a8adb8; font-size:17px; line-height:1.5; margin:0; }
+    section { max-width:1400px; margin:0 auto 64px; }
+    h2 { font-size:24px; margin:0 0 20px; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
+    article { background:#171b23; border:1px solid #292f3a; border-radius:18px; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.22); }
+    img { display:block; width:100%; height:auto; background:#10131a; }
+    .copy { padding:18px 20px 21px; }
+    h3 { font-size:18px; margin:0 0 7px; }
+    .copy p { color:#a8adb8; margin:0; line-height:1.45; }
+    .recommended { color:#7e91ff; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
+    @media (max-width:800px) { body{padding:24px}.grid{grid-template-columns:1fr}h1{font-size:34px} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Status</h1>
+    <p>Quatre directions pour la fenêtre macOS et quatre lectures pour la barre de menus. Les mêmes données réelles de démonstration sont utilisées pour faciliter la comparaison.</p>
+  </header>
+  <section>
+    <h2>Application</h2>
+    <div class="grid">
+      <article><img src="renders/app-1-twin-pulse.png" alt="Twin Pulse"><div class="copy"><div class="recommended">Recommandé</div><h3>1. Twin Pulse</h3><p>Le split-screen actuel, recentré sur les quotas 5 h et semaine.</p></div></article>
+      <article><img src="renders/app-2-time-horizon.png" alt="Time Horizon"><div class="copy"><h3>2. Time Horizon</h3><p>Les limites sont organisées par horizon temporel pour comparer les fournisseurs ligne à ligne.</p></div></article>
+      <article><img src="renders/app-3-breathing-room.png" alt="Breathing Room"><div class="copy"><h3>3. Breathing Room</h3><p>Une lecture émotionnelle et immédiate de la marge disponible et du prochain reset.</p></div></article>
+      <article><img src="renders/app-4-quiet-ledger.png" alt="Quiet Ledger"><div class="copy"><h3>4. Quiet Ledger</h3><p>Une vue compacte, précise et typographique, proche d’Activity Monitor.</p></div></article>
+    </div>
+  </section>
+  <section>
+    <h2>Barre des menus</h2>
+    <div class="grid">
+      <article><img src="renders/menu-a-dual-arc.png" alt="Dual Arc"><div class="copy"><h3>A. Dual Arc</h3><p>Deux arcs imbriqués pour garder les deux fournisseurs dans un symbole unique.</p></div></article>
+      <article><img src="renders/menu-b-plain-signal.png" alt="Plain Signal"><div class="copy"><div class="recommended">Recommandé</div><h3>B. Plain Signal</h3><p>La marge la plus faible est visible directement dans la barre système.</p></div></article>
+      <article><img src="renders/menu-c-reset-clock.png" alt="Reset Clock"><div class="copy"><h3>C. Reset Clock</h3><p>Le temps avant la prochaine remise à zéro devient l’information principale.</p></div></article>
+      <article><img src="renders/menu-d-split-bars.png" alt="Split Bars"><div class="copy"><h3>D. Split Bars</h3><p>Deux micro-barres sans texte pour une lecture discrète et instantanée.</p></div></article>
+    </div>
+  </section>
+</body>
+</html>

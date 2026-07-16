@@ -1,0 +1,327 @@
+// Implémentation de StatusQuota — voir StatusQuota.h pour le contrat et le pourquoi.
+//
+// Extrait de Status.m : ces fonctions ne touchent ni l'UI, ni le réseau, ni l'état applicatif, et
+// sont couvertes par Tests/native-tests.m.
+
+#import "StatusQuota.h"
+
+// Accepts either a bare Cookie header value or a whole "Copy as cURL" paste, so the user never has
+// to isolate the header by hand. Only the Cookie/-b value is kept; everything else is discarded.
+NSString *TMExtractCookieHeader(NSString *input) {
+    NSString *value = [input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!value.length) return @"";
+    if (![value hasPrefix:@"curl"] && [value rangeOfString:@"-H "].location == NSNotFound
+        && [value rangeOfString:@"-b "].location == NSNotFound) {
+        return value;
+    }
+    // Matches -H 'Cookie: …' / -H "Cookie: …" / -b '…' / --cookie '…', quote style either way.
+    NSString *pattern = @"(?:-H|--header)\\s+(['\"])\\s*[Cc]ookie:\\s*(.*?)\\1|(?:-b|--cookie)\\s+(['\"])(.*?)\\3";
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+    NSTextCheckingResult *match = [regex firstMatchInString:value options:0 range:NSMakeRange(0, value.length)];
+    if (!match) return @"";
+    for (NSNumber *group in @[@2, @4]) {
+        NSRange range = [match rangeAtIndex:group.unsignedIntegerValue];
+        if (range.location != NSNotFound) {
+            return [[value substringWithRange:range] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        }
+    }
+    return @"";
+}
+
+double TMNumber(id value) {
+    if ([value respondsToSelector:@selector(doubleValue)]) return [value doubleValue];
+    return 0;
+}
+
+long long TMInteger(id value) {
+    if ([value respondsToSelector:@selector(longLongValue)]) return [value longLongValue];
+    return 0;
+}
+
+NSString *TMQuotaWindowLabel(long long minutes) {
+    if (minutes == 300) return @"5 h";
+    if (minutes == 10080) return @"Semaine";
+    if (minutes == 1440) return @"24 h";
+    if (minutes > 0 && minutes % 10080 == 0) return [NSString stringWithFormat:@"%lld sem.", minutes / 10080];
+    if (minutes > 0 && minutes % 1440 == 0) return [NSString stringWithFormat:@"%lld j", minutes / 1440];
+    if (minutes > 0 && minutes % 60 == 0) return [NSString stringWithFormat:@"%lld h", minutes / 60];
+    if (minutes > 0) return [NSString stringWithFormat:@"%lld min", minutes];
+    return @"Période";
+}
+
+NSDictionary *TMDisconnectedOpenAIAccount(NSString *error) {
+    return @{
+        @"connected": @NO, @"connecting": @NO, @"email": @"", @"plan": @"",
+        @"windows": @[], @"availableCredits": @0, @"source": @"Codex app-server",
+        @"error": error ?: @""
+    };
+}
+
+NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateResponse, BOOL connecting, NSString *error) {
+    BOOL connected = [account[@"type"] isEqualToString:@"chatgpt"];
+    NSMutableArray *windows = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    NSMutableArray *snapshots = [NSMutableArray array];
+    NSDictionary *root = [rateResponse[@"rateLimits"] isKindOfClass:NSDictionary.class] ? rateResponse[@"rateLimits"] : nil;
+    if (root) [snapshots addObject:root];
+    NSDictionary *byID = [rateResponse[@"rateLimitsByLimitId"] isKindOfClass:NSDictionary.class] ? rateResponse[@"rateLimitsByLimitId"] : nil;
+    for (NSDictionary *snapshot in byID.allValues) {
+        if (![snapshot isKindOfClass:NSDictionary.class]) continue;
+        NSString *limitID = [snapshot[@"limitId"] isKindOfClass:NSString.class] ? snapshot[@"limitId"] : @"";
+        if (limitID.length && [limitID isEqualToString:root[@"limitId"]]) continue;
+        [snapshots addObject:snapshot];
+    }
+    for (NSDictionary *snapshot in snapshots) {
+        NSString *limitName = [snapshot[@"limitName"] isKindOfClass:NSString.class] ? snapshot[@"limitName"] : @"";
+        NSString *limitID = [snapshot[@"limitId"] isKindOfClass:NSString.class] ? snapshot[@"limitId"] : @"codex";
+        for (NSString *slot in @[@"primary", @"secondary"]) {
+            NSDictionary *window = [snapshot[slot] isKindOfClass:NSDictionary.class] ? snapshot[slot] : nil;
+            if (!window) continue;
+            long long duration = TMInteger(window[@"windowDurationMins"]);
+            NSString *dedupe = [NSString stringWithFormat:@"%@-%lld", limitID, duration];
+            if ([seen containsObject:dedupe]) continue;
+            [seen addObject:dedupe];
+            NSInteger used = MAX(0, MIN(100, (NSInteger)TMInteger(window[@"usedPercent"])));
+            [windows addObject:@{
+                @"label": TMQuotaWindowLabel(duration), @"usedPercent": @(used), @"remainingPercent": @(100 - used),
+                @"resetsAt": @(TMInteger(window[@"resetsAt"])), @"durationMinutes": @(duration),
+                @"limitName": limitName, @"limitId": limitID
+            }];
+        }
+    }
+    NSDictionary *creditSummary = [rateResponse[@"rateLimitResetCredits"] isKindOfClass:NSDictionary.class] ? rateResponse[@"rateLimitResetCredits"] : nil;
+    NSInteger credits = TMInteger(creditSummary[@"availableCount"]);
+    return @{
+        @"connected": @(connected), @"connecting": @(connecting),
+        @"email": connected && [account[@"email"] isKindOfClass:NSString.class] ? account[@"email"] : @"",
+        @"plan": connected && [account[@"planType"] isKindOfClass:NSString.class] ? account[@"planType"] : @"",
+        @"windows": windows, @"availableCredits": @(credits), @"source": @"Codex app-server",
+        @"error": error ?: @""
+    };
+}
+
+NSDictionary *TMEmptyClaudeAccount(void) {
+    return @{
+        @"cliAvailable": @NO, @"authenticated": @NO, @"authChecking": @NO,
+        @"trackingInstalled": @NO, @"trackingConfigured": @NO, @"snapshotPresent": @NO,
+        @"windows": @[], @"capturedAt": @0, @"subscriptionType": @"", @"fableConfigured": @NO,
+        @"liveSource": @NO, @"error": @""
+    };
+}
+
+NSString *TMClaudeWindowLabel(NSString *name) {
+    NSDictionary *labels = @{
+        @"five_hour": @"5 h", @"seven_day": @"7 jours", @"seven_day_opus": @"7 j · Opus",
+        @"seven_day_sonnet": @"7 j · Sonnet", @"seven_day_fable": @"7 j · Fable", @"overage": @"Dépassement"
+    };
+    NSString *label = labels[name];
+    if (label) return label;
+    return [[name stringByReplacingOccurrencesOfString:@"_" withString:@" "] capitalizedStringWithLocale:[NSLocale localeWithLocaleIdentifier:@"fr_FR"]];
+}
+
+NSArray *TMClaudeWindowsFromSnapshot(NSDictionary *snapshot) {
+    if (![snapshot[@"schema_version"] isEqual:@1] || ![snapshot[@"provider"] isEqual:@"claude"]) return @[];
+    NSDictionary *limits = [snapshot[@"rate_limits"] isKindOfClass:NSDictionary.class] ? snapshot[@"rate_limits"] : nil;
+    if (!limits) return @[];
+    // Confirmed against a live snapshot: Claude Code's statusLine only ever sends five_hour and
+    // seven_day (plus seven_day_opus/seven_day_sonnet/overage per Anthropic's docs, if applicable).
+    // Any per-model scoped window (e.g. Fable) is NOT exposed here — see TMFetchClaudeUsage below.
+    NSArray *preferred = @[@"five_hour", @"seven_day", @"seven_day_opus", @"seven_day_sonnet", @"overage"];
+    NSMutableArray *names = [NSMutableArray array];
+    for (NSString *name in preferred) if (limits[name]) [names addObject:name];
+    for (NSString *name in [[limits allKeys] sortedArrayUsingSelector:@selector(compare:)]) if (![names containsObject:name]) [names addObject:name];
+    NSMutableArray *windows = [NSMutableArray array];
+    for (NSString *name in names) {
+        NSDictionary *window = [limits[name] isKindOfClass:NSDictionary.class] ? limits[name] : nil;
+        if (!window) continue;
+        double usedRaw = TMNumber(window[@"used_percentage"]);
+        long long resetsAt = TMInteger(window[@"resets_at"]);
+        if (resetsAt <= 0) continue;
+        double used = MAX(0, MIN(100, usedRaw));
+        [windows addObject:@{
+            @"label": TMClaudeWindowLabel(name), @"windowId": name,
+            @"usedPercent": @(used), @"remainingPercent": @(100.0 - used), @"resetsAt": @(resetsAt)
+        }];
+    }
+    return windows;
+}
+
+NSDate *TMParseISODate(NSString *value) {
+    if (![value isKindOfClass:NSString.class] || !value.length) return nil;
+    static NSISO8601DateFormatter *withFraction, *plain;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        withFraction = [NSISO8601DateFormatter new];
+        withFraction.formatOptions = NSISO8601DateFormatWithInternetDateTime | NSISO8601DateFormatWithFractionalSeconds;
+        plain = [NSISO8601DateFormatter new];
+        plain.formatOptions = NSISO8601DateFormatWithInternetDateTime;
+    });
+    return [withFraction dateFromString:value] ?: [plain dateFromString:value];
+}
+
+// Unofficial source: parses claude.ai's internal /api/organizations/{org}/usage response.
+// Undocumented, so every field is treated as optional and unknown kinds are surfaced generically
+// rather than dropped. Unlike the statusLine snapshot (which only refreshes when a terminal
+// `claude` session answers), this returns every window live on each poll.
+NSArray *TMClaudeWindowsFromUsagePayload(NSDictionary *payload) {
+    NSArray *limits = [payload[@"limits"] isKindOfClass:NSArray.class] ? payload[@"limits"] : nil;
+    if (!limits) return @[];
+    NSMutableArray *windows = [NSMutableArray array];
+    for (NSDictionary *entry in limits) {
+        if (![entry isKindOfClass:NSDictionary.class]) continue;
+        NSDate *resetsDate = TMParseISODate(entry[@"resets_at"]);
+        if (!resetsDate) continue;
+        NSString *kind = [entry[@"kind"] isKindOfClass:NSString.class] ? entry[@"kind"] : @"";
+        NSDictionary *scope = [entry[@"scope"] isKindOfClass:NSDictionary.class] ? entry[@"scope"] : nil;
+        NSDictionary *model = [scope[@"model"] isKindOfClass:NSDictionary.class] ? scope[@"model"] : nil;
+        NSString *modelName = [model[@"display_name"] isKindOfClass:NSString.class] ? model[@"display_name"] : @"";
+
+        NSString *label, *windowId;
+        if ([kind isEqualToString:@"session"]) {
+            label = @"5 h";
+            windowId = @"five_hour";
+        } else if ([kind isEqualToString:@"weekly_all"]) {
+            label = @"7 jours";
+            windowId = @"seven_day";
+        } else if ([kind isEqualToString:@"weekly_scoped"]) {
+            label = modelName.length ? [NSString stringWithFormat:@"7 j · %@", modelName] : @"7 j · modèle";
+            windowId = [NSString stringWithFormat:@"seven_day_scoped_%@", modelName.length ? modelName.lowercaseString : @"unknown"];
+        } else {
+            if (!kind.length) continue;
+            label = [kind stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+            windowId = kind;
+        }
+
+        double used = MAX(0, MIN(100, TMNumber(entry[@"percent"])));
+        [windows addObject:@{
+            @"label": label, @"windowId": windowId,
+            @"usedPercent": @(used), @"remainingPercent": @(100.0 - used), @"resetsAt": @((long long)resetsDate.timeIntervalSince1970)
+        }];
+    }
+    return windows;
+}
+
+// A window whose reset time has passed carries no usable number: the quota has since rolled over
+// by an unknown amount. Drop it rather than show a stale percentage as if it were current.
+NSArray *TMDropExpiredWindows(NSArray *windows) {
+    long long now = (long long)NSDate.date.timeIntervalSince1970;
+    NSMutableArray *result = [NSMutableArray array];
+    for (NSDictionary *window in windows) {
+        if (TMInteger(window[@"resetsAt"]) > now) [result addObject:window];
+    }
+    return result;
+}
+
+NSString *TMSupportDirectory(void) {
+    // STATUS_SUPPORT_DIR laisse les tests écrire ailleurs que dans les données réelles de
+    // l'utilisateur. Redéfinir HOME ne suffit pas : Foundation met le chemin en cache.
+    // Même convention que STATUS_CLAUDE_STATE_DIR côté bridge Python.
+    NSString *override = NSProcessInfo.processInfo.environment[@"STATUS_SUPPORT_DIR"];
+    NSString *dir;
+    if (override.length) {
+        dir = override.stringByExpandingTildeInPath;
+    } else {
+        NSString *base = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+        dir = [base stringByAppendingPathComponent:@"Status"];
+    }
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return dir;
+}
+
+NSString *TMHistoryPath(void) {
+    return [TMSupportDirectory() stringByAppendingPathComponent:@"quota-history.json"];
+}
+
+NSArray *TMLoadHistory(void) {
+    NSData *data = [NSData dataWithContentsOfFile:TMHistoryPath()];
+    NSArray *history = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [history isKindOfClass:NSArray.class] ? history : @[];
+}
+
+// Appends one sample per provider window to a rolling on-disk series (max ~2000 points ≈ a week at
+// 5-min cadence). Nothing here is a secret: only window ids and used percentages.
+NSArray *TMAppendHistory(NSArray *claudeWindows, NSArray *openAIWindows, long long now) {
+    NSMutableDictionary *points = [NSMutableDictionary dictionary];
+    for (NSDictionary *w in claudeWindows) {
+        NSString *wid = w[@"windowId"];
+        if (wid) points[[@"claude:" stringByAppendingString:wid]] = @((long)(TMNumber(w[@"usedPercent"]) + 0.5));
+    }
+    for (NSDictionary *w in openAIWindows) {
+        NSString *wid = w[@"windowId"] ?: w[@"label"];
+        if (wid) points[[@"openai:" stringByAppendingString:wid]] = @((long)(TMNumber(w[@"usedPercent"]) + 0.5));
+    }
+    if (!points.count) return TMLoadHistory();
+
+    NSMutableArray *history = [TMLoadHistory() mutableCopy];
+    NSDictionary *last = history.lastObject;
+    // Coalesce: don't record a new row if <2 min since the previous one (double refresh, wake, etc.).
+    if (![last isKindOfClass:NSDictionary.class] || now - TMInteger(last[@"t"]) >= 120) {
+        [history addObject:@{@"t": @(now), @"p": points}];
+        while (history.count > 2000) [history removeObjectAtIndex:0];
+        NSData *data = [NSJSONSerialization dataWithJSONObject:history options:0 error:nil];
+        [data writeToFile:TMHistoryPath() atomically:YES];
+    }
+    return history;
+}
+
+// Turns a pasted "k=v; k2=v2" header into cookies for the WKWebView store. Only the name/value
+// pairs are used; everything else about the paste is discarded.
+//
+// Cloudflare's own cookies are deliberately skipped: cf_clearance is bound to the IP and
+// User-Agent that earned it and expires within hours, so re-seeding the pasted (stale) copy on
+// every launch would clobber the fresh one WebKit earns by solving the challenge itself.
+NSArray<NSHTTPCookie *> *TMCookiesFromHeader(NSString *header) {
+    NSMutableArray *cookies = [NSMutableArray array];
+    for (NSString *pair in [header componentsSeparatedByString:@";"]) {
+        NSString *trimmed = [pair stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSRange equals = [trimmed rangeOfString:@"="];
+        if (equals.location == NSNotFound || equals.location == 0) continue;
+        NSString *name = [trimmed substringToIndex:equals.location];
+        NSString *value = [trimmed substringFromIndex:equals.location + 1];
+        if (!name.length || !value.length) continue;
+        if ([name hasPrefix:@"cf_"] || [name hasPrefix:@"__cf"]) continue;
+        NSHTTPCookie *cookie = [NSHTTPCookie cookieWithProperties:@{
+            NSHTTPCookieName: name,
+            NSHTTPCookieValue: value,
+            NSHTTPCookieDomain: @".claude.ai",
+            NSHTTPCookiePath: @"/",
+            NSHTTPCookieSecure: @"TRUE",
+            NSHTTPCookieExpires: [NSDate dateWithTimeIntervalSinceNow:60 * 60 * 24 * 365]
+        }];
+        if (cookie) [cookies addObject:cookie];
+    }
+    return cookies;
+}
+
+BOOL TMWindowIsSession(NSDictionary *window) {
+    NSString *windowId = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"] : @"";
+    NSString *label = [window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : @"";
+    long long duration = TMInteger(window[@"durationMinutes"]);
+    if ([windowId isEqualToString:@"five_hour"]) return YES;
+    if (duration == 300) return YES;
+    return [label isEqualToString:@"5 h"];
+}
+
+BOOL TMWindowIsWeekly(NSDictionary *window) {
+    NSString *windowId = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"] : @"";
+    NSString *label = [window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : @"";
+    long long duration = TMInteger(window[@"durationMinutes"]);
+    if ([windowId isEqualToString:@"overage"]) return NO;
+    if ([windowId hasPrefix:@"seven_day"]) return YES;
+    if (duration == 10080) return YES;
+    return [label isEqualToString:@"Semaine"] || [label isEqualToString:@"7 jours"];
+}
+
+BOOL TMMaxUsedPercent(NSArray<NSArray *> *windowArrays, BOOL (^predicate)(NSDictionary *window), double *outValue) {
+    BOOL found = NO;
+    double best = 0;
+    for (NSArray *windows in windowArrays) {
+        for (NSDictionary *window in windows) {
+            if (![window isKindOfClass:NSDictionary.class] || !predicate(window)) continue;
+            double used = TMNumber(window[@"usedPercent"]);
+            if (!found || used > best) { best = used; found = YES; }
+        }
+    }
+    if (found && outValue) *outValue = best;
+    return found;
+}

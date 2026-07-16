@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* Direction « Blueprint » — même système que dashboard.html : grille cyan sur ardoise,
+     barres hachurées, cyan = OpenAI, violet = Claude. */
+  :root{color-scheme:dark;--bg:#12161C;--text:#CBD5E1;--muted:#5B6673;--hair:rgba(103,232,249,.14);--hair-strong:rgba(103,232,249,.28);--soft:rgba(103,232,249,.05);--blue:#67E8F9;--purple:#A78BFA;--amber:#FBBF24;--danger:#FB7185;--grid:rgba(103,232,249,.045)}
+  *{box-sizing:border-box}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;color:var(--text);font:12.5px/1.4 ui-monospace,"SF Mono","Menlo",monospace;
+    background:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px),var(--bg);
+    background-size:22px 22px,22px 22px,auto}
+  button{font:inherit;color:inherit}
+  .popover{height:100%;display:flex;flex-direction:column}
+  .providers{display:grid;grid-template-columns:1fr 1fr;flex:1}
+  .provider{padding:18px 16px 14px;text-align:center;min-width:0;position:relative;background:rgba(18,22,28,.55)}
+  .provider:before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--provider)}
+  .provider+.provider{border-left:1px solid var(--hair)}
+  .name{font-size:10px;color:var(--provider);font-weight:700;margin-bottom:10px;text-transform:lowercase;letter-spacing:.06em}
+  .value .unit{font-size:.42em;margin-left:.08em;opacity:.65;font-weight:400}
+  .value{font-size:44px;line-height:1;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--provider)}
+  .window{font-size:13px;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
+  .reset{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:5px}
+  .weekly{border-top:1px solid var(--hair);margin-top:16px;padding-top:13px;text-align:left}
+  .weekly-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
+  .weekly-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
+  /* Même trame hachurée que la fenêtre principale : une mesure, pas une progression. */
+  .rail{height:10px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin-top:7px;overflow:hidden}
+  .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);transition:width .3s ease}
+  .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
+  .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
+  .account-note.stale{color:var(--amber)}
+  .segmented{display:flex;border:1px solid var(--hair-strong);overflow:hidden;flex:none}
+  .seg{border:0;background:transparent;color:var(--muted);padding:5px 7px;cursor:pointer;font:inherit;font-size:9.5px;border-radius:0}
+  .seg+.seg{border-left:1px solid var(--hair-strong)}
+  .seg:hover{background:var(--soft);color:var(--text)}
+  .seg.on{background:rgba(103,232,249,.14);color:var(--blue);font-weight:700}
+  .account-action{border:1px solid var(--provider);color:var(--provider);background:color-mix(in srgb,var(--provider) 10%,transparent);border-radius:2px;padding:6px 9px;margin-top:9px;cursor:pointer;font-size:10px;font-weight:700}
+  .footer{height:56px;border-top:1px solid var(--hair-strong);display:flex;align-items:center;padding:0 14px;gap:8px;background:rgba(14,18,23,.9)}
+  .sync{color:var(--muted);font-size:9.5px;min-width:0;flex:1}
+  .footer button{border:1px solid transparent;background:transparent;padding:6px 8px;border-radius:2px;cursor:pointer;color:var(--muted)}
+  .footer button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
+  .footer button.go{color:var(--blue);font-weight:700}
+  .empty-value{color:var(--provider);opacity:.55}
+</style>
+</head>
+<body>
+<div class="popover"><div class="providers" id="providers"></div><footer class="footer"><span class="sync" id="sync">maj…</span><span class="segmented" id="metric"></span><button onclick="send('refresh')" title="Actualiser">⟳</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></footer></div>
+<script>
+const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
+const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
+const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
+const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
+const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+const reset=w=>{
+  if(!w?.resetsAt)return '—';
+  const s=w.resetsAt-Date.now()/1000;
+  if(s<=0)return 'réinitialisé';
+  const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d>0)return `dans ${d} j ${h} h`;
+  if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
+  return `dans ${m} min`;
+};
+const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
+function provider(id,name,account){
+  const windows=account?.windows||[];
+  const weekly=windows.find(isWeekly);
+  const connected=id==='openai'?account?.connected:(account?.authenticated||account?.trackingConfigured);
+  const action=id==='openai'?'loginOpenAI':account?.cliAvailable?'loginClaude':'installClaudeCLI';
+  const actionLabel=id==='openai'?'connecter':'configurer';
+  const noteText=(primaryValue)=>{
+    if(!connected)return 'non connecté';
+    if(account?.liveSource)return 'en direct';
+    if(account?.capturedAt)return `${account.stale?'⚠ figé ':'mesure '}${ageLabel(account.capturedAt)}`;
+    return primaryValue===null?'connecté · en attente':'quota en direct';
+  };
+  const noteAndAction=(primaryValue)=>`<div class="account-note ${account?.stale?'stale':''}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${action}')">${actionLabel}</button>`}`;
+  if(id==='openai'){
+    const weeklyValue=used(weekly);
+    return `<section class="provider" style="--provider:var(--blue)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div>${noteAndAction(weeklyValue)}</section>`;
+  }
+  const session=windows.find(isSession),fable=windows.find(isFable);
+  const sessionValue=used(session),weeklyValue=used(weekly),fableValue=used(fable);
+  return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${sessionValue===null?'empty-value':''}">${sessionValue===null?'—':sessionValue+'<span class="unit">%</span>'}</div><div class="window">5h</div><div class="reset">reset ${reset(session)}</div><div class="weekly"><div class="weekly-head"><span>semaine</span><strong>${weeklyValue===null?'—':weeklyValue+' %'}</strong></div><div class="rail"><i style="width:${weeklyValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="weekly-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(sessionValue)}</section>`;
+}
+let lastData=null;
+function renderMenu(data){
+  document.querySelector('#providers').innerHTML=provider('openai','OpenAI',data.accounts?.openai)+provider('claude','Claude',data.accounts?.claude);
+  const metric=data.prefs?.menuBarMetric||'claude:weekly';
+  const opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
+  document.querySelector('#metric').innerHTML=opt('claude:weekly','C sem')+opt('claude:session','C 5h')+opt('openai:weekly','AI sem')+opt('lowest','max');
+  document.querySelector('#sync').textContent=data.backoffUntil
+    ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
+    : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
+}
+window.StatusMenu={update(data){lastData=data;renderMenu(data)}};
+// Keep the "dans X min" countdowns honest between polls.
+setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
+</script>
+</body>
+</html>

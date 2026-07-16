@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* Direction « Blueprint » : plan technique. Grille cyan sur ardoise, tracés fins, monospace.
+     Le cyan appartient à OpenAI, le violet à Claude ; la couleur ne sert qu'aux données. */
+  :root{color-scheme:dark;--bg:#12161C;--sidebar:#0E1217;--text:#CBD5E1;--muted:#5B6673;--hair:rgba(103,232,249,.14);--hair-strong:rgba(103,232,249,.28);--soft:rgba(103,232,249,.05);--soft-hover:rgba(103,232,249,.1);--blue:#67E8F9;--blue-soft:rgba(103,232,249,.07);--purple:#A78BFA;--purple-soft:rgba(167,139,250,.07);--green:#5EEAD4;--amber:#FBBF24;--danger:#FB7185;--grid:rgba(103,232,249,.045)}
+  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 ui-monospace,"SF Mono","Menlo",monospace}button,select{font:inherit;color:inherit}
+  .shell{height:100%;display:grid;grid-template-columns:210px 1fr;padding-top:28px;background:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+    var(--bg);background-size:22px 22px,22px 22px,auto}
+  .sidebar{display:flex;flex-direction:column;background:var(--sidebar);border-right:1px solid var(--hair-strong);padding:20px 14px 16px;-webkit-app-region:drag}
+  .product{font-size:14px;font-weight:700;letter-spacing:.06em;margin:6px 12px 24px;color:var(--blue);text-transform:uppercase}
+  .nav,.sidebar-bottom{-webkit-app-region:no-drag}
+  .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:2px;padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
+  .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
+  .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:11px;line-height:1}
+  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="settings"]::before{content:"03"}
+  .nav button.active{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--blue);font-weight:700}
+  .nav button.active::before{opacity:1;color:var(--blue)}
+  .sidebar-spacer{flex:1}.sidebar-bottom{border-top:1px solid var(--hair);padding-top:10px}
+  .connection-state{display:flex;align-items:center;gap:8px;padding:7px 12px;color:var(--muted);font-size:10.5px}
+  .connection-state i{width:6px;height:6px;background:#3A424D}.connection-state i.live{background:var(--green)}.connection-state i.warn{background:var(--amber)}
+  main{overflow:auto;padding:0 34px 40px}.view{display:none;animation:enter .15s ease-out}.view.active{display:block}@keyframes enter{from{opacity:0}to{opacity:1}}
+  .toolbar{height:78px;border-bottom:1px solid var(--hair-strong);display:flex;align-items:center;gap:12px}
+  .toolbar h1{font-size:13px;letter-spacing:.1em;margin:0;font-weight:700;text-transform:uppercase;color:var(--blue)}
+  .toolbar-meta{margin-left:auto;color:var(--muted);font-size:10px}
+  .button{border:1px solid var(--hair-strong);border-radius:2px;background:var(--soft);padding:7px 10px;cursor:pointer;color:var(--blue)}
+  .button:hover{background:var(--soft-hover)}.button[disabled]{opacity:.52;cursor:default}
+  /* Cartouche de plan : le chiffre clé encadré, comme une cote sur un dessin technique. */
+  .hero{position:relative;padding:24px 20px;border-bottom:1px solid var(--hair-strong);border-left:1px solid var(--hair);border-right:1px solid var(--hair);margin-top:-1px;background:linear-gradient(90deg,color-mix(in srgb,var(--hero,var(--blue)) 7%,transparent),transparent 60%)}
+  .hero:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:repeating-linear-gradient(0deg,var(--hero,var(--blue)) 0 4px,transparent 4px 8px)}
+  .hero-line{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}
+  .hero-value .unit{font-size:.4em;margin-left:.08em;opacity:.65;font-weight:400}
+  .hero-value{font-size:52px;font-weight:700;line-height:.94;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--hero,var(--blue))}
+  .hero-label{font-size:13px;color:var(--muted)}
+  .hero-detail{font-size:11.5px;color:var(--muted);margin:16px 0 0}.hero-detail strong{color:var(--hero,var(--blue));font-weight:700}
+  /* align-items:start — OpenAI n'a qu'une fenêtre contre trois à Claude ; sans cela son bloc
+     s'étirerait à vide sur toute la hauteur de la rangée. */
+  .provider-blocks{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px;align-items:start}
+  .provider-block{border:1px solid var(--hair);border-radius:2px;background:rgba(18,22,28,.72);padding:20px;position:relative}
+  .provider-block:before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:2px;background:var(--provider)}
+  .provider-block-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .provider{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;color:var(--provider);text-transform:lowercase;letter-spacing:.04em}
+  .provider-dot{width:6px;height:6px;background:var(--provider)}
+  .status-label{font-size:10px;color:var(--muted);white-space:nowrap}
+  .status-label i{display:inline-block;width:5px;height:5px;background:var(--provider);margin-right:7px}
+  .freshness{font-size:10px;color:var(--muted);margin:-8px 0 12px}.freshness.stale{color:var(--amber)}
+  .section-head{display:flex;align-items:flex-start;gap:20px;margin:26px 0 20px}
+  .section-head h2{font-size:12px;letter-spacing:.1em;margin:0 0 5px;font-weight:700;text-transform:uppercase;color:var(--text)}
+  .section-head p{margin:0;color:var(--muted);font-size:11.5px}
+  .connections{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .connection-panel{border:1px solid var(--hair);border-radius:2px;background:rgba(18,22,28,.72);padding:22px;min-height:300px;position:relative}
+  .connection-panel:before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:2px;background:var(--blue)}
+  .connection-panel:nth-child(2):before{background:var(--purple)}
+  .connection-panel h3{font-size:12px;margin:0 0 4px;font-weight:700;color:var(--blue);text-transform:lowercase;letter-spacing:.04em}
+  .connection-panel:nth-child(2) h3{color:var(--purple)}
+  .connection-panel>p{color:var(--muted);margin:0 0 20px;font-size:11.5px}
+  .quota-block{border-top:1px solid var(--hair);padding-top:18px}
+  .account-row{display:flex;gap:10px;align-items:center;margin-bottom:15px}
+  .account-copy{min-width:0;flex:1}.account-copy strong,.account-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .account-copy small{color:var(--muted);font-size:9.5px;margin-top:3px}
+  .account-actions{display:flex;gap:6px}
+  .account-action{border:1px solid var(--hair-strong);border-radius:2px;background:var(--soft);padding:6px 9px;cursor:pointer;font-size:10px;color:var(--text)}
+  .account-action:hover{background:var(--soft-hover)}
+  .account-action.primary{background:var(--provider);border-color:var(--provider);color:#0B0F14;font-weight:700}
+  .account-action[disabled]{opacity:.5}
+  .quota-grid{display:grid;gap:9px}
+  .quota-card{padding:11px 12px;border:1px solid var(--hair);border-radius:2px;background:var(--soft)}
+  .quota-top{display:flex;justify-content:space-between;gap:12px}
+  .quota-top span{font-weight:700;font-size:11px;color:var(--text)}
+  .quota-top strong{font-variant-numeric:tabular-nums;color:var(--provider)}
+  /* Barre hachurée : la trame dit « mesure », pas « barre de progression ». */
+  .quota-track{height:14px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin:8px 0 6px;overflow:hidden}
+  .quota-track i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);transition:width .3s ease}
+  .quota-card small,.quota-empty{color:var(--muted);font-size:10px;line-height:1.45}
+  .quota-empty{padding:13px;border:1px dashed var(--hair-strong);border-radius:2px}
+  .quota-error,.quota-stale{font-size:10px;margin-top:10px}.quota-error{color:var(--danger)}.quota-stale{color:var(--amber)}
+  .quota-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:2px}.quota-foot small{flex:1;min-width:0}
+  .spark{width:132px;height:26px;flex:none;overflow:visible}.spark .area{fill:color-mix(in srgb,var(--c) 12%,transparent);stroke:none}.spark .line{fill:none;stroke:var(--c);stroke-width:1;vector-effect:non-scaling-stroke}.spark .tip{fill:var(--c)}
+  .toolbar-warn{font-size:10px;color:var(--amber);white-space:nowrap}
+  .settings{display:flex;flex-direction:column;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:2px;overflow:hidden}
+  .setting{display:flex;align-items:center;gap:20px;padding:16px 18px;background:rgba(18,22,28,.9)}
+  .setting-copy{flex:1;min-width:0}.setting-copy strong{display:block;font-size:12px;margin-bottom:3px}.setting-copy small{color:var(--muted);font-size:10.5px;line-height:1.45;display:block}
+  .setting-state{font-size:10px;color:var(--muted);white-space:nowrap}.setting-state.ok{color:var(--green)}
+  .button.on{border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
+  .segmented{display:flex;border:1px solid var(--hair-strong);border-radius:2px;overflow:hidden;flex:none}
+  .seg{border:0;background:transparent;color:var(--muted);padding:7px 11px;cursor:pointer;font:inherit;font-size:10px}
+  .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
+  .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
+  @media(max-width:970px){.shell{grid-template-columns:178px 1fr}main{padding-left:22px;padding-right:22px}.provider-blocks,.connections{grid-template-columns:1fr}.hero-value{font-size:44px}.spark{display:none}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="product">Status</div>
+    <nav class="nav">
+      <button class="active" data-view="overview">Status</button>
+      <button data-view="connections">Connexions</button>
+      <button data-view="settings">Réglages</button>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-bottom">
+      <div class="connection-state"><i id="stateDot"></i><span id="stateText">Non connecté</span></div>
+    </div>
+  </aside>
+  <main>
+    <section class="view active" id="overview"></section>
+    <section class="view" id="connections"></section>
+    <section class="view" id="settings"></section>
+  </main>
+</div>
+<script>
+const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const providerColor=id=>id==='openai'?'var(--blue)':'var(--purple)';
+const resetFull=timestamp=>timestamp?new Intl.DateTimeFormat('fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(timestamp*1000)):'—';
+const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
+// "dans 2 h 14" is actionable in a way that "14:00" is not — you can decide whether to keep working.
+const countdown=timestamp=>{
+  if(!timestamp)return '—';
+  const s=timestamp-Date.now()/1000;
+  if(s<=0)return 'réinitialisé';
+  const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d>0)return `dans ${d} j ${h} h`;
+  if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
+  return `dans ${m} min`;
+};
+const isConnected=(id,account)=>id==='openai'?Boolean(account?.connected):Boolean(account?.authenticated||account?.trackingConfigured);
+const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
+const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+const windowsFor=(providerId,account)=>{const windows=account?.windows||[];return providerId==='openai'?windows.filter(isWeekly):windows};
+const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
+let appData=null,currentView='overview';
+
+// Rebuilds one window's series from the rolling history file and draws it as an inline sparkline.
+// The last point is emphasised so "where am I now" reads without hunting.
+function sparkline(history,key,color){
+  const pts=(history||[]).map(row=>({t:row.t,v:row.p?.[key]})).filter(p=>typeof p.v==='number');
+  if(pts.length<2)return '';
+  const recent=pts.slice(-60);
+  const w=132,h=26,max=100;
+  const x=i=>i/(recent.length-1)*w;
+  const y=v=>h-(v/max)*h;
+  const line=recent.map((p,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  const area=`${line} L${w},${h} L0,${h} Z`;
+  const last=recent[recent.length-1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="--c:${color}">
+    <path class="area" d="${area}"/><path class="line" d="${line}"/>
+    <circle class="tip" cx="${w}" cy="${y(last.v).toFixed(1)}" r="2"/></svg>`;
+}
+
+function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div></div>`}
+function providerBlock(provider,account,history){const windows=windowsFor(provider.id,account),connected=isConnected(provider.id,account),state=connected?(account?.error?'Attention':'Connecté'):'Non connecté',cards=windows.length?windows.map(w=>quotaCard(w,provider.id,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`,freshness=account?.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${state}</span></div>${freshness}<div class="quota-grid">${cards}</div>${account?.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</section>`}
+function overview(data){const accounts={openai:data.accounts?.openai,claude:data.accounts?.claude},entries=[];PROVIDERS.forEach(p=>{windowsFor(p.id,accounts[p.id]).forEach(w=>entries.push({provider:p.name,window:w,used:used(w)}))});entries.sort((a,b)=>b.used-a.used);const max=entries[0],heroValue=max?`${max.used}<span class="unit">%</span>`:'—',heroLabel=max?'consommation la plus élevée actuellement':'quotas en attente',heroDetail=max?`<strong>${max.provider}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Connectez OpenAI et Claude pour afficher les volumes consommés.',heroColor=max?.provider==='Claude'?'var(--purple)':'var(--blue)',backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accounts[p.id],data.history)).join('')}</div>`}
+function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
+  <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
+  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></div>
+  <div class="setting"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Une notification à 80 % puis à 95 % de chaque fenêtre.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></div>
+  <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>
+</div>`}
+function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
+function claudePanel(account){if(!account)return '';const busy=account.actionRunning||account.authChecking;let subtitle='',actions='',content='';const windows=(account.windows||[]).map(w=>quotaCard(w,'claude',appData?.history)).join('');if(account.trackingConfigured){subtitle=`Suivi actif${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`;actions=`${!account.cliAvailable?`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`:!account.authenticated?`<button class="account-action primary" onclick="send('loginClaude')">Connecter</button>`:''}<button class="account-action" ${busy?'disabled':''} onclick="send('uninstallClaudeTracking')">Désactiver</button>`;content=windows||`<div class="quota-empty">Le suivi est prêt. Lancez Claude Code et envoyez un message pour recevoir les compteurs.<br><button class="account-action" onclick="send('openClaudeTerminal')">Ouvrir Claude Code</button></div>`}else if(!account.cliAvailable){subtitle='CLI non détectée';actions=`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`;content=`<div class="quota-empty">Installez Claude Code depuis la documentation officielle.</div>`}else if(!account.authenticated){subtitle='Claude Code détecté · non connecté';actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('loginClaude')">Connecter</button>`;content=`<div class="quota-empty">La connexion s’effectue dans Terminal. Status ne capture aucun secret.</div>`}else{subtitle=`Connecté${account.subscriptionType?` · ${esc(account.subscriptionType)}`:''}`;actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('installClaudeTracking')">Activer le suivi</button>`;content=`<div class="quota-empty">Activez le collecteur status line pour recevoir les fenêtres 5 h et 7 jours.</div>`}actions+=`<button class="account-action" onclick="send('configureClaudeFableCookie')" title="Quotas en direct + jauge Fable (avancé, non officiel)">${account.fableConfigured?'direct ✓':'direct'}</button>`;return `<div class="quota-block" style="--provider:var(--purple)"><div class="account-row"><div class="account-copy"><strong>Claude Code</strong><small>${subtitle}</small></div><div class="account-actions">${actions}</div></div><div class="quota-grid">${content}</div>${account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la status line ne s’exécute que pendant une session « claude » en Terminal. Activez « direct » pour une lecture live toutes les 5 min.</div>`:''}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
+function connectionsView(data){return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Identifiants gérés par les outils officiels</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Status lit uniquement les compteurs autorisés et ne copie jamais vos jetons OAuth.</p></div></div><div class="connections"><article class="connection-panel"><h3>OpenAI</h3><p>Quotas ChatGPT via le serveur local Codex.</p>${quotaPanel(data.accounts?.openai)}</article><article class="connection-panel"><h3>Claude</h3><p>Quotas Claude via la status line officielle de Claude Code.</p>${claudePanel(data.accounts?.claude)}</article></div>`}
+function render(){if(!appData)return;document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
+window.StatusApp={update(data){appData=data;render()}};
+document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>{currentView=button.dataset.view;render()});
+// The countdowns must keep ticking between the 5-minute polls, otherwise "dans 2 h 14" quietly
+// becomes a lie. Re-rendering from the last payload is cheap and needs no native round-trip.
+setInterval(()=>{if(appData)render()},30000);
+</script>
+</body>
+</html>
