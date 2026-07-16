@@ -193,6 +193,64 @@ static void TestWindowClassification(void) {
 
 #pragma mark - Historique
 
+// Deux limites OpenAI distinctes partagent la même durée de 7 jours. Elles étaient toutes deux
+// libellées « Semaine » et dépourvues de windowId : à l'écran on ne pouvait pas les distinguer, et
+// dans l'historique elles écrasaient la même clé — la moitié de la donnée était perdue en silence.
+static NSDictionary *TMFakeOpenAIResponse(void) {
+    return @{
+        @"rateLimits": @{
+            @"limitId": @"codex", @"limitName": @"Codex",
+            @"primary": @{@"windowDurationMins": @10080, @"usedPercent": @84, @"resetsAt": @1000}
+        },
+        @"rateLimitsByLimitId": @{
+            @"gpt5": @{
+                @"limitId": @"gpt5", @"limitName": @"GPT-5",
+                @"primary": @{@"windowDurationMins": @10080, @"usedPercent": @1, @"resetsAt": @2000}
+            }
+        }
+    };
+}
+
+static void TestOpenAIWindowIdentity(void) {
+    printf("\n\033[1mIdentité des fenêtres OpenAI\033[0m\n");
+    NSDictionary *account = @{@"type": @"chatgpt", @"email": @"x@y.z", @"planType": @"pro"};
+    NSArray *windows = TMOpenAIAccountPayload(account, TMFakeOpenAIResponse(), NO, nil)[@"windows"];
+
+    Check(windows.count == 2, @"deux limites distinctes produisent deux fenêtres");
+    NSSet *ids = [NSSet setWithArray:[windows valueForKey:@"windowId"]];
+    Check(ids.count == 2, @"chaque fenêtre a un windowId unique");
+    Check(![ids containsObject:[NSNull null]], @"aucun windowId nul");
+
+    NSSet *labels = [NSSet setWithArray:[windows valueForKey:@"label"]];
+    Check(labels.count == 2, @"les libellés distinguent les deux limites");
+    Check([labels containsObject:@"Codex · Semaine"], @"le nom de la limite apparaît dans le libellé");
+    Check([labels containsObject:@"GPT-5 · Semaine"], @"le nom de la seconde limite aussi");
+
+    // Le libellé porte désormais le nom de la limite, donc la reconnaissance ne peut plus s'y fier.
+    // Elle doit tenir sur la durée, sinon la jauge OpenAI disparaît de la barre des menus.
+    for (NSDictionary *w in windows) {
+        Check(TMInteger(w[@"durationMinutes"]) == 10080, @"la durée reste exploitable");
+        Check(TMWindowIsWeekly(w), @"classée hebdo malgré le libellé nommé");
+        Check(!TMWindowIsSession(w), @"pas confondue avec une fenêtre de 5 h");
+    }
+}
+
+static void TestOpenAIHistoryCollision(void) {
+    printf("\n\033[1mHistorique OpenAI — collision de clés\033[0m\n");
+    setenv("STATUS_SUPPORT_DIR", "/tmp/status-tests-openai", 1);
+    [NSFileManager.defaultManager removeItemAtPath:TMHistoryPath() error:nil];
+
+    NSDictionary *account = @{@"type": @"chatgpt", @"email": @"x@y.z", @"planType": @"pro"};
+    NSArray *windows = TMOpenAIAccountPayload(account, TMFakeOpenAIResponse(), NO, nil)[@"windows"];
+    NSArray *history = TMAppendHistory(@[], windows, 5000);
+
+    NSDictionary *points = history.lastObject[@"p"];
+    Check(points.count == 2, @"les deux limites sont historisées séparément");
+    NSSet *values = [NSSet setWithArray:points.allValues];
+    Check([values containsObject:@84] && [values containsObject:@1], @"84 % et 1 % survivent tous les deux");
+    [NSFileManager.defaultManager removeItemAtPath:TMHistoryPath() error:nil];
+}
+
 static void TestHistory(void) {
     Section(@"TMAppendHistory — série locale");
     // Isole le test des données réelles. Redéfinir HOME ne suffirait pas (Foundation met le chemin
@@ -295,6 +353,8 @@ int main(void) {
         TestExpiredWindows();
         TestWindowClassification();
         TestHistory();
+        TestOpenAIWindowIdentity();
+        TestOpenAIHistoryCollision();
         TestAwake();
         TestHoldFraction();
         TestLockStateMachine();

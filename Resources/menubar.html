@@ -71,7 +71,10 @@ const reset=w=>{
 const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
 function provider(id,name,account){
   const windows=account?.windows||[];
-  const weekly=windows.find(isWeekly);
+  // OpenAI expose plusieurs limites hebdo : prendre la première venue afficherait 1 % pendant que
+  // l'autre est à 84 %. Une jauge doit montrer la limite la plus proche de sa borne, comme le fait
+  // déjà l'aperçu du tableau de bord.
+  const weekly=windows.filter(isWeekly).sort((a,b)=>(used(b)??0)-(used(a)??0))[0];
   const connected=id==='openai'?account?.connected:(account?.authenticated||account?.trackingConfigured);
   const action=id==='openai'?'loginOpenAI':account?.cliAvailable?'loginClaude':'installClaudeCLI';
   const actionLabel=id==='openai'?'connecter':'configurer';

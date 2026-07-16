@@ -82,8 +82,17 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
             if ([seen containsObject:dedupe]) continue;
             [seen addObject:dedupe];
             NSInteger used = MAX(0, MIN(100, (NSInteger)TMInteger(window[@"usedPercent"])));
+            // OpenAI expose plusieurs limites qui partagent la même durée : sans le nom, deux
+            // fenêtres de 7 jours s'affichaient toutes deux « Semaine », indiscernables à l'écran.
+            NSString *label = limitName.length
+                ? [NSString stringWithFormat:@"%@ · %@", limitName, TMQuotaWindowLabel(duration)]
+                : TMQuotaWindowLabel(duration);
             [windows addObject:@{
-                @"label": TMQuotaWindowLabel(duration), @"usedPercent": @(used), @"remainingPercent": @(100 - used),
+                // windowId identifie la limite, pas la durée. Sans lui, TMAppendHistory retombait
+                // sur le libellé et les deux limites écrasaient la même clé : la moitié de la
+                // donnée OpenAI disparaissait en silence à chaque relevé.
+                @"windowId": dedupe,
+                @"label": label, @"usedPercent": @(used), @"remainingPercent": @(100 - used),
                 @"resetsAt": @(TMInteger(window[@"resetsAt"])), @"durationMinutes": @(duration),
                 @"limitName": limitName, @"limitId": limitID
             }];
