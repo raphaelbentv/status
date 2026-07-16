@@ -8,6 +8,8 @@
 
 #import <Foundation/Foundation.h>
 #import "StatusQuota.h"
+#import "StatusAwake.h"
+#import <IOKit/pwr_mgt/IOPMLib.h>
 
 static int gFailures = 0;
 static int gChecks = 0;
@@ -220,6 +222,38 @@ static void TestHistory(void) {
     [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
 }
 
+// Interroge IOKit plutôt que notre propre état : c'est la seule façon de savoir si l'assertion
+// existe vraiment. Filtré sur notre pid — une autre app tenant la même assertion ne doit pas
+// rendre ce test faussement vert.
+static BOOL TMOurSleepAssertionPresent(void) {
+    CFDictionaryRef raw = NULL;
+    if (IOPMCopyAssertionsByProcess(&raw) != kIOReturnSuccess || !raw) return NO;
+    NSDictionary *byPid = CFBridgingRelease(raw);
+    for (NSDictionary *assertion in byPid[@(getpid())]) {
+        NSString *type = assertion[(__bridge NSString *)kIOPMAssertionTypeKey];
+        if ([type isEqualToString:(__bridge NSString *)kIOPMAssertionTypePreventUserIdleDisplaySleep]) return YES;
+    }
+    return NO;
+}
+
+static void TestAwake(void) {
+    printf("\n\033[1mTMAwake\033[0m\n");
+    TMAwake *awake = [TMAwake new];
+    Check(!awake.isEnabled, @"éteint au départ");
+    Check(!TMOurSleepAssertionPresent(), @"aucune assertion au départ");
+
+    awake.enabled = YES;
+    Check(awake.isEnabled, @"s'allume");
+    Check(TMOurSleepAssertionPresent(), @"IOKit voit notre assertion");
+
+    awake.enabled = YES;  // idempotent : ne doit pas créer une seconde assertion fuyante
+    Check(awake.isEnabled, @"rallumer ne change rien");
+
+    awake.enabled = NO;
+    Check(!awake.isEnabled, @"s'éteint");
+    Check(!TMOurSleepAssertionPresent(), @"IOKit ne voit plus d'assertion");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -233,6 +267,7 @@ int main(void) {
         TestExpiredWindows();
         TestWindowClassification();
         TestHistory();
+        TestAwake();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

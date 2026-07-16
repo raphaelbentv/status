@@ -6,6 +6,7 @@
 #include <string.h>
 
 #import "StatusQuota.h"
+#import "StatusAwake.h"
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -454,11 +455,13 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
 @property NSDate *nextAllowedRefresh;       // backoff: automatic polls are skipped until this time
 @property NSMutableDictionary *notifiedThresholds;  // "windowId@resetsAt" -> highest % already alerted
 @property BOOL notificationsAuthorized;
+@property TMAwake *awake;
 @end
 
 @implementation TMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    self.awake = [TMAwake new];
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     [defaults registerDefaults:@{
         @"refreshIntervalMinutes": @5,
@@ -498,6 +501,7 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
+    self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
 }
@@ -554,7 +558,7 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
     self.statusItem.button.action = @selector(toggleStatusPopover:);
     [self installHoverTracking];
 
-    NSRect frame = NSMakeRect(0, 0, 400, 450);
+    NSRect frame = NSMakeRect(0, 0, 400, 500);
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.menuWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
@@ -849,6 +853,10 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
     }
     if ([action isEqualToString:@"openDashboard"]) [self openDashboard:nil];
     if ([action isEqualToString:@"quit"]) [NSApp terminate:nil];
+    if ([action isEqualToString:@"toggleAwake"]) {
+        self.awake.enabled = !self.awake.isEnabled;
+        [self pushData];
+    }
     if ([action isEqualToString:@"loginOpenAI"]) [self loginOpenAI:nil];
     if ([action isEqualToString:@"logoutOpenAI"]) [self confirmLogoutOpenAI:nil];
     if ([action isEqualToString:@"installClaudeCLI"]) [self openClaudeInstallPage:nil];
@@ -898,6 +906,7 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
             @"hoverPopover": @([self hoverPopoverEnabled]),
             @"notificationsAuthorized": @(self.notificationsAuthorized)
         },
+        @"tools": @{ @"awake": @{ @"active": @(self.awake.isEnabled) } },
         @"backoffUntil": self.nextAllowedRefresh ? @(self.nextAllowedRefresh.timeIntervalSince1970 * 1000) : [NSNull null],
         @"refreshing": @(self.refreshing), @"updatedAt": @([[NSDate date] timeIntervalSince1970] * 1000)
     };

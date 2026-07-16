@@ -10,8 +10,8 @@ cd "$ROOT"
 mkdir -p "$ROOT/work" "$ROOT/outputs"
 clang -fobjc-arc -O2 -I "$ROOT/Native" \
   -framework Cocoa -framework WebKit -framework Security \
-  -framework ServiceManagement -framework UserNotifications \
-  "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" -o "$BUILD"
+  -framework ServiceManagement -framework UserNotifications -framework IOKit \
+  "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAwake.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/scripts" "$OUTPUT/Contents/Resources/icons"

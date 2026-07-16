@@ -31,6 +31,12 @@
   .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
   .account-note.stale{color:var(--amber)}
+  /* Outils machine — rien à voir avec les quotas, d'où la séparation visuelle nette. */
+  .tools{display:flex;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
+  .tool{flex:1;border:0;background:rgba(18,22,28,.85);color:var(--muted);padding:10px 6px;cursor:pointer;font:inherit;font-size:9.5px;display:flex;flex-direction:column;align-items:center;gap:5px;text-transform:lowercase;letter-spacing:.05em}
+  .tool:hover{background:var(--soft);color:var(--text)}
+  .tool.on{color:var(--blue);background:rgba(103,232,249,.12)}
+  .tool .glyph{font-size:15px;line-height:1}
   .segmented{display:flex;border:1px solid var(--hair-strong);overflow:hidden;flex:none}
   .seg{border:0;background:transparent;color:var(--muted);padding:5px 7px;cursor:pointer;font:inherit;font-size:9.5px;border-radius:0}
   .seg+.seg{border-left:1px solid var(--hair-strong)}
@@ -46,7 +52,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div class="providers" id="providers"></div><footer class="footer"><span class="sync" id="sync">maj…</span><span class="segmented" id="metric"></span><button onclick="send('refresh')" title="Actualiser">⟳</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></footer></div>
+<div class="popover"><div class="providers" id="providers"></div><div class="tools" id="tools"></div><footer class="footer"><span class="sync" id="sync">maj…</span><span class="segmented" id="metric"></span><button onclick="send('refresh')" title="Actualiser">⟳</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
@@ -84,9 +90,16 @@ function provider(id,name,account){
   const sessionValue=used(session),weeklyValue=used(weekly),fableValue=used(fable);
   return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${sessionValue===null?'empty-value':''}">${sessionValue===null?'—':sessionValue+'<span class="unit">%</span>'}</div><div class="window">5h</div><div class="reset">reset ${reset(session)}</div><div class="weekly"><div class="weekly-head"><span>semaine</span><strong>${weeklyValue===null?'—':weeklyValue+' %'}</strong></div><div class="rail"><i style="width:${weeklyValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="weekly-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(sessionValue)}</section>`;
 }
+// La tâche 4 ajoutera ici le bouton du verrou clavier.
+function tools(t){
+  const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
+  const awake=t?.awake||{};
+  return btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active);
+}
 let lastData=null;
 function renderMenu(data){
   document.querySelector('#providers').innerHTML=provider('openai','OpenAI',data.accounts?.openai)+provider('claude','Claude',data.accounts?.claude);
+  document.querySelector('#tools').innerHTML=tools(data.tools);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
   const opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
   document.querySelector('#metric').innerHTML=opt('claude:weekly','C sem')+opt('claude:session','C 5h')+opt('openai:weekly','AI sem')+opt('lowest','max');
