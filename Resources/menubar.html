@@ -57,7 +57,12 @@
      Le popover a du vide vertical à revendre — mieux vaut le dépenser que tronquer une alerte. */
   .footer{border-top:1px solid var(--hair-strong);display:flex;flex-direction:column;gap:7px;padding:9px 10px;background:rgba(14,18,23,.9);flex:none}
   .footer-row{display:flex;align-items:center;gap:6px}
-  .sync{color:var(--muted);font-size:9.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .footer-row > button.sync{flex:1;min-width:0;text-align:left;color:var(--muted);font-size:9.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid transparent;background:transparent;
+    padding:5px 6px;border-radius:2px;cursor:pointer;font-family:inherit}
+  .footer-row > button.sync:hover{color:var(--text);border-color:var(--hair);background:var(--soft)}
+  .footer-row > button.sync:disabled{cursor:default;opacity:.7}
+  .footer-row > button.sync:disabled:hover{color:var(--muted);border-color:transparent;background:transparent}
   /* Ciblé sur les enfants directs de la rangée : « .footer button » l'emportait en spécificité
      sur « .seg » et figeait les segments à leur largeur de contenu. */
   .footer-row > button{border:1px solid transparent;background:transparent;padding:6px 7px;border-radius:2px;cursor:pointer;color:var(--muted);white-space:nowrap;flex:none}
@@ -67,7 +72,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row"><span class="sync" id="sync">maj…</span><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
@@ -126,9 +131,13 @@ function renderMenu(data){
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
   const opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
   document.querySelector('#metric').innerHTML=opt('claude:weekly','C sem')+opt('claude:session','C 5h')+opt('openai:weekly','AI sem')+opt('lowest','max')+opt('system:cpu','cpu')+opt('system:temp','°C');
-  document.querySelector('#sync').textContent=data.backoffUntil
-    ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
-    : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
+  const sync=document.querySelector('#sync');
+  sync.textContent=data.refreshing
+    ? 'actualisation…'
+    : data.backoffUntil
+      ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
+      : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
+  sync.disabled=Boolean(data.refreshing);
 }
 // Métriques système : flux séparé, poussé à 1 Hz par le natif tant que le popover est ouvert.
 const CHART_A='#0891B2',CHART_B='#8B5CF6';
