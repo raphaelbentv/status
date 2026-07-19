@@ -3,37 +3,72 @@
 #
 # Pourquoi : sans identité, package-app.sh signe en ad-hoc. Une signature ad-hoc change à chaque
 # build, donc macOS considère chaque build comme une application différente — d'où des demandes
-# répétées d'accès au Trousseau, et un SMAppService (lancement au démarrage) qui peut refuser de
-# s'enregistrer. Une identité stable, même auto-signée, supprime ces frictions sur cette machine.
+# répétées d'accès au Trousseau, une autorisation d'Accessibilité révoquée (verrou clavier,
+# raccourci global), et un SMAppService qui peut refuser de s'enregistrer. Une identité stable,
+# même auto-signée, supprime ces frictions sur cette machine.
 #
 # Ce que ça ne fait PAS : distribuer l'app. Pour cela il faut un certificat Developer ID Apple.
 #
-# À lancer une seule fois. macOS demandera votre mot de passe pour faire confiance au certificat.
+# Pourquoi pas en ligne de commande : importer une clé privée utilisable par codesign exige
+# `security set-key-partition-list`, qui réclame le mot de passe de session. L'assistant graphique
+# est le seul chemin qui n'oblige pas à le taper dans un terminal.
 set -euo pipefail
 
 NAME="Status Local Signing"
 
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$NAME"; then
-  echo "L'identité « $NAME » existe déjà. Rien à faire."
-  exit 0
+existing=$(security find-certificate -a -c "$NAME" 2>/dev/null | grep -c "labl" || true)
+
+if [[ "$existing" -gt 0 ]]; then
+  echo "⚠  $existing certificat(s) « $NAME » déjà présent(s)."
+  if security find-certificate -c "$NAME" -p 2>/dev/null > /tmp/status-cert-check.pem && [[ -s /tmp/status-cert-check.pem ]]; then
+    echo "   Expiration : $(openssl x509 -in /tmp/status-cert-check.pem -noout -enddate 2>/dev/null | cut -d= -f2)"
+    rm -f /tmp/status-cert-check.pem
+  fi
+  echo
+  echo "   Deux certificats du même nom rendraient codesign ambigu : il refuserait de signer."
+  echo "   Pour en recréer un, supprimez D'ABORD l'ancien :"
+  echo
+  echo "     1. Trousseau d'accès › catégorie « Mes certificats »"
+  echo "     2. Clic droit sur « $NAME » › Supprimer"
+  echo "        (supprime le certificat ET sa clé privée)"
+  echo
+  REPLY=""
+  read -q "REPLY?Continuer quand même vers la création ? [o/N] " || true
+  echo
+  [[ "$REPLY" == "o" || "$REPLY" == "y" ]] || exit 0
+  echo
 fi
 
-echo "Création d'un certificat de signature auto-signé « $NAME »…"
+cat <<'GUIDE'
+Création d'un certificat de signature auto-signé.
+
+macOS ne permet pas de créer une identité de signature sans interaction. Dans Trousseau d'accès :
+
+  1. Menu « Trousseau d'accès » › Assistant de certification › Créer un certificat…
+  2. Nom             : Status Local Signing
+  3. Type d'identité : Racine auto-signée
+  4. Type            : Signature de code
+  5. COCHEZ « Remplacer les réglages par défaut » — sans cette case, l'assistant impose
+     365 jours en silence et il faudra tout recommencer dans un an.
+  6. Écran « Validité » : remplacez 365 par 3650 jours.
+  7. Continuez jusqu'à la fin (les écrans suivants n'ont rien à changer).
+
+Ensuite, relancez ce script : il vérifiera le résultat.
+GUIDE
+
 echo
-echo "macOS ne permet pas de créer une identité de signature sans interaction."
-echo "Suivez ces étapes une seule fois dans Trousseau d'accès :"
-echo
-echo "  1. Ouvrez « Trousseau d'accès » (Cmd+Espace → Trousseau)."
-echo "  2. Menu « Trousseau d'accès » › Assistant de certification › Créer un certificat…"
-echo "  3. Nom            : $NAME"
-echo "  4. Type d'identité: Root auto-signée"
-echo "  5. Type           : Signature de code"
-echo "  6. Cochez « Remplacer les réglages par défaut », puis Continuer jusqu'à la fin."
-echo "  7. Validité       : 3650 jours (facultatif, évite de recommencer chaque année)."
-echo
-echo "Ensuite, relancez ./scripts/package-app.sh : il détectera l'identité automatiquement."
-echo
+REPLY=""
 read -q "REPLY?Ouvrir Trousseau d'accès maintenant ? [o/N] " || true
 echo
 [[ "$REPLY" == "o" || "$REPLY" == "y" ]] && open -a "Keychain Access"
-exit 0
+
+cat <<'CHECK'
+
+Une fois créé, vérifiez avec :
+
+  security find-identity -p codesigning | grep "Status Local Signing"
+  ./scripts/package-app.sh            # doit afficher « signé avec : Status Local Signing »
+
+Le statut CSSMERR_TP_NOT_TRUSTED est normal et sans effet : une racine auto-signée n'est pas
+approuvée par défaut, et codesign l'accepte quand même. Voir README § Signature stable.
+CHECK
