@@ -3,20 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="themes.css">
 <style>
-  /* Direction « Blueprint » : plan technique. Grille cyan sur ardoise, tracés fins, monospace.
-     Le cyan appartient à OpenAI, le violet à Claude ; la couleur ne sert qu'aux données. */
-  /* --chart-a/--chart-b : marques de graphique du Moniteur, plus sombres que les couleurs
-     d'interface — paire validée (bande de luminance, CVD, contraste) sur ce fond. */
-  :root{color-scheme:dark;--bg:#12161C;--sidebar:#0E1217;--text:#CBD5E1;--muted:#5B6673;--hair:rgba(103,232,249,.14);--hair-strong:rgba(103,232,249,.28);--soft:rgba(103,232,249,.05);--soft-hover:rgba(103,232,249,.1);--blue:#67E8F9;--blue-soft:rgba(103,232,249,.07);--purple:#A78BFA;--purple-soft:rgba(167,139,250,.07);--green:#5EEAD4;--amber:#FBBF24;--danger:#FB7185;--grid:rgba(103,232,249,.045);--chart-a:#0891B2;--chart-b:#8B5CF6}
-  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 ui-monospace,"SF Mono","Menlo",monospace}button,select{font:inherit;color:inherit}
-  .shell{height:100%;display:grid;grid-template-columns:210px 1fr;padding-top:28px;background:
-    linear-gradient(var(--grid) 1px,transparent 1px),
-    linear-gradient(90deg,var(--grid) 1px,transparent 1px),
-    var(--bg);background-size:22px 22px,22px 22px,auto}
+  /* Le thème actif vient de themes.css ([data-theme] sur <html>, poussé par render()).
+     --chart-a/--chart-b restent les marques de graphique du Moniteur, définies par thème. */
+  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 var(--font)}button,select{font:inherit;color:inherit}
+  .shell{height:100%;display:grid;grid-template-columns:210px 1fr;padding-top:28px;background:var(--bg);
+    background-image:var(--bg-image,linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px));
+    background-size:var(--bg-size,22px 22px,22px 22px)}
   .sidebar{display:flex;flex-direction:column;background:var(--sidebar);border-right:1px solid var(--hair-strong);padding:20px 14px 16px}
   .product{font-size:14px;font-weight:700;letter-spacing:.06em;margin:6px 12px 24px;color:var(--blue);text-transform:uppercase}
-  .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:2px;padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
+  .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:var(--radius);padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
   .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:11px;line-height:1}
   .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="settings"]::before{content:"03"}.nav button[data-view="monitor"]::before{content:"04"}
@@ -29,20 +26,20 @@
   .toolbar{height:78px;border-bottom:1px solid var(--hair-strong);display:flex;align-items:center;gap:12px}
   .toolbar h1{font-size:13px;letter-spacing:.1em;margin:0;font-weight:700;text-transform:uppercase;color:var(--blue)}
   .toolbar-meta{margin-left:auto;color:var(--muted);font-size:10px}
-  .button{border:1px solid var(--hair-strong);border-radius:2px;background:var(--soft);padding:7px 10px;cursor:pointer;color:var(--blue)}
+  .button{border:1px solid var(--hair-strong);border-radius:var(--radius);background:var(--soft);padding:7px 10px;cursor:pointer;color:var(--blue)}
   .button:hover{background:var(--soft-hover)}.button[disabled]{opacity:.52;cursor:default}
   /* Cartouche de plan : le chiffre clé encadré, comme une cote sur un dessin technique. */
-  .hero{position:relative;padding:24px 20px;border-bottom:1px solid var(--hair-strong);border-left:1px solid var(--hair);border-right:1px solid var(--hair);margin-top:-1px;background:linear-gradient(90deg,color-mix(in srgb,var(--hero,var(--blue)) 7%,transparent),transparent 60%)}
+  .hero{position:relative;padding:24px 20px;border-bottom:1px solid var(--hair-strong);border-left:1px solid var(--hair);border-right:1px solid var(--hair);margin-top:-1px;background:linear-gradient(90deg,color-mix(in srgb,var(--hero,var(--blue)) 7%,transparent),transparent 60%);clip-path:var(--clip,none);box-shadow:var(--edge-glow,none)}
   .hero:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:repeating-linear-gradient(0deg,var(--hero,var(--blue)) 0 4px,transparent 4px 8px)}
   .hero-line{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}
   .hero-value .unit{font-size:.4em;margin-left:.08em;opacity:.65;font-weight:400}
-  .hero-value{font-size:52px;font-weight:700;line-height:.94;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--hero,var(--blue))}
+  .hero-value{font-size:52px;font-weight:700;line-height:.94;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--hero,var(--blue));text-shadow:var(--value-glow,none)}
   .hero-label{font-size:13px;color:var(--muted)}
   .hero-detail{font-size:11.5px;color:var(--muted);margin:16px 0 0}.hero-detail strong{color:var(--hero,var(--blue));font-weight:700}
   /* align-items:start — OpenAI n'a qu'une fenêtre contre trois à Claude ; sans cela son bloc
      s'étirerait à vide sur toute la hauteur de la rangée. */
   .provider-blocks{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px;align-items:start}
-  .provider-block{border:1px solid var(--hair);border-radius:2px;background:rgba(18,22,28,.72);padding:20px;position:relative}
+  .provider-block{border:1px solid var(--hair);border-radius:var(--radius);background:var(--panel-bg);padding:20px;position:relative;clip-path:var(--clip,none)}
   .provider-block:before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:2px;background:var(--provider)}
   .provider-block-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
   .provider{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;color:var(--provider);text-transform:lowercase;letter-spacing:.04em}
@@ -54,7 +51,7 @@
   .section-head h2{font-size:12px;letter-spacing:.1em;margin:0 0 5px;font-weight:700;text-transform:uppercase;color:var(--text)}
   .section-head p{margin:0;color:var(--muted);font-size:11.5px}
   .connections{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  .connection-panel{border:1px solid var(--hair);border-radius:2px;background:rgba(18,22,28,.72);padding:22px;min-height:300px;position:relative}
+  .connection-panel{border:1px solid var(--hair);border-radius:var(--radius);background:var(--panel-bg);padding:22px;min-height:300px;position:relative;clip-path:var(--clip,none)}
   .connection-panel:before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:2px;background:var(--blue)}
   .connection-panel:nth-child(2):before{background:var(--purple)}
   .connection-panel h3{font-size:12px;margin:0 0 4px;font-weight:700;color:var(--blue);text-transform:lowercase;letter-spacing:.04em}
@@ -65,33 +62,39 @@
   .account-copy{min-width:0;flex:1}.account-copy strong,.account-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .account-copy small{color:var(--muted);font-size:9.5px;margin-top:3px}
   .account-actions{display:flex;gap:6px}
-  .account-action{border:1px solid var(--hair-strong);border-radius:2px;background:var(--soft);padding:6px 9px;cursor:pointer;font-size:10px;color:var(--text)}
+  .account-action{border:1px solid var(--hair-strong);border-radius:var(--radius);background:var(--soft);padding:6px 9px;cursor:pointer;font-size:10px;color:var(--text)}
   .account-action:hover{background:var(--soft-hover)}
   .account-action.primary{background:var(--provider);border-color:var(--provider);color:#0B0F14;font-weight:700}
   .account-action[disabled]{opacity:.5}
   .quota-grid{display:grid;gap:9px}
-  .quota-card{padding:11px 12px;border:1px solid var(--hair);border-radius:2px;background:var(--soft)}
+  .quota-card{padding:11px 12px;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft)}
   .quota-top{display:flex;justify-content:space-between;gap:12px}
   .quota-top span{font-weight:700;font-size:11px;color:var(--text)}
-  .quota-top strong{font-variant-numeric:tabular-nums;color:var(--provider)}
-  /* Barre hachurée : la trame dit « mesure », pas « barre de progression ». */
+  .quota-top strong{font-variant-numeric:tabular-nums;color:var(--provider);text-shadow:var(--value-glow,none)}
+  /* Trame par défaut : la mesure dit « mesure », pas « barre de progression » — un thème peut
+     remplacer --rail-fill par un aplat ou un dégradé (voir themes.css). */
   .quota-track{height:14px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin:8px 0 6px;overflow:hidden}
-  .quota-track i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);transition:width .3s ease}
+  .quota-track i{display:block;height:100%;background:var(--rail-fill);box-shadow:var(--edge-glow,none);transition:width .3s ease}
   .quota-card small,.quota-empty{color:var(--muted);font-size:10px;line-height:1.45}
-  .quota-empty{padding:13px;border:1px dashed var(--hair-strong);border-radius:2px}
+  .quota-empty{padding:13px;border:1px dashed var(--hair-strong);border-radius:var(--radius)}
   .quota-error,.quota-stale{font-size:10px;margin-top:10px}.quota-error{color:var(--danger)}.quota-stale{color:var(--amber)}
   .quota-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:2px}.quota-foot small{flex:1;min-width:0}
   .spark{width:132px;height:26px;flex:none;overflow:visible}.spark .area{fill:color-mix(in srgb,var(--c) 12%,transparent);stroke:none}.spark .line{fill:none;stroke:var(--c);stroke-width:1;vector-effect:non-scaling-stroke}.spark .tip{fill:var(--c)}
   .toolbar-warn{font-size:10px;color:var(--amber);white-space:nowrap}
-  .settings{display:flex;flex-direction:column;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:2px;overflow:hidden}
-  .setting{display:flex;align-items:center;gap:20px;padding:16px 18px;background:rgba(18,22,28,.9)}
+  .settings{display:flex;flex-direction:column;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:var(--radius);overflow:hidden}
+  .setting{display:flex;align-items:center;gap:20px;padding:16px 18px;background:var(--panel-bg-strong);flex-wrap:wrap}
   .setting-copy{flex:1;min-width:0}.setting-copy strong{display:block;font-size:12px;margin-bottom:3px}.setting-copy small{color:var(--muted);font-size:10.5px;line-height:1.45;display:block}
   .setting-state{font-size:10px;color:var(--muted);white-space:nowrap}.setting-state.ok{color:var(--green)}
   .button.on{border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
-  .segmented{display:flex;border:1px solid var(--hair-strong);border-radius:2px;overflow:hidden;flex:none}
+  .segmented{display:flex;border:1px solid var(--hair-strong);border-radius:var(--radius);overflow:hidden;flex:none}
   .seg{border:0;background:transparent;color:var(--muted);padding:7px 11px;cursor:pointer;font:inherit;font-size:10px}
   .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
+  .theme-swatch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;flex:1;min-width:220px}
+  .theme-swatch{display:flex;align-items:center;gap:7px;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft);padding:8px 10px;cursor:pointer;color:var(--text);font:inherit;font-size:11px;text-align:left}
+  .theme-swatch:hover{background:var(--soft-hover);border-color:var(--hair-strong)}
+  .theme-swatch.on{border-color:var(--hair-strong);background:var(--soft-hover);font-weight:700}
+  .theme-swatch .dot{width:7px;height:7px;border-radius:50%;flex:none}
   @media(max-width:970px){.shell{grid-template-columns:178px 1fr}main{padding-left:22px;padding-right:22px}.provider-blocks,.connections{grid-template-columns:1fr}.hero-value{font-size:44px}.spark{display:none}}
   /* Moniteur — cartes métriques. Marques fines, grilles discrètes, le texte en encre, jamais
      en couleur de série : la couleur n'appartient qu'aux tracés. */
@@ -175,6 +178,16 @@ const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.duration
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
 const windowsFor=(providerId,account)=>{const windows=account?.windows||[];return providerId==='openai'?windows.filter(isWeekly):windows};
 const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
+// Gardez ces couleurs synchronisées avec Resources/themes.css : le JS ne peut pas lire les
+// jetons d'un thème non actif, donc l'aperçu de chaque pastille est dupliqué ici à la main.
+const THEMES=[
+  {id:'blueprint',label:'Blueprint',blue:'#67E8F9',purple:'#A78BFA'},
+  {id:'phosphore',label:'Phosphore',blue:'#59FFB0',purple:'#2E8F5E'},
+  {id:'synthwave',label:'Synthwave',blue:'#3CF2FF',purple:'#FF3CD6'},
+  {id:'circuit',label:'Circuit',blue:'#B4FF3C',purple:'#3CD6FF'},
+  {id:'holograme',label:'Holograme',blue:'#7CC8FF',purple:'#E29AFF'},
+  {id:'ion',label:'Ion',blue:'#78E1FF',purple:'#B98CFF'}
+];
 let appData=null,currentView='overview';
 
 // Rebuilds one window's series from the rolling history file and draws it as an inline sparkline.
@@ -197,7 +210,8 @@ function sparkline(history,key,color){
 function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div></div>`}
 function providerBlock(provider,account,history){const windows=windowsFor(provider.id,account),connected=isConnected(provider.id,account),state=connected?(account?.error?'Attention':'Connecté'):'Non connecté',cards=windows.length?windows.map(w=>quotaCard(w,provider.id,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`,freshness=account?.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${state}</span></div>${freshness}<div class="quota-grid">${cards}</div>${account?.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</section>`}
 function overview(data){const accounts={openai:data.accounts?.openai,claude:data.accounts?.claude},entries=[];PROVIDERS.forEach(p=>{windowsFor(p.id,accounts[p.id]).forEach(w=>entries.push({provider:p.name,window:w,used:used(w)}))});entries.sort((a,b)=>b.used-a.used);const max=entries[0],heroValue=max?`${max.used}<span class="unit">%</span>`:'—',heroLabel=max?'consommation la plus élevée actuellement':'quotas en attente',heroDetail=max?`<strong>${max.provider}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Connectez OpenAI et Claude pour afficher les volumes consommés.',heroColor=max?.provider==='Claude'?'var(--purple)':'var(--blue)',backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accounts[p.id],data.history)).join('')}</div>`}
-function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
+function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`,theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
+  <div class="setting"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></div>
@@ -208,7 +222,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
 function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
 function claudePanel(account){if(!account)return '';const busy=account.actionRunning||account.authChecking;let subtitle='',actions='',content='';const windows=(account.windows||[]).map(w=>quotaCard(w,'claude',appData?.history)).join('');if(account.trackingConfigured){subtitle=`Suivi actif${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`;actions=`${!account.cliAvailable?`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`:!account.authenticated?`<button class="account-action primary" onclick="send('loginClaude')">Connecter</button>`:''}<button class="account-action" ${busy?'disabled':''} onclick="send('uninstallClaudeTracking')">Désactiver</button>`;content=windows||`<div class="quota-empty">Le suivi est prêt. Lancez Claude Code et envoyez un message pour recevoir les compteurs.<br><button class="account-action" onclick="send('openClaudeTerminal')">Ouvrir Claude Code</button></div>`}else if(!account.cliAvailable){subtitle='CLI non détectée';actions=`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`;content=`<div class="quota-empty">Installez Claude Code depuis la documentation officielle.</div>`}else if(!account.authenticated){subtitle='Claude Code détecté · non connecté';actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('loginClaude')">Connecter</button>`;content=`<div class="quota-empty">La connexion s’effectue dans Terminal. Status ne capture aucun secret.</div>`}else{subtitle=`Connecté${account.subscriptionType?` · ${esc(account.subscriptionType)}`:''}`;actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('installClaudeTracking')">Activer le suivi</button>`;content=`<div class="quota-empty">Activez le collecteur status line pour recevoir les fenêtres 5 h et 7 jours.</div>`}actions+=`<button class="account-action" onclick="send('configureClaudeFableCookie')" title="Quotas en direct + jauge Fable (avancé, non officiel)">${account.fableConfigured?'direct ✓':'direct'}</button>`;return `<div class="quota-block" style="--provider:var(--purple)"><div class="account-row"><div class="account-copy"><strong>Claude Code</strong><small>${subtitle}</small></div><div class="account-actions">${actions}</div></div><div class="quota-grid">${content}</div>${account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la status line ne s’exécute que pendant une session « claude » en Terminal. Activez « direct » pour une lecture live toutes les 5 min.</div>`:''}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
 function connectionsView(data){return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Identifiants gérés par les outils officiels</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Status lit uniquement les compteurs autorisés et ne copie jamais vos jetons OAuth.</p></div></div><div class="connections"><article class="connection-panel"><h3>OpenAI</h3><p>Quotas ChatGPT via le serveur local Codex.</p>${quotaPanel(data.accounts?.openai)}</article><article class="connection-panel"><h3>Claude</h3><p>Quotas Claude via la status line officielle de Claude Code.</p>${claudePanel(data.accounts?.claude)}</article></div>`}
-function render(){if(!appData)return;document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
+function render(){if(!appData)return;document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
 // ─── Moniteur système ───────────────────────────────────────────────────────
 // Flux séparé des quotas : le natif pousse un snapshot par seconde quand la fenêtre est visible.
 // Cette vue a son propre chemin de rendu — re-render() global à 1 Hz reconstruirait trois vues
