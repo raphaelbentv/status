@@ -22,9 +22,9 @@
   .value{font-size:44px;line-height:1;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--provider)}
   .window{font-size:13px;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
   .reset{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:5px}
-  .weekly{border-top:1px solid var(--hair);margin-top:16px;padding-top:13px;text-align:left}
-  .weekly-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
-  .weekly-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
+  .subgauge{border-top:1px solid var(--hair);margin-top:16px;padding-top:13px;text-align:left}
+  .subgauge-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
+  .subgauge-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
   /* Même trame hachurée que la fenêtre principale : une mesure, pas une progression. */
   .rail{height:10px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin-top:7px;overflow:hidden}
   .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);transition:width .3s ease}
@@ -99,7 +99,10 @@ function provider(id,name,account){
   }
   const session=windows.find(isSession),fable=windows.find(isFable);
   const sessionValue=used(session),weeklyValue=used(weekly),fableValue=used(fable);
-  return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${sessionValue===null?'empty-value':''}">${sessionValue===null?'—':sessionValue+'<span class="unit">%</span>'}</div><div class="window">5h</div><div class="reset">reset ${reset(session)}</div><div class="weekly"><div class="weekly-head"><span>semaine</span><strong>${weeklyValue===null?'—':weeklyValue+' %'}</strong></div><div class="rail"><i style="width:${weeklyValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="weekly-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(sessionValue)}</section>`;
+  // La semaine en grand, comme pour OpenAI juste au-dessus : c'est la fenêtre qui engage
+  // réellement, celle des 5 h se rechargeant d'elle-même dans la demi-journée. Les deux
+  // panneaux se lisent donc de la même façon.
+  return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div><div class="subgauge"><div class="subgauge-head"><span>5h</span><strong>${sessionValue===null?'—':sessionValue+' %'}</strong></div><div class="rail"><i style="width:${sessionValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="subgauge-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(weeklyValue)}</section>`;
 }
 function tools(t){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
