@@ -31,6 +31,14 @@
   .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
   .account-note.stale{color:var(--amber)}
+  /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
+     conditionnelle : une tuile n'existe que si sa source répond. */
+  .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
+  .mtile{flex:1;background:rgba(18,22,28,.85);padding:7px 8px 6px;min-width:0}
+  .mtile .mlabel{font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .mtile .mvalue{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin:1px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mtile svg{display:block;width:100%;height:14px}
+  .mtile .line{fill:none;stroke-width:1.5;vector-effect:non-scaling-stroke}
   /* Outils machine — rien à voir avec les quotas, d'où la séparation visuelle nette. */
   .tools{display:flex;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
   .tool{flex:1;border:0;background:rgba(18,22,28,.85);color:var(--muted);padding:10px 6px;cursor:pointer;font:inherit;font-size:9.5px;display:flex;flex-direction:column;align-items:center;gap:5px;text-transform:lowercase;letter-spacing:.05em}
@@ -52,7 +60,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div class="providers" id="providers"></div><div class="tools" id="tools"></div><footer class="footer"><span class="sync" id="sync">maj…</span><span class="segmented" id="metric"></span><button onclick="send('refresh')" title="Actualiser">⟳</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></footer></div>
+<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="tools" id="tools"></div><footer class="footer"><span class="sync" id="sync">maj…</span><span class="segmented" id="metric"></span><button onclick="send('refresh')" title="Actualiser">⟳</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
@@ -110,7 +118,30 @@ function renderMenu(data){
     ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
     : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
 }
-window.StatusMenu={update(data){lastData=data;renderMenu(data)}};
+// Métriques système : flux séparé, poussé à 1 Hz par le natif tant que le popover est ouvert.
+const CHART_A='#0891B2',CHART_B='#8B5CF6';
+const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const units=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+units[i]};
+function miniChart(family,specs,percent){
+  const drawn=specs.map(s=>({...s,values:family.series?.[s.key]||[]})).filter(s=>s.values.length>1);
+  if(!drawn.length)return '';
+  const w=80,h=14,len=Math.max(...drawn.map(s=>s.values.length));
+  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values));
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${drawn.map(s=>{const offset=len-s.values.length;
+    return `<path class="line" stroke="${s.color}" d="${s.values.map((v,i)=>`${i?'L':'M'}${((offset+i)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ')}"/>`}).join('')}</svg>`;
+}
+function renderMetrics(data){
+  const familyById=id=>data?.families?.find(f=>f.id===id);
+  const tiles=[];
+  const pctTile=(id,label)=>{const family=familyById(id);if(!family)return;const key=id==='gpu'?'usage':id==='ram'?'usedPercent':'total';
+    tiles.push(`<div class="mtile"><div class="mlabel">${label}</div><div class="mvalue">${family.now[key]==null?'—':Math.round(family.now[key])+' %'}</div>${miniChart(family,[{key,color:CHART_A}],true)}</div>`)};
+  pctTile('cpu','cpu');pctTile('gpu','gpu');pctTile('ram','mém');
+  const network=familyById('network');
+  if(network)tiles.push(`<div class="mtile"><div class="mlabel">réseau ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
+  const sensors=familyById('sensors');
+  if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">temp</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
+  document.querySelector('#metrics').innerHTML=tiles.join('');
+}
+window.StatusMenu={update(data){lastData=data;renderMenu(data)},updateMetrics(data){renderMetrics(data)}};
 // Keep the "dans X min" countdowns honest between polls.
 setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
 </script>

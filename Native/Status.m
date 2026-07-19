@@ -7,6 +7,7 @@
 
 #import "StatusQuota.h"
 #import "StatusAwake.h"
+#import "StatusSystemMonitor.h"
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -464,6 +465,8 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSPopover *statusPopover;
 @property BOOL webReady;
 @property BOOL menuWebReady;
+@property TMSystemMonitor *systemMonitor;
+@property NSTimer *metricsTimer;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
 @property TMCodexAppServer *codexServer;
@@ -510,6 +513,7 @@ static const CGFloat TMTitleBarHeight = 28;
     [self buildWindow];
     [self buildStatusItem];
     [self scheduleRefresh];
+    [self startSystemMonitor];
     [self requestNotificationAuthorization];
     [self observeWakeNotifications];
     [self.window makeKeyAndOrderFront:nil];
@@ -526,6 +530,7 @@ static const CGFloat TMTitleBarHeight = 28;
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
+    [self.metricsTimer invalidate];
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
 }
@@ -982,6 +987,38 @@ static const CGFloat TMTitleBarHeight = 28;
         }];
     }
     [self updateStatusMenu];
+}
+
+#pragma mark - Moniteur système
+
+// Échantillonnage permanent à 1 Hz (choix de la spec : anneaux pleins dès qu'on ouvre l'onglet).
+// La poussée vers les webviews, elle, est conditionnelle — sérialiser 6 × 300 points chaque
+// seconde pour des surfaces invisibles serait du gaspillage pur.
+- (void)startSystemMonitor {
+    self.systemMonitor = TMSystemMonitorCreate();
+    __weak typeof(self) weakSelf = self;
+    self.metricsTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf metricsTick];
+    }];
+    self.metricsTimer.tolerance = 0.2;  // laisse macOS grouper les réveils, l'œil ne verra rien
+}
+
+- (void)metricsTick {
+    [self.systemMonitor sample];
+    BOOL dashboardVisible = self.webReady && self.window.isVisible;
+    BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
+    if (!dashboardVisible && !popoverVisible) return;
+
+    NSData *data = [NSJSONSerialization dataWithJSONObject:[self.systemMonitor snapshot] options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (dashboardVisible) {
+        NSString *script = [NSString stringWithFormat:@"window.StatusApp && window.StatusApp.updateMetrics && window.StatusApp.updateMetrics(%@);", json];
+        [self.webView evaluateJavaScript:script completionHandler:nil];
+    }
+    if (popoverVisible) {
+        NSString *script = [NSString stringWithFormat:@"window.StatusMenu && window.StatusMenu.updateMetrics && window.StatusMenu.updateMetrics(%@);", json];
+        [self.menuWebView evaluateJavaScript:script completionHandler:nil];
+    }
 }
 
 - (void)scheduleRefresh {

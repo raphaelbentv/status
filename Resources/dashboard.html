@@ -6,7 +6,9 @@
 <style>
   /* Direction « Blueprint » : plan technique. Grille cyan sur ardoise, tracés fins, monospace.
      Le cyan appartient à OpenAI, le violet à Claude ; la couleur ne sert qu'aux données. */
-  :root{color-scheme:dark;--bg:#12161C;--sidebar:#0E1217;--text:#CBD5E1;--muted:#5B6673;--hair:rgba(103,232,249,.14);--hair-strong:rgba(103,232,249,.28);--soft:rgba(103,232,249,.05);--soft-hover:rgba(103,232,249,.1);--blue:#67E8F9;--blue-soft:rgba(103,232,249,.07);--purple:#A78BFA;--purple-soft:rgba(167,139,250,.07);--green:#5EEAD4;--amber:#FBBF24;--danger:#FB7185;--grid:rgba(103,232,249,.045)}
+  /* --chart-a/--chart-b : marques de graphique du Moniteur, plus sombres que les couleurs
+     d'interface — paire validée (bande de luminance, CVD, contraste) sur ce fond. */
+  :root{color-scheme:dark;--bg:#12161C;--sidebar:#0E1217;--text:#CBD5E1;--muted:#5B6673;--hair:rgba(103,232,249,.14);--hair-strong:rgba(103,232,249,.28);--soft:rgba(103,232,249,.05);--soft-hover:rgba(103,232,249,.1);--blue:#67E8F9;--blue-soft:rgba(103,232,249,.07);--purple:#A78BFA;--purple-soft:rgba(167,139,250,.07);--green:#5EEAD4;--amber:#FBBF24;--danger:#FB7185;--grid:rgba(103,232,249,.045);--chart-a:#0891B2;--chart-b:#8B5CF6}
   *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 ui-monospace,"SF Mono","Menlo",monospace}button,select{font:inherit;color:inherit}
   .shell{height:100%;display:grid;grid-template-columns:210px 1fr;padding-top:28px;background:
     linear-gradient(var(--grid) 1px,transparent 1px),
@@ -17,7 +19,7 @@
   .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:2px;padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
   .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:11px;line-height:1}
-  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="settings"]::before{content:"03"}
+  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="settings"]::before{content:"03"}.nav button[data-view="monitor"]::before{content:"04"}
   .nav button.active{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--blue);font-weight:700}
   .nav button.active::before{opacity:1;color:var(--blue)}
   .sidebar-spacer{flex:1}.sidebar-bottom{border-top:1px solid var(--hair);padding-top:10px}
@@ -91,6 +93,28 @@
   .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
   @media(max-width:970px){.shell{grid-template-columns:178px 1fr}main{padding-left:22px;padding-right:22px}.provider-blocks,.connections{grid-template-columns:1fr}.hero-value{font-size:44px}.spark{display:none}}
+  /* Moniteur — cartes métriques. Marques fines, grilles discrètes, le texte en encre, jamais
+     en couleur de série : la couleur n'appartient qu'aux tracés. */
+  .metric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:20px}
+  .metric-card{border:1px solid var(--hair);background:var(--soft);padding:14px 16px}
+  .metric-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px}
+  .metric-head h3{margin:0;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .metric-value{font-size:21px;font-weight:700;color:var(--text)}
+  .metric-value .unit{font-size:11px;color:var(--muted);font-weight:400;margin-left:2px}
+  .metric-readout{font-size:10px;color:var(--muted);min-height:14px;margin-bottom:6px}
+  .metric-chart{position:relative}
+  .metric-chart svg{display:block;width:100%;height:56px;cursor:crosshair}
+  .metric-chart .baseline{stroke:var(--hair-strong);stroke-width:1}
+  .metric-chart .line{fill:none;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+  .metric-chart .area{opacity:.13}
+  .metric-legend{display:flex;gap:14px;margin-top:7px;font-size:10px;color:var(--muted)}
+  .metric-legend i{display:inline-block;width:9px;height:2px;vertical-align:middle;margin-right:5px}
+  .core-bars{display:flex;gap:2px;margin-top:9px;height:24px;align-items:flex-end}
+  .core-bars i{flex:1;background:var(--chart-a);min-height:1px}
+  .metric-badge{font-size:10px;padding:2px 7px;border:1px solid var(--hair);color:var(--muted)}
+  .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
+  .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
+  .metric-empty{color:var(--muted);padding:26px 0;text-align:center;font-size:11px}
 </style>
 </head>
 <body>
@@ -101,6 +125,7 @@
       <button class="active" data-view="overview">Status</button>
       <button data-view="connections">Connexions</button>
       <button data-view="settings">Réglages</button>
+      <button data-view="monitor">Moniteur</button>
     </nav>
     <div class="sidebar-spacer"></div>
     <div class="sidebar-bottom">
@@ -111,6 +136,7 @@
     <section class="view active" id="overview"></section>
     <section class="view" id="connections"></section>
     <section class="view" id="settings"></section>
+    <section class="view" id="monitor"></section>
   </main>
 </div>
 <script>
@@ -167,8 +193,87 @@ function quotaPanel(account){if(!account)return '';const name=account.email||'Co
 function claudePanel(account){if(!account)return '';const busy=account.actionRunning||account.authChecking;let subtitle='',actions='',content='';const windows=(account.windows||[]).map(w=>quotaCard(w,'claude',appData?.history)).join('');if(account.trackingConfigured){subtitle=`Suivi actif${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`;actions=`${!account.cliAvailable?`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`:!account.authenticated?`<button class="account-action primary" onclick="send('loginClaude')">Connecter</button>`:''}<button class="account-action" ${busy?'disabled':''} onclick="send('uninstallClaudeTracking')">Désactiver</button>`;content=windows||`<div class="quota-empty">Le suivi est prêt. Lancez Claude Code et envoyez un message pour recevoir les compteurs.<br><button class="account-action" onclick="send('openClaudeTerminal')">Ouvrir Claude Code</button></div>`}else if(!account.cliAvailable){subtitle='CLI non détectée';actions=`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`;content=`<div class="quota-empty">Installez Claude Code depuis la documentation officielle.</div>`}else if(!account.authenticated){subtitle='Claude Code détecté · non connecté';actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('loginClaude')">Connecter</button>`;content=`<div class="quota-empty">La connexion s’effectue dans Terminal. Status ne capture aucun secret.</div>`}else{subtitle=`Connecté${account.subscriptionType?` · ${esc(account.subscriptionType)}`:''}`;actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('installClaudeTracking')">Activer le suivi</button>`;content=`<div class="quota-empty">Activez le collecteur status line pour recevoir les fenêtres 5 h et 7 jours.</div>`}actions+=`<button class="account-action" onclick="send('configureClaudeFableCookie')" title="Quotas en direct + jauge Fable (avancé, non officiel)">${account.fableConfigured?'direct ✓':'direct'}</button>`;return `<div class="quota-block" style="--provider:var(--purple)"><div class="account-row"><div class="account-copy"><strong>Claude Code</strong><small>${subtitle}</small></div><div class="account-actions">${actions}</div></div><div class="quota-grid">${content}</div>${account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la status line ne s’exécute que pendant une session « claude » en Terminal. Activez « direct » pour une lecture live toutes les 5 min.</div>`:''}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
 function connectionsView(data){return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Identifiants gérés par les outils officiels</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Status lit uniquement les compteurs autorisés et ne copie jamais vos jetons OAuth.</p></div></div><div class="connections"><article class="connection-panel"><h3>OpenAI</h3><p>Quotas ChatGPT via le serveur local Codex.</p>${quotaPanel(data.accounts?.openai)}</article><article class="connection-panel"><h3>Claude</h3><p>Quotas Claude via la status line officielle de Claude Code.</p>${claudePanel(data.accounts?.claude)}</article></div>`}
 function render(){if(!appData)return;document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
-window.StatusApp={update(data){appData=data;render()}};
-document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>{currentView=button.dataset.view;render()});
+// ─── Moniteur système ───────────────────────────────────────────────────────
+// Flux séparé des quotas : le natif pousse un snapshot par seconde quand la fenêtre est visible.
+// Cette vue a son propre chemin de rendu — re-render() global à 1 Hz reconstruirait trois vues
+// pour rien.
+let metricsData=null,hoverState=null;
+const famGet=id=>metricsData?.families?.find(f=>f.id===id);
+const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const units=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+units[i]};
+
+// Multi-séries, une seule échelle (jamais de double axe) : % → 0-100 fixe, débits → max commun.
+// data-* portent ce qu'il faut au survol pour relire les valeurs au point visé.
+function metricChart(familyId,specs,{percent=false}={}){
+  const family=famGet(familyId);if(!family)return '';
+  const drawn=specs.map(s=>({...s,values:family.series?.[s.key]||[]})).filter(s=>s.values.length>1);
+  if(!drawn.length)return '<div class="metric-empty">Mesure en cours…</div>';
+  const w=300,h=56,len=Math.max(...drawn.map(s=>s.values.length));
+  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values));
+  const paths=drawn.map(s=>{
+    const offset=len-s.values.length;  // séries plus courtes (famille revenue de panne) : calées à droite
+    const line=s.values.map((v,i)=>`${i?'L':'M'}${((offset+i)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
+    return `<path class="area" fill="${s.color}" d="${line} L${w},${h} L${(offset/(len-1)*w).toFixed(1)},${h} Z"/><path class="line" stroke="${s.color}" d="${line}"/>`;
+  }).join('');
+  return `<div class="metric-chart"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" data-family="${familyId}" data-keys="${drawn.map(s=>s.key).join(',')}" data-labels="${drawn.map(s=>s.label||s.key).join(',')}" data-percent="${percent?1:0}"><line class="baseline" x1="0" y1="${h}" x2="${w}" y2="${h}"/>${paths}</svg></div>`;
+}
+const readout=familyId=>{
+  if(hoverState?.family!==familyId)return '';
+  const family=famGet(familyId);if(!family)return '';
+  const values=hoverState.keys.map((key,i)=>{const series=family.series?.[key]||[];const v=series[series.length-1-hoverState.back];return `${hoverState.labels[i]} ${hoverState.percent?(v==null?'—':Math.round(v)+' %'):fmtBytes(v)}`});
+  return `il y a ${hoverState.back} s · ${values.join(' · ')}`;
+};
+const legend=pairs=>`<div class="metric-legend">${pairs.map(([color,label])=>`<span><i style="background:${color}"></i>${label}</span>`).join('')}</div>`;
+const PRESSURE={1:['normale',''],2:['élevée','warn'],4:['critique','crit']};
+
+function metricCard(familyId,title,valueHTML,body){return `<div class="metric-card"><div class="metric-head"><h3>${title}</h3>${valueHTML}</div><div class="metric-readout">${readout(familyId)}</div>${body}</div>`}
+function monitorView(){
+  if(!metricsData?.families?.length)return `<div class="toolbar"><h1>Moniteur</h1></div><div class="metric-empty">Première mesure en cours…</div>`;
+  const cpu=famGet('cpu'),gpu=famGet('gpu'),ram=famGet('ram'),net=famGet('network'),disk=famGet('disk'),sensors=famGet('sensors');
+  const pct=v=>v==null?'—':`${Math.round(v)}<span class="unit">%</span>`;
+  const cards=[];
+  if(cpu){const cores=Object.keys(cpu.now).filter(k=>k.startsWith('core')).sort((a,b)=>+a.slice(4)-+b.slice(4));
+    cards.push(metricCard('cpu','CPU',`<span class="metric-value">${pct(cpu.now.total)}</span>`,
+      metricChart('cpu',[{key:'total',color:'var(--chart-a)',label:'CPU'}],{percent:true})
+      +`<div class="core-bars" title="un trait par cœur">${cores.map(c=>`<i style="height:${Math.max(4,cpu.now[c])}%"></i>`).join('')}</div>`));}
+  if(gpu)cards.push(metricCard('gpu','GPU',`<span class="metric-value">${pct(gpu.now.usage)}</span>`,
+    metricChart('gpu',[{key:'usage',color:'var(--chart-a)',label:'GPU'}],{percent:true})));
+  if(ram){const [pressureLabel,pressureClass]=PRESSURE[ram.now.pressureLevel]||[];
+    cards.push(metricCard('ram','Mémoire',`<span>${pressureLabel?`<span class="metric-badge ${pressureClass}">pression ${pressureLabel}</span> `:''}<span class="metric-value">${pct(ram.now.usedPercent)}</span></span>`,
+      metricChart('ram',[{key:'usedPercent',color:'var(--chart-a)',label:'Occupée'}],{percent:true})));}
+  if(net)cards.push(metricCard('network','Réseau',`<span class="metric-value" style="font-size:14px">↓ ${fmtBytes(net.now.rxBytesPerSec)} · ↑ ${fmtBytes(net.now.txBytesPerSec)}</span>`,
+    metricChart('network',[{key:'rxBytesPerSec',color:'var(--chart-a)',label:'↓ réception'},{key:'txBytesPerSec',color:'var(--chart-b)',label:'↑ émission'}])
+    +legend([['var(--chart-a)','↓ réception'],['var(--chart-b)','↑ émission']])));
+  if(disk)cards.push(metricCard('disk','Disque',`<span><span class="metric-value" style="font-size:14px">R ${fmtBytes(disk.now.readBytesPerSec)} · W ${fmtBytes(disk.now.writeBytesPerSec)}</span> <span class="unit">· plein à ${disk.now.usedPercent==null?'—':Math.round(disk.now.usedPercent)+' %'}</span></span>`,
+    metricChart('disk',[{key:'readBytesPerSec',color:'var(--chart-a)',label:'lecture'},{key:'writeBytesPerSec',color:'var(--chart-b)',label:'écriture'}])
+    +legend([['var(--chart-a)','lecture'],['var(--chart-b)','écriture']])));
+  if(sensors){const battery=sensors.now.batteryPercent!=null?`<span class="unit">batterie ${Math.round(sensors.now.batteryPercent)} %${sensors.now.batteryCharging?' ⚡':''}</span> `:'';
+    cards.push(metricCard('sensors','Capteurs',`<span>${battery}<span class="metric-value">${sensors.now.tempC==null?'—':Math.round(sensors.now.tempC)+'<span class="unit">°C</span>'}</span></span>`,
+      sensors.now.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):''));}
+  return `<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/s · fenêtre 5 min · une carte absente = source indisponible</span></div><div class="metric-grid">${cards.join('')}</div>`;
+}
+function renderMonitor(){if(currentView!=='monitor')return;const section=document.querySelector('#monitor');if(section)section.innerHTML=monitorView()}
+// Survol : l'état vit hors DOM parce que le re-render à 1 Hz remplace le innerHTML — l'état
+// persiste, la lecture au point visé aussi.
+document.querySelector('#monitor').addEventListener('mousemove',event=>{
+  const svg=event.target.closest('svg[data-family]');if(!svg)return;
+  const family=famGet(svg.dataset.family);if(!family)return;
+  const keys=svg.dataset.keys.split(',');
+  const len=Math.max(...keys.map(k=>(family.series?.[k]||[]).length));
+  const rect=svg.getBoundingClientRect();
+  const index=Math.round((event.clientX-rect.left)/rect.width*(len-1));
+  hoverState={family:svg.dataset.family,keys,labels:svg.dataset.labels.split(','),percent:svg.dataset.percent==='1',back:Math.max(0,len-1-index)};
+  const card=svg.closest('.metric-card');if(card)card.querySelector('.metric-readout').textContent=readout(svg.dataset.family);
+});
+document.querySelector('#monitor').addEventListener('mouseleave',()=>{hoverState=null;renderMonitor()});
+window.StatusApp={update(data){appData=data;render()},updateMetrics(data){metricsData=data;renderMonitor()}};
+// Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
+// encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.
+document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>{
+  currentView=button.dataset.view;
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));
+  render();renderMonitor();
+});
 // The countdowns must keep ticking between the 5-minute polls, otherwise "dans 2 h 14" quietly
 // becomes a lie. Re-rendering from the last payload is cheap and needs no native round-trip.
 setInterval(()=>{if(appData)render()},30000);
