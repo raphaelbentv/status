@@ -115,6 +115,21 @@
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
   .metric-empty{color:var(--muted);padding:26px 0;text-align:center;font-size:11px}
+  .metric-card.expandable{cursor:pointer}
+  .metric-card .chevron{margin-left:6px;opacity:.6}
+  .metric-card-wide{grid-column:1/-1}
+  .metric-detail{border-top:1px solid var(--hair);margin-top:10px;padding-top:10px}
+  .detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .detail-cell .metric-chart svg{height:30px}
+  .detail-label{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+  .detail-rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+  .detail-row{display:flex;justify-content:space-between;align-items:baseline;font-size:11px}
+  .proc-rows{display:flex;flex-direction:column;margin-top:6px}
+  .proc-row{display:grid;grid-template-columns:1fr 90px 70px;gap:10px;padding:5px 0;border-top:1px solid var(--hair);font-size:11.5px}
+  .proc-row:first-child{border-top:0}
+  .proc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .proc-mem{color:var(--muted);text-align:right}
+  .proc-cpu{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 </style>
 </head>
 <body>
@@ -184,7 +199,8 @@ function providerBlock(provider,account,history){const windows=windowsFor(provid
 function overview(data){const accounts={openai:data.accounts?.openai,claude:data.accounts?.claude},entries=[];PROVIDERS.forEach(p=>{windowsFor(p.id,accounts[p.id]).forEach(w=>entries.push({provider:p.name,window:w,used:used(w)}))});entries.sort((a,b)=>b.used-a.used);const max=entries[0],heroValue=max?`${max.used}<span class="unit">%</span>`:'—',heroLabel=max?'consommation la plus élevée actuellement':'quotas en attente',heroDetail=max?`<strong>${max.provider}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Connectez OpenAI et Claude pour afficher les volumes consommés.',heroColor=max?.provider==='Claude'?'var(--purple)':'var(--blue)',backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accounts[p.id],data.history)).join('')}</div>`}
 function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
-  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Une notification à 80 % puis à 95 % de chaque fenêtre.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></div>
   <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>
@@ -224,8 +240,39 @@ const readout=familyId=>{
 };
 const legend=pairs=>`<div class="metric-legend">${pairs.map(([color,label])=>`<span><i style="background:${color}"></i>${label}</span>`).join('')}</div>`;
 const PRESSURE={1:['normale',''],2:['élevée','warn'],4:['critique','crit']};
+const fmtSize=v=>{if(v==null||isNaN(v))return '—';const units=['o','Ko','Mo','Go'];let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+units[i]};
+const fmtUptime=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d} j ${h} h`:h?`${h} h ${String(m).padStart(2,'0')}`:`${m} min`};
 
-function metricCard(familyId,title,valueHTML,body){return `<div class="metric-card"><div class="metric-head"><h3>${title}</h3>${valueHTML}</div><div class="metric-readout">${readout(familyId)}</div>${body}</div>`}
+// ─ Vues détaillées (clic sur une carte) ─
+// L'état survit au re-render à 1 Hz, comme hoverState.
+const expanded=new Set();
+function detailCPU(cpu){const cores=Object.keys(cpu.series||{}).filter(k=>k.startsWith('core')).sort((a,b)=>+a.slice(4)-+b.slice(4));
+  return `<div class="detail-grid">${cores.map(c=>`<div class="detail-cell"><div class="detail-label">cœur ${c.slice(4)} · ${cpu.now[c]==null?'—':Math.round(cpu.now[c])+' %'}</div>${metricChart('cpu',[{key:c,color:'var(--chart-a)',label:c}],{percent:true})}</div>`).join('')}</div>`}
+function detailNetwork(net){const ifaces=[...new Set(Object.keys(net.now).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
+  return `<div class="detail-rows">${ifaces.map(name=>`<div class="detail-row"><span class="detail-label">${esc(name)}</span><span>↓ ${fmtBytes(net.now['rx:'+name])} · ↑ ${fmtBytes(net.now['tx:'+name])}</span></div>`).join('')||'<div class="metric-empty">Aucune interface active.</div>'}</div>`}
+function detailDisk(disk){const volumes=Object.keys(disk.now).filter(k=>k.startsWith('vol:')).sort();
+  return `<div class="detail-rows">${volumes.map(key=>{const pct=Math.round(disk.now[key]);return `<div class="detail-row"><span class="detail-label">${esc(key.slice(4))}</span><span>${pct} %</span></div><div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${pct}%"></i></div>`}).join('')}</div>`}
+const DETAILS={cpu:detailCPU,network:detailNetwork,disk:detailDisk};
+
+function processesCard(){
+  const processes=metricsData?.processes||[];
+  if(!processes.length)return '';
+  const rows=processes.map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem">${fmtSize(p.rssBytes)}</span><span class="proc-cpu">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span></div>`).join('');
+  return `<div class="metric-card metric-card-wide"><div class="metric-head"><h3>Processus les plus actifs</h3><span class="unit">CPU sur le dernier intervalle · un fil = 100 %</span></div><div class="proc-rows">${rows}</div></div>`;
+}
+function systemCard(){
+  const system=famGet('system');if(!system)return '';
+  const load=k=>system.now[k]==null?'—':system.now[k].toFixed(2).replace('.',',');
+  return metricCard('system','Système',`<span class="metric-value" style="font-size:14px">up ${fmtUptime(system.now.uptimeSec)}</span>`,
+    `<div class="detail-rows"><div class="detail-row"><span class="detail-label">charge 1 / 5 / 15 min</span><span>${load('load1')} / ${load('load5')} / ${load('load15')}</span></div><div class="detail-row"><span class="detail-label">processus</span><span>${system.now.processCount??'—'}</span></div></div>`
+    +metricChart('system',[{key:'load1',color:'var(--chart-a)',label:'charge 1 min'}]));
+}
+
+function metricCard(familyId,title,valueHTML,body){
+  const expandable=DETAILS[familyId],isOpen=expandable&&expanded.has(familyId);
+  const detail=isOpen?`<div class="metric-detail">${DETAILS[familyId](famGet(familyId))}</div>`:'';
+  return `<div class="metric-card ${expandable?'expandable':''}" data-family="${familyId}"><div class="metric-head"><h3>${title}${expandable?`<span class="chevron">${isOpen?'▾':'▸'}</span>`:''}</h3>${valueHTML}</div><div class="metric-readout">${readout(familyId)}</div>${body}${detail}</div>`;
+}
 function monitorView(){
   if(!metricsData?.families?.length)return `<div class="toolbar"><h1>Moniteur</h1></div><div class="metric-empty">Première mesure en cours…</div>`;
   const cpu=famGet('cpu'),gpu=famGet('gpu'),ram=famGet('ram'),net=famGet('network'),disk=famGet('disk'),sensors=famGet('sensors');
@@ -249,7 +296,8 @@ function monitorView(){
   if(sensors){const battery=sensors.now.batteryPercent!=null?`<span class="unit">batterie ${Math.round(sensors.now.batteryPercent)} %${sensors.now.batteryCharging?' ⚡':''}</span> `:'';
     cards.push(metricCard('sensors','Capteurs',`<span>${battery}<span class="metric-value">${sensors.now.tempC==null?'—':Math.round(sensors.now.tempC)+'<span class="unit">°C</span>'}</span></span>`,
       sensors.now.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):''));}
-  return `<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/s · fenêtre 5 min · une carte absente = source indisponible</span></div><div class="metric-grid">${cards.join('')}</div>`;
+  const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
+  return `<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min · une carte absente = source indisponible</span></div><div class="metric-grid">${cards.join('')}${systemCard()}${processesCard()}</div>`;
 }
 function renderMonitor(){if(currentView!=='monitor')return;const section=document.querySelector('#monitor');if(section)section.innerHTML=monitorView()}
 // Survol : l'état vit hors DOM parce que le re-render à 1 Hz remplace le innerHTML — l'état
@@ -265,6 +313,12 @@ document.querySelector('#monitor').addEventListener('mousemove',event=>{
   const card=svg.closest('.metric-card');if(card)card.querySelector('.metric-readout').textContent=readout(svg.dataset.family);
 });
 document.querySelector('#monitor').addEventListener('mouseleave',()=>{hoverState=null;renderMonitor()});
+document.querySelector('#monitor').addEventListener('click',event=>{
+  const card=event.target.closest('.metric-card.expandable');if(!card)return;
+  const family=card.dataset.family;
+  expanded.has(family)?expanded.delete(family):expanded.add(family);
+  renderMonitor();
+});
 window.StatusApp={update(data){appData=data;render()},updateMetrics(data){metricsData=data;renderMonitor()}};
 // Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
 // encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.

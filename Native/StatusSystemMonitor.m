@@ -6,6 +6,8 @@
 #import <net/if.h>
 #import <net/if_types.h>
 #import <IOKit/IOKitLib.h>
+#import <libproc.h>
+#import <mach/mach_time.h>
 #import <IOKit/ps/IOPowerSources.h>
 #import <IOKit/ps/IOPSKeys.h>
 #import <IOKit/storage/IOBlockStorageDriver.h>
@@ -255,31 +257,53 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectGPU(void) {
     return usage ? @{ @"usage": @(round(usage.doubleValue)) } : nil;
 }
 
-// Réseau : somme des compteurs de toutes les interfaces physiques, débit par delta.
-static NSDictionary<NSString *, NSNumber *> *TMCollectNetwork(uint64_t *previousRx, uint64_t *previousTx,
-                                                              NSTimeInterval *previousAt) {
+// Réseau : total (clés rxBytesPerSec/txBytesPerSec) + par interface active (rx:en0, tx:en0…),
+// débit par delta. `state` porte les compteurs précédents par interface, plus l'horodatage.
+static const NSUInteger TMNetworkInterfaceCap = 8;  // les anneaux par clé ont un coût : on borne
+
+static NSDictionary<NSString *, NSNumber *> *TMCollectNetwork(NSMutableDictionary *state) {
     struct ifaddrs *interfaces = NULL;
     if (getifaddrs(&interfaces) != 0) return nil;
-    uint64_t rx = 0, tx = 0;
+    NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *totals = [NSMutableDictionary dictionary];
     for (struct ifaddrs *interface = interfaces; interface; interface = interface->ifa_next) {
         if (!interface->ifa_addr || interface->ifa_addr->sa_family != AF_LINK) continue;
         if (interface->ifa_flags & IFF_LOOPBACK) continue;
+        if (!(interface->ifa_flags & IFF_UP)) continue;
         const struct if_data *data = interface->ifa_data;
-        if (!data) continue;
-        rx += data->ifi_ibytes;
-        tx += data->ifi_obytes;
+        if (!data || (!data->ifi_ibytes && !data->ifi_obytes)) continue;  // jamais servi : ignoré
+        totals[@(interface->ifa_name)] = @[@(data->ifi_ibytes), @(data->ifi_obytes)];
     }
     freeifaddrs(interfaces);
 
     NSTimeInterval now = TMMonotonicNow();
-    double rxRate, txRate;
-    BOOL valid = *previousAt > 0
-              && TMRatePerSecond(*previousRx, rx, now - *previousAt, &rxRate)
-              && TMRatePerSecond(*previousTx, tx, now - *previousAt, &txRate);
-    *previousRx = rx; *previousTx = tx; *previousAt = now;
-    // Compteur 32 bits rebouclé ou premier appel : on saute ce point plutôt qu'inventer un pic.
-    if (!valid) return nil;
-    return @{ @"rxBytesPerSec": @(round(rxRate)), @"txBytesPerSec": @(round(txRate)) };
+    NSTimeInterval elapsed = now - [state[@"__at"] doubleValue];
+    BOOL first = ![state[@"__at"] doubleValue];
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    double rxTotal = 0, txTotal = 0;
+    BOOL anyValid = NO;
+    NSUInteger emitted = 0;
+    for (NSString *name in [totals.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        NSArray<NSNumber *> *previous = state[name];
+        double rxRate, txRate;
+        if (previous
+            && TMRatePerSecond(previous[0].unsignedLongLongValue, [totals[name][0] unsignedLongLongValue], elapsed, &rxRate)
+            && TMRatePerSecond(previous[1].unsignedLongLongValue, [totals[name][1] unsignedLongLongValue], elapsed, &txRate)) {
+            anyValid = YES;
+            rxTotal += rxRate; txTotal += txRate;
+            if (emitted < TMNetworkInterfaceCap) {
+                values[[@"rx:" stringByAppendingString:name]] = @(round(rxRate));
+                values[[@"tx:" stringByAppendingString:name]] = @(round(txRate));
+                emitted++;
+            }
+        }
+        state[name] = totals[name];
+    }
+    state[@"__at"] = @(now);
+    // Premier appel ou compteurs tous rebouclés : on saute ce point plutôt qu'inventer un pic.
+    if (first || !anyValid) return nil;
+    values[@"rxBytesPerSec"] = @(round(rxTotal));
+    values[@"txBytesPerSec"] = @(round(txTotal));
+    return values;
 }
 
 // Disque : espace du volume racine (statfs) + débits E/S cumulés de tous les pilotes de stockage.
@@ -321,7 +345,40 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectDisk(uint64_t *previousRea
         }
         *previousRead = read; *previousWrite = write; *previousAt = now;
     }
+
+    // Par volume monté visible (vol:/, vol:/Volumes/X…) — pour la vue détaillée.
+    struct statfs *mounts = NULL;
+    int mountCount = getmntinfo(&mounts, MNT_NOWAIT);
+    NSUInteger emitted = 0;
+    for (int i = 0; i < mountCount && emitted < 8; i++) {
+        if (mounts[i].f_flags & MNT_DONTBROWSE) continue;  // volumes système cachés
+        uint64_t total = (uint64_t)mounts[i].f_blocks * mounts[i].f_bsize;
+        if (!total) continue;
+        uint64_t free = (uint64_t)mounts[i].f_bfree * mounts[i].f_bsize;
+        values[[@"vol:" stringByAppendingString:@(mounts[i].f_mntonname)]] =
+            @(round(100.0 * (double)(total - free) / (double)total));
+        emitted++;
+    }
     return values;  // l'espace disque reste utile même si les débits manquent ce tick-ci
+}
+
+// Uptime, charge moyenne, nombre de processus — tout est public et trivial.
+static NSDictionary<NSString *, NSNumber *> *TMCollectSystem(void) {
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    struct timeval boot;
+    size_t bootSize = sizeof(boot);
+    if (sysctlbyname("kern.boottime", &boot, &bootSize, NULL, 0) == 0 && boot.tv_sec) {
+        values[@"uptimeSec"] = @((long long)([NSDate date].timeIntervalSince1970 - boot.tv_sec));
+    }
+    double loads[3];
+    if (getloadavg(loads, 3) == 3) {
+        values[@"load1"] = @(round(loads[0] * 100) / 100);
+        values[@"load5"] = @(round(loads[1] * 100) / 100);
+        values[@"load15"] = @(round(loads[2] * 100) / 100);
+    }
+    int processCount = proc_listallpids(NULL, 0);
+    if (processCount > 0) values[@"processCount"] = @(processCount);
+    return values.count ? values : nil;
 }
 
 #pragma mark - Capteurs (température via HID privé, batterie via IOPS public)
@@ -393,20 +450,50 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
     return values.count ? values : nil;
 }
 
+#pragma mark - Processus
+
+NSDictionary *TMProcessSample(void) {
+    // ri_user_time/ri_system_time sont en unités mach_absolute_time, pas en nanosecondes —
+    // identiques sur Intel (1/1), différentes sur Apple Silicon. Conversion obligatoire.
+    static mach_timebase_info_data_t timebase;
+    if (!timebase.denom) mach_timebase_info(&timebase);
+
+    int capacity = proc_listallpids(NULL, 0);
+    if (capacity <= 0) return nil;
+    capacity += 16;  // des processus naissent entre les deux appels
+    pid_t *pids = calloc(capacity, sizeof(pid_t));
+    int filled = proc_listallpids(pids, capacity * (int)sizeof(pid_t));
+    NSMutableDictionary *sample = [NSMutableDictionary dictionaryWithCapacity:filled];
+    for (int i = 0; i < filled; i++) {
+        if (!pids[i]) continue;
+        struct rusage_info_v2 usage;
+        if (proc_pid_rusage(pids[i], RUSAGE_INFO_V2, (rusage_info_t *)&usage) != 0) continue;  // disparu ou interdit
+        char name[2 * MAXCOMLEN];
+        if (proc_name(pids[i], name, sizeof(name)) <= 0) continue;
+        uint64_t cpuNs = (usage.ri_user_time + usage.ri_system_time) * timebase.numer / timebase.denom;
+        sample[[@(pids[i]) stringValue]] = @{ @"name": @(name), @"cpuTimeNs": @(cpuNs),
+                                              @"rssBytes": @(usage.ri_phys_footprint) };
+    }
+    free(pids);
+    return sample.count ? sample : nil;
+}
+
 #pragma mark - Assemblage
 
 TMSystemMonitor *TMSystemMonitorCreate(void) {
     // L'état inter-échantillons de chaque collecteur vit dans les captures des blocs.
     NSMutableData *cpuTicks = [NSMutableData data];
-    __block uint64_t networkRx = 0, networkTx = 0, diskRead = 0, diskWrite = 0;
-    __block NSTimeInterval networkAt = 0, diskAt = 0;
+    NSMutableDictionary *networkState = [NSMutableDictionary dictionary];
+    __block uint64_t diskRead = 0, diskWrite = 0;
+    __block NSTimeInterval diskAt = 0;
 
     return [[TMSystemMonitor alloc] initWithCollectors:@{
         @"cpu":     ^{ return TMCollectCPU(cpuTicks); },
         @"gpu":     ^{ return TMCollectGPU(); },
         @"ram":     ^{ return TMCollectRAM(); },
-        @"network": ^{ return TMCollectNetwork(&networkRx, &networkTx, &networkAt); },
+        @"network": ^{ return TMCollectNetwork(networkState); },
         @"disk":    ^{ return TMCollectDisk(&diskRead, &diskWrite, &diskAt); },
         @"sensors": ^{ return TMCollectSensors(); },
-    } familyOrder:@[@"cpu", @"gpu", @"ram", @"network", @"disk", @"sensors"]];
+        @"system":  ^{ return TMCollectSystem(); },
+    } familyOrder:@[@"cpu", @"gpu", @"ram", @"network", @"disk", @"sensors", @"system"]];
 }

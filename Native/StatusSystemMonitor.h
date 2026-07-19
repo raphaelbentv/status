@@ -9,6 +9,8 @@
 
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 #pragma mark - Logique pure (testable sans machine)
 
 // Fenêtre glissante : 5 minutes à 1 Hz. Fixée ici et non configurable — la spec ne prévoit
@@ -70,3 +72,10 @@ typedef NSDictionary<NSString *, NSNumber *> * _Nullable (^TMMetricCollector)(vo
 
 // Le moniteur de production : tous les collecteurs réels branchés, dans l'ordre de la spec.
 TMSystemMonitor *TMSystemMonitorCreate(void);
+
+// Relevé instantané des processus via libproc, au format attendu par TMTopProcesses.
+// nil si la liste des pids est illisible. Coûte quelques centaines d'appels noyau : à n'appeler
+// que quand une surface est visible.
+NSDictionary * _Nullable TMProcessSample(void);
+
+NS_ASSUME_NONNULL_END

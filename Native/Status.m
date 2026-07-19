@@ -467,6 +467,11 @@ static const CGFloat TMTitleBarHeight = 28;
 @property BOOL menuWebReady;
 @property TMSystemMonitor *systemMonitor;
 @property NSTimer *metricsTimer;
+@property NSDictionary *previousProcessSample;
+@property NSTimeInterval previousProcessAt;
+@property NSArray *topProcesses;
+// États d'hystérésis des alertes système — un booléen par seuil surveillé.
+@property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
 @property TMCodexAppServer *codexServer;
@@ -737,6 +742,13 @@ static const CGFloat TMTitleBarHeight = 28;
         hasValue = hasClaudeWeekly; shown = claudeWeekly;
     } else if ([metric isEqualToString:@"openai:weekly"]) {
         hasValue = hasOpenAIWeekly; shown = openAIWeekly;
+    } else if ([metric hasPrefix:@"system:"]) {
+        // Métriques système : mêmes valeurs que l'onglet Moniteur, rafraîchies par metricsTick.
+        NSMutableDictionary *nowById = [NSMutableDictionary dictionary];
+        for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) nowById[family[@"id"]] = family[@"now"];
+        NSNumber *value = [metric isEqualToString:@"system:temp"] ? nowById[@"sensors"][@"tempC"] : nowById[@"cpu"][@"total"];
+        hasValue = value != nil; shown = value.doubleValue;
+        label = [metric isEqualToString:@"system:temp"] ? @"temp" : @"cpu";
     } else {
         // « lowest » = la marge la plus faible, donc le pourcentage consommé le plus élevé.
         NSArray *candidates = @[
@@ -752,8 +764,9 @@ static const CGFloat TMTitleBarHeight = 28;
     }
 
     TMSeverity severity = hasValue ? TMSeverityForPercent(shown) : TMSeverityNormal;
+    NSString *suffix = [metric isEqualToString:@"system:temp"] ? @"°" : @"%";
     NSString *title = hasValue
-        ? [NSString stringWithFormat:@" %@%ld%%", label ? [label stringByAppendingString:@" "] : @"", (long)(shown + 0.5)]
+        ? [NSString stringWithFormat:@" %@%ld%@", label ? [label stringByAppendingString:@" "] : @"", (long)(shown + 0.5), suffix]
         : @" --";
 
     self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity);
@@ -890,6 +903,11 @@ static const CGFloat TMTitleBarHeight = 28;
         [NSUserDefaults.standardUserDefaults setObject:value forKey:@"menuBarMetric"];
         [self pushData];
     }
+    if ([action isEqualToString:@"setMetricsInterval"]) {
+        [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:@"metricsIntervalSeconds"];
+        [self startSystemMonitor];  // recrée le timer à la nouvelle cadence
+        [self pushData];
+    }
     if ([action isEqualToString:@"openDashboard"]) [self openDashboard:nil];
     if ([action isEqualToString:@"quit"]) [NSApp terminate:nil];
     if ([action isEqualToString:@"toggleAwake"]) {
@@ -943,6 +961,7 @@ static const CGFloat TMTitleBarHeight = 28;
             @"launchAtLogin": @([self launchAtLoginEnabled]),
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
             @"hoverPopover": @([self hoverPopoverEnabled]),
+            @"metricsInterval": @([self metricsInterval]),
             @"notificationsAuthorized": @(self.notificationsAuthorized)
         },
         @"tools": @{ @"awake": @{ @"active": @(self.awake.isEnabled) } },
@@ -974,22 +993,75 @@ static const CGFloat TMTitleBarHeight = 28;
 // Échantillonnage permanent à 1 Hz (choix de la spec : anneaux pleins dès qu'on ouvre l'onglet).
 // La poussée vers les webviews, elle, est conditionnelle — sérialiser 6 × 300 points chaque
 // seconde pour des surfaces invisibles serait du gaspillage pur.
+- (NSTimeInterval)metricsInterval {
+    NSInteger seconds = [NSUserDefaults.standardUserDefaults integerForKey:@"metricsIntervalSeconds"];
+    return (seconds == 2 || seconds == 5) ? seconds : 1;
+}
+
 - (void)startSystemMonitor {
-    self.systemMonitor = TMSystemMonitorCreate();
+    if (!self.systemMonitor) self.systemMonitor = TMSystemMonitorCreate();
+    [self.metricsTimer invalidate];  // recréé au changement d'intervalle ; les anneaux survivent
     __weak typeof(self) weakSelf = self;
-    self.metricsTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
+    self.metricsTimer = [NSTimer scheduledTimerWithTimeInterval:[self metricsInterval] repeats:YES block:^(NSTimer *timer) {
         [weakSelf metricsTick];
     }];
-    self.metricsTimer.tolerance = 0.2;  // laisse macOS grouper les réveils, l'œil ne verra rien
+    self.metricsTimer.tolerance = [self metricsInterval] * 0.2;  // macOS groupe les réveils, l'œil ne verra rien
+}
+
+// Seuils volontairement hauts : ces alertes signalent un état anormal, pas une machine qui
+// travaille. L'écart seuil/réarmement évite la rafale quand la valeur oscille.
+- (void)checkSystemAlerts:(NSDictionary *)snapshot {
+    NSMutableDictionary *byId = [NSMutableDictionary dictionary];
+    for (NSDictionary *family in snapshot[@"families"]) byId[family[@"id"]] = family[@"now"];
+
+    BOOL above = self.alertRAMAbove;
+    NSNumber *pressure = byId[@"ram"][@"pressureLevel"];
+    if (pressure && TMThresholdShouldFire(&above, pressure.doubleValue, 4, 2))
+        [self postNotificationTitle:@"Mémoire · pression critique"
+                               body:@"macOS compresse et purge agressivement. Fermez quelques applications."];
+    self.alertRAMAbove = above;
+
+    above = self.alertTempAbove;
+    NSNumber *temp = byId[@"sensors"][@"tempC"];
+    if (temp && TMThresholdShouldFire(&above, temp.doubleValue, 90, 82))
+        [self postNotificationTitle:@"Température élevée"
+                               body:[NSString stringWithFormat:@"Capteurs à %.0f °C en moyenne.", temp.doubleValue]];
+    self.alertTempAbove = above;
+
+    above = self.alertDiskAbove;
+    NSNumber *diskUsed = byId[@"disk"][@"usedPercent"];
+    if (diskUsed && TMThresholdShouldFire(&above, diskUsed.doubleValue, 90, 85))
+        [self postNotificationTitle:@"Disque presque plein"
+                               body:[NSString stringWithFormat:@"Volume de démarrage à %.0f %%.", diskUsed.doubleValue]];
+    self.alertDiskAbove = above;
 }
 
 - (void)metricsTick {
     [self.systemMonitor sample];
+    NSDictionary *snapshot = [self.systemMonitor snapshot];
+    [self checkSystemAlerts:snapshot];  // les alertes veillent même toutes surfaces fermées
+
     BOOL dashboardVisible = self.webReady && self.window.isVisible;
     BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
-    if (!dashboardVisible && !popoverVisible) return;
+    BOOL menuBarWantsSystem = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] hasPrefix:@"system:"];
+    if (menuBarWantsSystem) [self updateStatusMenu];
+    if (!dashboardVisible && !popoverVisible) { self.previousProcessSample = nil; return; }
 
-    NSData *data = [NSJSONSerialization dataWithJSONObject:[self.systemMonitor snapshot] options:0 error:nil];
+    // Le relevé des processus (~500 appels noyau) n'a lieu que surface visible ; le premier tick
+    // après ouverture n'a donc pas de delta, comme le réseau au lancement.
+    NSDictionary *processSample = TMProcessSample();
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (processSample && self.previousProcessSample) {
+        self.topProcesses = TMTopProcesses(self.previousProcessSample, processSample,
+                                           now - self.previousProcessAt, 5);
+    }
+    self.previousProcessSample = processSample;
+    self.previousProcessAt = now;
+
+    NSMutableDictionary *payload = [snapshot mutableCopy];
+    payload[@"processes"] = self.topProcesses ?: @[];
+    payload[@"intervalSeconds"] = @([self metricsInterval]);
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (dashboardVisible) {
         NSString *script = [NSString stringWithFormat:@"window.StatusApp && window.StatusApp.updateMetrics && window.StatusApp.updateMetrics(%@);", json];

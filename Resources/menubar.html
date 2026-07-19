@@ -113,7 +113,7 @@ function renderMenu(data){
   document.querySelector('#tools').innerHTML=tools(data.tools);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
   const opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
-  document.querySelector('#metric').innerHTML=opt('claude:weekly','C sem')+opt('claude:session','C 5h')+opt('openai:weekly','AI sem')+opt('lowest','max');
+  document.querySelector('#metric').innerHTML=opt('claude:weekly','C sem')+opt('claude:session','C 5h')+opt('openai:weekly','AI sem')+opt('lowest','max')+opt('system:cpu','cpu')+opt('system:temp','°C');
   document.querySelector('#sync').textContent=data.backoffUntil
     ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
     : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
