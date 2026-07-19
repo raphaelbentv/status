@@ -3,45 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="themes.css">
 <style>
-  /* Direction « Blueprint » — même système que dashboard.html : grille cyan sur ardoise,
-     barres hachurées, cyan = OpenAI, violet = Claude. */
-  :root{color-scheme:dark;--bg:#12161C;--text:#CBD5E1;--muted:#5B6673;--hair:rgba(103,232,249,.14);--hair-strong:rgba(103,232,249,.28);--soft:rgba(103,232,249,.05);--blue:#67E8F9;--purple:#A78BFA;--amber:#FBBF24;--danger:#FB7185;--grid:rgba(103,232,249,.045)}
+  /* Le thème actif vient de themes.css ([data-theme] sur <html>, poussé par renderMenu()) ;
+     cyan = OpenAI, violet = Claude reste la convention par défaut, mais chaque thème peut
+     réassigner --blue/--purple à ses deux teintes propres. */
   *{box-sizing:border-box}
-  html,body{width:100%;height:100%;margin:0;overflow:hidden;color:var(--text);font:12.5px/1.4 ui-monospace,"SF Mono","Menlo",monospace;
-    background:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px),var(--bg);
-    background-size:22px 22px,22px 22px,auto}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;color:var(--text);font:12.5px/1.4 var(--font);
+    background:var(--bg);
+    background-image:var(--bg-image,linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px));
+    background-size:var(--bg-size,22px 22px,22px 22px)}
   button{font:inherit;color:inherit}
-  .popover{height:100%;display:flex;flex-direction:column}
+  .popover{height:100%;display:flex;flex-direction:column;clip-path:var(--clip,none)}
   .providers{display:grid;grid-template-columns:1fr 1fr;flex:1}
-  .provider{padding:18px 16px 14px;text-align:center;min-width:0;position:relative;background:rgba(18,22,28,.55)}
+  .provider{padding:18px 16px 14px;text-align:center;min-width:0;position:relative;background:var(--panel-bg)}
   .provider:before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--provider)}
   .provider+.provider{border-left:1px solid var(--hair)}
-  .name{font-size:10px;color:var(--provider);font-weight:700;margin-bottom:10px;text-transform:lowercase;letter-spacing:.06em}
+  .name{font-size:10px;color:var(--provider);font-weight:700;margin-bottom:10px;text-transform:lowercase;letter-spacing:.06em;text-shadow:var(--value-glow,none)}
   .value .unit{font-size:.42em;margin-left:.08em;opacity:.65;font-weight:400}
-  .value{font-size:44px;line-height:1;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--provider)}
+  .value{font-size:44px;line-height:1;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--provider);text-shadow:var(--value-glow,none)}
   .window{font-size:13px;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
   .reset{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:5px}
   .subgauge{border-top:1px solid var(--hair);margin-top:16px;padding-top:13px;text-align:left}
   .subgauge-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
-  .subgauge-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
-  /* Même trame hachurée que la fenêtre principale : une mesure, pas une progression. */
+  .subgauge-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;text-shadow:var(--value-glow,none)}
+  /* Même trame que la fenêtre principale : une mesure, pas une progression — hachure par
+     défaut (blueprint/phosphore), qu'un thème peut remplacer par un aplat ou un dégradé
+     (voir themes.css). --provider est réellement hérité ici, contrairement à un alias
+     --rail-fill qui figerait var(--provider) invalide à son propre niveau de déclaration. */
   .rail{height:10px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin-top:7px;overflow:hidden}
-  .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);transition:width .3s ease}
+  .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);box-shadow:var(--edge-glow,none);transition:width .3s ease}
   .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
   .account-note.stale{color:var(--amber)}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
   .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
-  .mtile{flex:1;background:rgba(18,22,28,.85);padding:7px 8px 6px;min-width:0}
+  .mtile{flex:1;background:var(--panel-bg-strong);padding:7px 8px 6px;min-width:0}
   .mtile .mlabel{font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
   .mtile .mvalue{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin:1px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .mtile svg{display:block;width:100%;height:14px}
   .mtile .line{fill:none;stroke-width:1.5;vector-effect:non-scaling-stroke}
   /* Outils machine — rien à voir avec les quotas, d'où la séparation visuelle nette. */
   .tools{display:flex;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
-  .tool{flex:1;border:0;background:rgba(18,22,28,.85);color:var(--muted);padding:10px 6px;cursor:pointer;font:inherit;font-size:9.5px;display:flex;flex-direction:column;align-items:center;gap:5px;text-transform:lowercase;letter-spacing:.05em}
+  .tool{flex:1;border:0;background:var(--panel-bg-strong);color:var(--muted);padding:10px 6px;cursor:pointer;font:inherit;font-size:9.5px;display:flex;flex-direction:column;align-items:center;gap:5px;text-transform:lowercase;letter-spacing:.05em}
   .tool:hover{background:var(--soft);color:var(--text)}
   .tool.on{color:var(--blue);background:rgba(103,232,249,.12)}
   .tool .glyph{font-size:15px;line-height:1}
@@ -51,21 +56,21 @@
   .seg+.seg{border-left:1px solid var(--hair-strong)}
   .seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:rgba(103,232,249,.14);color:var(--blue);font-weight:700}
-  .account-action{border:1px solid var(--provider);color:var(--provider);background:color-mix(in srgb,var(--provider) 10%,transparent);border-radius:2px;padding:6px 9px;margin-top:9px;cursor:pointer;font-size:10px;font-weight:700}
+  .account-action{border:1px solid var(--provider);color:var(--provider);background:color-mix(in srgb,var(--provider) 10%,transparent);border-radius:var(--radius);padding:6px 9px;margin-top:9px;cursor:pointer;font-size:10px;font-weight:700}
   /* Deux rangées, et non une : à six segments, le sélecteur ne laissait plus la place au message
      de backoff (« ⚠ pause · retry dans 39 min », 154 px) qui débordait alors le pied de page.
      Le popover a du vide vertical à revendre — mieux vaut le dépenser que tronquer une alerte. */
-  .footer{border-top:1px solid var(--hair-strong);display:flex;flex-direction:column;gap:7px;padding:9px 10px;background:rgba(14,18,23,.9);flex:none}
+  .footer{border-top:1px solid var(--hair-strong);display:flex;flex-direction:column;gap:7px;padding:9px 10px;background:var(--panel-bg-strong);flex:none}
   .footer-row{display:flex;align-items:center;gap:6px}
   .footer-row > button.sync{flex:1;min-width:0;text-align:left;color:var(--muted);font-size:9.5px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid transparent;background:transparent;
-    padding:5px 6px;border-radius:2px;cursor:pointer;font-family:inherit}
+    padding:5px 6px;border-radius:var(--radius);cursor:pointer;font-family:inherit}
   .footer-row > button.sync:hover{color:var(--text);border-color:var(--hair);background:var(--soft)}
   .footer-row > button.sync:disabled{cursor:default;opacity:.7}
   .footer-row > button.sync:disabled:hover{color:var(--muted);border-color:transparent;background:transparent}
   /* Ciblé sur les enfants directs de la rangée : « .footer button » l'emportait en spécificité
      sur « .seg » et figeait les segments à leur largeur de contenu. */
-  .footer-row > button{border:1px solid transparent;background:transparent;padding:6px 7px;border-radius:2px;cursor:pointer;color:var(--muted);white-space:nowrap;flex:none}
+  .footer-row > button{border:1px solid transparent;background:transparent;padding:6px 7px;border-radius:var(--radius);cursor:pointer;color:var(--muted);white-space:nowrap;flex:none}
   .footer-row > button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .footer-row > button.go{color:var(--blue);font-weight:700}
   .empty-value{color:var(--provider);opacity:.55}
@@ -126,6 +131,7 @@ function tools(t){
 }
 let lastData=null;
 function renderMenu(data){
+  document.documentElement.dataset.theme=data.prefs?.theme||'blueprint';
   document.querySelector('#providers').innerHTML=provider('openai','OpenAI',data.accounts?.openai)+provider('claude','Claude',data.accounts?.claude);
   document.querySelector('#tools').innerHTML=tools(data.tools);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
