@@ -9,6 +9,7 @@
 #import "StatusAwake.h"
 #import "StatusSystemMonitor.h"
 #import "StatusKeyboardLock.h"
+#import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -497,6 +498,7 @@ static const CGFloat TMTitleBarHeight = 28;
 // États d'hystérésis des alertes système — un booléen par seuil surveillé.
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
 @property TMKeyboardLock *keyboardLock;
+@property id globalShortcutMonitor, localShortcutMonitor;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
 @property TMCodexAppServer *codexServer;
@@ -547,6 +549,7 @@ static const CGFloat TMTitleBarHeight = 28;
     self.keyboardLock = [TMKeyboardLock new];
     __weak typeof(self) weakLockSelf = self;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
+    [self installGlobalShortcut];
     [self requestNotificationAuthorization];
     [self observeWakeNotifications];
     [self.window makeKeyAndOrderFront:nil];
@@ -563,7 +566,8 @@ static const CGFloat TMTitleBarHeight = 28;
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
-    [self.keyboardLock forceUnlock];  // même logique : le tap mourrait aussi, mais soyons explicites
+    [self.keyboardLock forceUnlock];
+    [self removeGlobalShortcut];  // même logique : le tap mourrait aussi, mais soyons explicites
     [self.metricsTimer invalidate];
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
@@ -885,6 +889,42 @@ static const CGFloat TMTitleBarHeight = 28;
     [self refresh:nil];
 }
 
+// Raccourci global ⌘⇧S — atteindre les quotas sans viser l'icône à la souris.
+//
+// Deux moniteurs sont nécessaires et non un seul : le global ne reçoit rien quand Status est
+// déjà l'application active (macOS ne livre pas à une app ses propres événements par ce canal),
+// le local ne reçoit que ceux-là. Ensemble ils couvrent les deux cas.
+//
+// Le moniteur global exige l'autorisation d'Accessibilité — la même que le verrou clavier. Sans
+// elle, l'enregistrement échoue silencieusement : c'est pourquoi le réglage indique l'état
+// plutôt que de promettre un raccourci qui ne viendrait jamais.
+- (void)installGlobalShortcut {
+    [self removeGlobalShortcut];
+    if (![NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]) return;
+
+    __weak typeof(self) weakSelf = self;
+    BOOL (^matches)(NSEvent *) = ^BOOL(NSEvent *event) {
+        NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        return (flags == (NSEventModifierFlagCommand | NSEventModifierFlagShift))
+            && [event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"s"];
+    };
+    self.globalShortcutMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                                       handler:^(NSEvent *event) {
+        if (matches(event)) dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf toggleStatusPopover:nil]; });
+    }];
+    self.localShortcutMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                                      handler:^NSEvent *(NSEvent *event) {
+        if (!matches(event)) return event;
+        [weakSelf toggleStatusPopover:nil];
+        return nil;  // consommé : ne pas le laisser filer vers la webview
+    }];
+}
+
+- (void)removeGlobalShortcut {
+    if (self.globalShortcutMonitor) { [NSEvent removeMonitor:self.globalShortcutMonitor]; self.globalShortcutMonitor = nil; }
+    if (self.localShortcutMonitor) { [NSEvent removeMonitor:self.localShortcutMonitor]; self.localShortcutMonitor = nil; }
+}
+
 - (void)toggleStatusPopover:(id)sender {
     (void)sender;
     [self.hoverOpenTimer invalidate];
@@ -945,6 +985,12 @@ static const CGFloat TMTitleBarHeight = 28;
     if ([action isEqualToString:@"toggleKeyboardLock"]) {
         [self.statusPopover close];  // l'overlay va tout recouvrir ; un popover transient resterait orphelin
         [self.keyboardLock toggle];
+    }
+    if ([action isEqualToString:@"toggleGlobalShortcut"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:![defaults boolForKey:@"globalShortcutEnabled"] forKey:@"globalShortcutEnabled"];
+        [self installGlobalShortcut];
+        [self pushData];
     }
     if ([action isEqualToString:@"setMetricsInterval"]) {
         [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:@"metricsIntervalSeconds"];
@@ -1007,6 +1053,8 @@ static const CGFloat TMTitleBarHeight = 28;
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
             @"hoverPopover": @([self hoverPopoverEnabled]),
             @"metricsInterval": @([self metricsInterval]),
+            @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
+            @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"notificationsAuthorized": @(self.notificationsAuthorized)
         },
         @"tools": @{
