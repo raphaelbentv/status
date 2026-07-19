@@ -45,6 +45,38 @@ Voir [`docs/quota-auth-research.md`](docs/quota-auth-research.md) § 6 pour le d
   par nvm/volta/asdf sont donc trouvées
 - **Python 3** : requis par le collecteur de status line
 
+## Signature stable (recommandé)
+
+Sans identité de signature, chaque build est signé ad hoc : macOS voit une app différente à
+chaque compilation et **révoque la permission Accessibilité** (verrou clavier) ainsi que le
+lancement au démarrage. Une fois pour toutes :
+
+```bash
+./scripts/create-signing-identity.sh   # guide la création dans Trousseau d'accès
+./scripts/package-app.sh               # détecte l'identité automatiquement
+```
+
+Après le premier build signé, ré-accordez l'Accessibilité une dernière fois : la signature
+change d'ad-hoc à stable, donc macOS la redemande — puis plus jamais.
+
+## Installer sur un autre Mac
+
+L'app n'est pas notarisée (cela exigerait un compte Apple Developer payant) : Gatekeeper la
+bloquera au premier lancement. Procédure :
+
+1. Copiez `outputs/Status.zip` sur l'autre Mac (AirDrop, disque, etc.) et décompressez dans
+   `/Applications`.
+2. Premier lancement : macOS refuse d'ouvrir l'app. Deux options :
+   - Réglages système › Confidentialité et sécurité › bouton **« Ouvrir quand même »** (apparaît
+     dans les instants qui suivent la tentative), **ou**
+   - retirer la quarantaine en une commande : `xattr -d com.apple.quarantine /Applications/Status.app`
+3. Les permissions sont par machine : ré-accordez notifications et Accessibilité (verrou
+   clavier), et refaites les connexions OpenAI/Claude — les identifiants ne voyagent pas avec
+   l'app, c'est voulu (ils vivent dans le Trousseau).
+
+Les prérequis (Codex CLI, Claude Code, Python 3) s'appliquent sur chaque machine pour les
+quotas ; le Moniteur système, lui, fonctionne sans rien.
+
 ## Construire et lancer
 
 ```bash
