@@ -524,7 +524,10 @@ static const CGFloat TMTitleBarHeight = 28;
         // lowest | claude:session | claude:weekly | openai:weekly — quel % accompagne l'icône.
         // Claude semaine par défaut : c'est la limite qui contraint réellement le travail.
         @"menuBarMetric": @"claude:weekly",
-        @"hoverPopover": @YES
+        @"hoverPopover": @YES,
+        // blueprint reste l'apparence historique : les utilisateurs existants ne voient aucun
+        // changement tant qu'ils ne choisissent pas un autre thème dans Réglages.
+        @"theme": @"blueprint"
     }];
     // Migration : les valeurs d'avant l'ajout du fournisseur ne correspondent plus à rien, et
     // laisseraient l'élément bloqué sur « -- » sans jamais dire pourquoi.
@@ -941,6 +944,21 @@ static const CGFloat TMTitleBarHeight = 28;
         [NSUserDefaults.standardUserDefaults setObject:value forKey:@"menuBarMetric"];
         [self pushData];
     }
+    if ([action isEqualToString:@"setTheme"]) {
+        // Entrée non fiable (vient de la webview) : seuls les six identifiants de themes.css
+        // sont acceptés, sinon un thème mal orthographié figerait l'app sur les jetons par
+        // défaut de :root sans jamais le dire.
+        static NSSet<NSString *> *validThemes;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            validThemes = [NSSet setWithArray:@[@"blueprint", @"phosphore", @"synthwave", @"circuit", @"holograme", @"ion"]];
+        });
+        NSString *value = [body[@"value"] isKindOfClass:NSString.class] ? body[@"value"] : @"";
+        if ([validThemes containsObject:value]) {
+            [NSUserDefaults.standardUserDefaults setObject:value forKey:@"theme"];
+            [self pushData];
+        }
+    }
     if ([action isEqualToString:@"toggleKeyboardLock"]) {
         [self.statusPopover close];  // l'overlay va tout recouvrir ; un popover transient resterait orphelin
         [self.keyboardLock toggle];
@@ -1004,7 +1022,8 @@ static const CGFloat TMTitleBarHeight = 28;
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
             @"hoverPopover": @([self hoverPopoverEnabled]),
             @"metricsInterval": @([self metricsInterval]),
-            @"notificationsAuthorized": @(self.notificationsAuthorized)
+            @"notificationsAuthorized": @(self.notificationsAuthorized),
+            @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint"
         },
         @"tools": @{
         @"awake": @{ @"active": @(self.awake.isEnabled) },
