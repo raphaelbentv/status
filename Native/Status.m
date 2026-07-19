@@ -429,6 +429,30 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
     return [NSString stringWithFormat:@"%@   %@", lower, [parts componentsJoinedByString:@" "]];
 }
 
+// Hauteur de la bande de titre. Doit rester alignée sur le `padding-top` de `.shell` dans
+// dashboard.html, qui réserve la même zone côté contenu.
+static const CGFloat TMTitleBarHeight = 28;
+
+// La fenêtre est en FullSizeContentView avec une barre de titre transparente : la WKWebView couvre
+// donc toute la surface, y compris la zone du titre, et consomme les événements souris — plus rien
+// n'offre de prise pour déplacer la fenêtre. `-webkit-app-region: drag` ne comble pas ce manque :
+// malgré son préfixe, c'est une extension Chromium que WebKit n'implémente pas. Cette bande
+// transparente, posée par-dessus la webview, rend la prise à AppKit.
+@interface TMTitleBarDragView : NSView
+@end
+
+@implementation TMTitleBarDragView
+- (BOOL)mouseDownCanMoveWindow { return YES; }
+// INSTRUMENTATION TEMPORAIRE — à retirer
+// Le déplacement implicite via mouseDownCanMoveWindow ne fonctionne pas sur cette machine alors
+// que toute la chaîne est valide (hitTest correct, movable=YES, styleMask complet). On passe par
+// l'API explicite : même mécanique que la barre de titre native, mais déclenchée par nous.
+- (void)mouseDown:(NSEvent *)event {
+    NSLog(@"[DRAG] mouseDown reçu %@ -> performWindowDragWithEvent", NSStringFromPoint(event.locationInWindow));
+    [self.window performWindowDragWithEvent:event];
+}
+@end
+
 @interface TMAppDelegate : NSObject <NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate>
 @property NSWindow *window;
 @property WKWebView *webView;
@@ -540,7 +564,37 @@ static NSString *TMAccountQuotaLine(NSString *name, NSArray *windows) {
     self.webView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
     self.webView.navigationDelegate = self;
     self.webView.underPageBackgroundColor = NSColor.clearColor;
-    self.window.contentView = self.webView;
+    self.webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+    // La bande doit rester au-dessus de la webview dans l'ordre des sous-vues, sinon la webview
+    // récupère le clic et la fenêtre redevient fixe.
+    NSView *content = [[NSView alloc] initWithFrame:frame];
+    [content addSubview:self.webView];
+    TMTitleBarDragView *titleBar = [[TMTitleBarDragView alloc]
+        initWithFrame:NSMakeRect(0, NSHeight(frame) - TMTitleBarHeight, NSWidth(frame), TMTitleBarHeight)];
+    titleBar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;  // collée en haut au redimensionnement
+    [content addSubview:titleBar];
+    self.window.contentView = content;
+
+    // INSTRUMENTATION TEMPORAIRE — à retirer
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSLog(@"[DRAG] window.frame=%@ movable=%d styleMask=%lu",
+              NSStringFromRect(self.window.frame), self.window.movable, (unsigned long)self.window.styleMask);
+        NSLog(@"[DRAG] contentView.frame=%@ classe=%@",
+              NSStringFromRect(self.window.contentView.frame), self.window.contentView.class);
+        for (NSView *sub in self.window.contentView.subviews) {
+            NSLog(@"[DRAG]   sous-vue %@ frame=%@", sub.class, NSStringFromRect(sub.frame));
+        }
+        // Qui reçoit un clic dans la bande du titre ? Testé par programme : la souris n'y passe pas
+        // forcément, et c'est le seul point qui tranche.
+        NSPoint dansLaBande = NSMakePoint(600, 746);
+        NSView *cible = [self.window.contentView hitTest:dansLaBande];
+        NSLog(@"[DRAG] hitTest(600,746) dans la bande -> %@ | mouseDownCanMoveWindow=%d",
+              cible.class, cible.mouseDownCanMoveWindow);
+        NSView *cibleMilieu = [self.window.contentView hitTest:NSMakePoint(100, 400)];
+        NSLog(@"[DRAG] hitTest(100,400) sidebar -> %@ | mouseDownCanMoveWindow=%d",
+              cibleMilieu.class, cibleMilieu.mouseDownCanMoveWindow);
+    });
 
     NSURL *url = [NSBundle.mainBundle URLForResource:@"dashboard" withExtension:@"html"];
     [self.webView loadFileURL:url allowingReadAccessToURL:url.URLByDeletingLastPathComponent];
