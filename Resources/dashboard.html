@@ -115,6 +115,16 @@
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
   .metric-empty{color:var(--muted);padding:26px 0;text-align:center;font-size:11px}
+  .forecast{margin-top:7px;font-size:10px;color:var(--muted);border-top:1px dashed var(--hair);padding-top:6px}
+  .forecast.soon{color:var(--amber)}
+  .metric-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:16px}
+  .metric-table th,.metric-table td{text-align:right;padding:6px 10px;border-bottom:1px solid var(--hair)}
+  .metric-table th{color:var(--muted);font-weight:400;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
+  .metric-table th:first-child,.metric-table td:first-child{text-align:left}
+  .metric-table td:first-child{color:var(--muted)}
+  .view-toggle{margin-left:auto;display:flex;gap:0;border:1px solid var(--hair-strong)}
+  .view-toggle button{border:0;background:transparent;color:var(--muted);padding:5px 10px;cursor:pointer;font:inherit;font-size:9.5px}
+  .view-toggle button.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
   .metric-card.expandable{cursor:pointer}
   .metric-card .chevron{margin-left:6px;opacity:.6}
   .metric-card-wide{grid-column:1/-1}
@@ -194,7 +204,16 @@ function sparkline(history,key,color){
     <circle class="tip" cx="${w}" cy="${y(last.v).toFixed(1)}" r="2"/></svg>`;
 }
 
-function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div></div>`}
+// « épuisé jeudi vers 16 h » fait décider ; « 78 % » ne fait que constater. Absent quand le
+// natif juge la prévision non fiable — jamais de chiffre inventé pour remplir la ligne.
+function forecastLine(key){
+  const at=appData?.forecasts?.[key];
+  if(!at)return '';
+  const hours=(at-Date.now())/3600000;
+  const when=new Intl.DateTimeFormat('fr-FR',hours<24?{hour:'2-digit',minute:'2-digit'}:{weekday:'long',hour:'2-digit'}).format(new Date(at));
+  return `<div class="forecast ${hours<12?'soon':''}">au rythme actuel, épuisé ${hours<24?'à ':''}${when}</div>`;
+}
+function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
 function providerBlock(provider,account,history){const windows=windowsFor(provider.id,account),connected=isConnected(provider.id,account),state=connected?(account?.error?'Attention':'Connecté'):'Non connecté',cards=windows.length?windows.map(w=>quotaCard(w,provider.id,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`,freshness=account?.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${state}</span></div>${freshness}<div class="quota-grid">${cards}</div>${account?.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</section>`}
 function overview(data){const accounts={openai:data.accounts?.openai,claude:data.accounts?.claude},entries=[];PROVIDERS.forEach(p=>{windowsFor(p.id,accounts[p.id]).forEach(w=>entries.push({provider:p.name,window:w,used:used(w)}))});entries.sort((a,b)=>b.used-a.used);const max=entries[0],heroValue=max?`${max.used}<span class="unit">%</span>`:'—',heroLabel=max?'consommation la plus élevée actuellement':'quotas en attente',heroDetail=max?`<strong>${max.provider}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Connectez OpenAI et Claude pour afficher les volumes consommés.',heroColor=max?.provider==='Claude'?'var(--purple)':'var(--blue)',backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accounts[p.id],data.history)).join('')}</div>`}
 function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
@@ -297,8 +316,39 @@ function monitorView(){
     cards.push(metricCard('sensors','Capteurs',`<span>${battery}<span class="metric-value">${sensors.now.tempC==null?'—':Math.round(sensors.now.tempC)+'<span class="unit">°C</span>'}</span></span>`,
       sensors.now.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):''));}
   const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
-  return `<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min · une carte absente = source indisponible</span></div><div class="metric-grid">${cards.join('')}${systemCard()}${processesCard()}</div>`;
+  const toggle=`<div class="view-toggle"><button class="${monitorMode==='charts'?'on':''}" onclick="setMonitorMode('charts')">graphiques</button><button class="${monitorMode==='table'?'on':''}" onclick="setMonitorMode('table')">tableau</button></div>`;
+  const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min</span>${toggle}</div>`;
+  if(monitorMode==='table')return head+monitorTable();
+  return head+`<div class="metric-grid">${cards.join('')}${systemCard()}${processesCard()}</div>`;
 }
+// Les courbes sont muettes au clavier et au lecteur d'écran. Ce tableau dit la même chose en
+// texte : valeur courante, min, max, moyenne sur la fenêtre glissante.
+let monitorMode='charts';
+const stats=values=>{
+  if(!values?.length)return null;
+  const sum=values.reduce((a,b)=>a+b,0);
+  return {now:values[values.length-1],min:Math.min(...values),max:Math.max(...values),avg:sum/values.length};
+};
+// Le format ne se déduit pas de l'unité : une charge de 2,4 arrondie à l'entier ne dit plus rien.
+const METRIC_LABELS={'cpu.total':['CPU','%','int'],'gpu.usage':['GPU','%','int'],'ram.usedPercent':['Mémoire','%','int'],
+  'network.rxBytesPerSec':['Réseau ↓','','bytes'],'network.txBytesPerSec':['Réseau ↑','','bytes'],
+  'disk.readBytesPerSec':['Disque lecture','','bytes'],'disk.writeBytesPerSec':['Disque écriture','','bytes'],
+  'sensors.tempC':['Température','°C','int'],'system.load1':['Charge 1 min','','decimal']};
+function monitorTable(){
+  const rows=[];
+  for(const [path,[label,unit,kind]] of Object.entries(METRIC_LABELS)){
+    const [familyId,key]=path.split('.');
+    const family=famGet(familyId);if(!family)continue;
+    const s=stats(family.series?.[key]);if(!s)continue;
+    const fmt=v=>kind==='bytes'?fmtBytes(v)
+      :kind==='decimal'?v.toFixed(2).replace('.',',')
+      :Math.round(v)+(unit?' '+unit:'');
+    rows.push(`<tr><td>${label}</td><td>${fmt(s.now)}</td><td>${fmt(s.min)}</td><td>${fmt(s.max)}</td><td>${fmt(s.avg)}</td></tr>`);
+  }
+  if(!rows.length)return '<div class="metric-empty">Mesure en cours…</div>';
+  return `<table class="metric-table"><thead><tr><th>Métrique</th><th>Actuel</th><th>Min</th><th>Max</th><th>Moyenne</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+function setMonitorMode(mode){monitorMode=mode;renderMonitor()}
 function renderMonitor(){if(currentView!=='monitor')return;const section=document.querySelector('#monitor');if(section)section.innerHTML=monitorView()}
 // Survol : l'état vit hors DOM parce que le re-render à 1 Hz remplace le innerHTML — l'état
 // persiste, la lecture au point visé aussi.

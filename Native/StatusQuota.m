@@ -241,6 +241,57 @@ NSString *TMHistoryPath(void) {
     return [TMSupportDirectory() stringByAppendingPathComponent:@"quota-history.json"];
 }
 
+const NSTimeInterval TMForecastMinimumSpan = 900;  // 15 min : sous ce seuil, la pente est du bruit
+
+BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resetsAt, NSTimeInterval *outAt) {
+    if (!key.length) return NO;
+
+    // 1. Ne garder que les points portant la clé — le collecteur écrit une entrée par cycle,
+    //    pas forcément avec toutes les fenêtres (un fournisseur peut être déconnecté).
+    NSMutableArray<NSArray<NSNumber *> *> *points = [NSMutableArray array];  // [t, valeur]
+    for (NSDictionary *row in history) {
+        if (![row isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *values = row[@"p"];
+        if (![values isKindOfClass:NSDictionary.class]) continue;
+        NSNumber *value = values[key];
+        if (![value isKindOfClass:NSNumber.class]) continue;
+        [points addObject:@[@(TMNumber(row[@"t"])), value]];
+    }
+
+    // 2. Repartir de la dernière réinitialisation. Une fenêtre qui se recharge fait chuter le
+    //    pourcentage ; conserver l'avant donnerait une pente négative alors que la consommation
+    //    peut être vive depuis. Le seuil évite de confondre une chute avec le bruit de mesure.
+    NSUInteger start = 0;
+    for (NSUInteger i = 1; i < points.count; i++) {
+        double previous = points[i - 1][1].doubleValue, current = points[i][1].doubleValue;
+        if (current < previous - 5) start = i;
+    }
+    if (points.count - start < 2) return NO;
+
+    NSTimeInterval firstTime = points[start][0].doubleValue;
+    NSTimeInterval lastTime = points.lastObject[0].doubleValue;
+    double lastValue = points.lastObject[1].doubleValue;
+    if (lastTime - firstTime < TMForecastMinimumSpan) return NO;
+
+    // 3. Moindres carrés sur les points retenus. Une régression plutôt que le simple écart entre
+    //    le premier et le dernier : un pic isolé ne doit pas décider de la prévision.
+    NSUInteger n = points.count - start;
+    double sumT = 0, sumV = 0, sumTV = 0, sumTT = 0;
+    for (NSUInteger i = start; i < points.count; i++) {
+        double t = points[i][0].doubleValue - firstTime, v = points[i][1].doubleValue;
+        sumT += t; sumV += v; sumTV += t * v; sumTT += t * t;
+    }
+    double denominator = n * sumTT - sumT * sumT;
+    if (denominator <= 0) return NO;
+    double slope = (n * sumTV - sumT * sumV) / denominator;  // pourcent par seconde
+    if (slope <= 0) return NO;                               // stable ou en baisse : rien à annoncer
+
+    NSTimeInterval exhaustAt = lastTime + (100.0 - lastValue) / slope;
+    if (resetsAt > 0 && exhaustAt >= resetsAt) return NO;    // tiendra jusqu'au reset
+    if (outAt) *outAt = exhaustAt;
+    return YES;
+}
+
 NSArray *TMLoadHistory(void) {
     NSData *data = [NSData dataWithContentsOfFile:TMHistoryPath()];
     NSArray *history = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;

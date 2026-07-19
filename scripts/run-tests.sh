@@ -14,6 +14,15 @@ clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit -frame
 "$BUILD/native-tests"
 native_status=$?
 
+echo "── Tests des surfaces web (JavaScript) ──"
+if command -v node >/dev/null; then
+  node "$ROOT/Tests/web-tests.mjs"
+  web_status=$?
+else
+  echo "node introuvable — ignoré"
+  web_status=0
+fi
+
 echo "── Tests du bridge Claude (Python) ──"
 if command -v python3 >/dev/null; then
   python3 -m unittest discover -s "$ROOT/Tests" -p 'test_*.py' -v 2>&1 | tail -5
@@ -23,4 +32,4 @@ else
   python_status=0
 fi
 
-exit $(( native_status + python_status ))
+exit $(( native_status + web_status + python_status ))

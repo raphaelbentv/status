@@ -45,4 +45,18 @@ NSDictionary *TMEmptyClaudeAccount(void);
 NSString *TMSupportDirectory(void);
 NSString *TMHistoryPath(void);
 NSArray *TMLoadHistory(void);
+
+// Instant d'épuisement prévu d'une fenêtre, extrapolé de son historique récent — « au rythme
+// actuel, épuisé jeudi à 16 h », l'information qui fait décider là où « 78 % » ne fait que
+// constater. `history` est le format de TMLoadHistory : [{ t: secondes, p: { clé: pourcent } }].
+//
+// NO — et *outAt intact — dans tous les cas où une prévision mentirait :
+//   — moins de deux points, ou moins de TMForecastMinimumSpan entre le premier et le dernier ;
+//   — consommation stable ou en baisse (pente ≤ 0) : rien ne permet d'annoncer un épuisement ;
+//   — épuisement prévu après `resetsAt` : la fenêtre tient jusqu'à sa réinitialisation, ce qui
+//     est une réponse en soi et non une prévision.
+// Les points antérieurs à la dernière réinitialisation sont écartés : la chute de 90 % à 5 %
+// qu'elle provoque donnerait une pente absurde.
+extern const NSTimeInterval TMForecastMinimumSpan;
+BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resetsAt, NSTimeInterval *outAt);
 NSArray *TMAppendHistory(NSArray *claudeWindows, NSArray *openAIWindows, long long now);

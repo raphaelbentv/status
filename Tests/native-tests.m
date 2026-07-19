@@ -415,6 +415,62 @@ static void TestSystemMonitorSnapshot(void) {
     Check([NSJSONSerialization isValidJSONObject:[monitor snapshot]], @"le snapshot est sérialisable tel quel");
 }
 
+// Construit un historique : `values` échantillonnés toutes les `stepSeconds`, le dernier à `endAt`.
+static NSArray *TMHistoryFrom(NSString *key, NSArray<NSNumber *> *values, NSTimeInterval endAt, NSTimeInterval stepSeconds) {
+    NSMutableArray *history = [NSMutableArray array];
+    NSInteger count = values.count;
+    for (NSInteger i = 0; i < count; i++) {
+        [history addObject:@{ @"t": @(endAt - (count - 1 - i) * stepSeconds), @"p": @{ key: values[i] } }];
+    }
+    return history;
+}
+
+static void TestForecastExhaustion(void) {
+    Section(@"TMForecastExhaustion — prévision d'épuisement");
+    const NSTimeInterval now = 1000000, hour = 3600;
+    NSTimeInterval at = 0;
+
+    // 10 %/h sur 5 h, à 50 % : il reste 50 points, soit 5 h.
+    NSArray *steady = TMHistoryFrom(@"claude:weekly", (@[@0, @10, @20, @30, @40, @50]), now, hour);
+    Check(TMForecastExhaustion(steady, @"claude:weekly", now + 100 * hour, &at), @"pente régulière : prévision rendue");
+    Check(fabs(at - (now + 5 * hour)) < 60, @"50 % restants à 10 %/h ⇒ épuisé dans ~5 h");
+
+    // Une fenêtre qui tient jusqu'au bout n'a pas besoin d'être annoncée comme menacée.
+    Check(!TMForecastExhaustion(steady, @"claude:weekly", now + 2 * hour, &at),
+          @"épuisement prévu après le reset : la fenêtre tient, pas de prévision");
+
+    NSArray *flat = TMHistoryFrom(@"k", (@[@40, @40, @40, @40]), now, hour);
+    Check(!TMForecastExhaustion(flat, @"k", now + 100 * hour, &at), @"consommation stable : rien à prévoir");
+    NSArray *falling = TMHistoryFrom(@"k", (@[@60, @50, @40]), now, hour);
+    Check(!TMForecastExhaustion(falling, @"k", now + 100 * hour, &at), @"consommation en baisse : rien à prévoir");
+
+    Check(!TMForecastExhaustion(@[], @"k", now + 100 * hour, &at), @"historique vide");
+    NSArray *single = TMHistoryFrom(@"k", @[@30], now, hour);
+    Check(!TMForecastExhaustion(single, @"k", now + 100 * hour, &at), @"un seul point : aucune pente");
+    NSArray *tooShort = TMHistoryFrom(@"k", (@[@10, @20]), now, 60);  // 1 min d'écart
+    Check(!TMForecastExhaustion(tooShort, @"k", now + 100 * hour, &at),
+          @"moins de 15 min couvertes : trop court pour extrapoler");
+
+    // Le cas piège : l'historique traverse une réinitialisation. Sans filtrage, la chute
+    // 80 → 5 donnerait une pente négative et effacerait une consommation pourtant vive.
+    NSArray *acrossReset = TMHistoryFrom(@"k", (@[@60, @70, @80, @5, @15, @25]), now, hour);
+    Check(TMForecastExhaustion(acrossReset, @"k", now + 100 * hour, &at),
+          @"historique traversant un reset : prévision quand même rendue");
+    Check(fabs(at - (now + 7.5 * hour)) < 300, @"seuls les points post-reset comptent : 75 % à 10 %/h ⇒ ~7,5 h");
+
+    NSArray *otherKey = TMHistoryFrom(@"autre", (@[@10, @20, @30]), now, hour);
+    Check(!TMForecastExhaustion(otherKey, @"k", now + 100 * hour, &at), @"clé absente de l'historique");
+
+    // Points hétérogènes : le collecteur peut écrire une entrée sans la clé attendue.
+    NSArray *withGaps = @[
+        @{ @"t": @(now - 4 * hour), @"p": @{ @"k": @20 } },
+        @{ @"t": @(now - 3 * hour), @"p": @{ @"autre": @99 } },
+        @{ @"t": @(now - 2 * hour), @"p": @{ @"k": @40 } },
+        @{ @"t": @(now), @"p": @{ @"k": @80 } },
+    ];
+    Check(TMForecastExhaustion(withGaps, @"k", now + 100 * hour, &at), @"entrées sans la clé : ignorées, pas fatales");
+}
+
 static NSDictionary *TMProc(NSString *name, uint64_t cpuNs, uint64_t rss) {
     return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss) };
 }
@@ -503,6 +559,7 @@ int main(void) {
         TestRatePerSecond();
         TestCPUPercent();
         TestSystemMonitorSnapshot();
+        TestForecastExhaustion();
         TestTopProcesses();
         TestThresholdFire();
         TestSystemMonitorLive();

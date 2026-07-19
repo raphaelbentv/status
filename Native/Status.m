@@ -493,6 +493,7 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSDictionary *previousProcessSample;
 @property NSTimeInterval previousProcessAt;
 @property NSArray *topProcesses;
+@property BOOL processTickParity;
 // États d'hystérésis des alertes système — un booléen par seuil surveillé.
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
 @property TMKeyboardLock *keyboardLock;
@@ -993,12 +994,14 @@ static const CGFloat TMTitleBarHeight = 28;
 }
 
 - (NSDictionary *)payload {
+    NSArray *history = TMLoadHistory();
     return @{
         @"accounts": @{
             @"openai": self.openAIAccount ?: TMDisconnectedOpenAIAccount(@""),
             @"claude": self.claudeAccount ?: TMEmptyClaudeAccount()
         },
-        @"history": TMLoadHistory(),
+        @"history": history,
+        @"forecasts": [self forecastsFromHistory:history],
         @"prefs": @{
             @"launchAtLogin": @([self launchAtLoginEnabled]),
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
@@ -1014,6 +1017,44 @@ static const CGFloat TMTitleBarHeight = 28;
         @"backoffUntil": self.nextAllowedRefresh ? @(self.nextAllowedRefresh.timeIntervalSince1970 * 1000) : [NSNull null],
         @"refreshing": @(self.refreshing), @"updatedAt": @([[NSDate date] timeIntervalSince1970] * 1000)
     };
+}
+
+// Une prévision par fenêtre exploitable. Le calcul vit ici et non dans le JavaScript : la logique
+// est testée dans native-tests, et les deux surfaces (tableau de bord, popover) la partagent.
+- (NSDictionary *)forecastsFromHistory:(NSArray *)history {
+    NSMutableDictionary *forecasts = [NSMutableDictionary dictionary];
+    NSArray *pairs = @[@[@"claude", self.claudeAccount[@"windows"] ?: @[]],
+                       @[@"openai", self.openAIAccount[@"windows"] ?: @[]]];
+    for (NSArray *pair in pairs) {
+        for (NSDictionary *window in pair[1]) {
+            NSString *key = [NSString stringWithFormat:@"%@:%@", pair[0],
+                             window[@"windowId"] ?: window[@"label"] ?: @""];
+            NSTimeInterval at = 0;
+            if (TMForecastExhaustion(history, key, TMNumber(window[@"resetsAt"]), &at)) {
+                forecasts[key] = @(at * 1000);  // millisecondes : ce que Date attend côté web
+            }
+        }
+    }
+    return forecasts;
+}
+
+// Une fenêtre qui se recharge est une bonne nouvelle actionnable — on peut se remettre au travail.
+// Détection par le couple (identifiant, resetsAt) : quand l'heure de reset avance, la fenêtre a
+// tourné. Le dictionnaire est celui des seuils, déjà purgé des fenêtres périmées.
+- (void)notifyWindowResets:(NSArray *)windows provider:(NSString *)provider {
+    for (NSDictionary *window in windows) {
+        NSString *identifier = window[@"windowId"] ?: window[@"label"];
+        if (!identifier) continue;
+        NSString *key = [NSString stringWithFormat:@"reset:%@:%@", provider, identifier];
+        double resetsAt = TMNumber(window[@"resetsAt"]);
+        double known = [self.notifiedThresholds[key] doubleValue];
+        if (known > 0 && resetsAt > known && TMNumber(window[@"usedPercent"]) < 50) {
+            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · %@ réinitialisée",
+                                         provider, window[@"label"] ?: identifier]
+                                   body:@"La fenêtre est repartie à zéro."];
+        }
+        if (resetsAt > known) self.notifiedThresholds[key] = @(resetsAt);
+    }
 }
 
 - (void)pushData {
@@ -1095,8 +1136,18 @@ static const CGFloat TMTitleBarHeight = 28;
 
     // Le relevé des processus (~500 appels noyau) n'a lieu que surface visible ; le premier tick
     // après ouverture n'a donc pas de delta, comme le réseau au lancement.
-    NSDictionary *processSample = TMProcessSample();
+    // Un tick sur deux : ~500 appels noyau, le poste le plus coûteux du moniteur. Invisible à
+    // l'œil — la liste bouge peu d'une seconde à l'autre — et le coût est divisé par deux.
+    self.processTickParity = !self.processTickParity;
+    NSDictionary *processSample = self.processTickParity ? TMProcessSample() : nil;
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (!processSample) {
+        NSMutableDictionary *skipped = [snapshot mutableCopy];
+        skipped[@"processes"] = self.topProcesses ?: @[];
+        skipped[@"intervalSeconds"] = @([self metricsInterval]);
+        [self pushMetrics:skipped dashboard:dashboardVisible popover:popoverVisible];
+        return;
+    }
     if (processSample && self.previousProcessSample) {
         self.topProcesses = TMTopProcesses(self.previousProcessSample, processSample,
                                            now - self.previousProcessAt, 5);
@@ -1107,13 +1158,17 @@ static const CGFloat TMTitleBarHeight = 28;
     NSMutableDictionary *payload = [snapshot mutableCopy];
     payload[@"processes"] = self.topProcesses ?: @[];
     payload[@"intervalSeconds"] = @([self metricsInterval]);
+    [self pushMetrics:payload dashboard:dashboardVisible popover:popoverVisible];
+}
+
+- (void)pushMetrics:(NSDictionary *)payload dashboard:(BOOL)dashboard popover:(BOOL)popover {
     NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (dashboardVisible) {
+    if (dashboard) {
         NSString *script = [NSString stringWithFormat:@"window.StatusApp && window.StatusApp.updateMetrics && window.StatusApp.updateMetrics(%@);", json];
         [self.webView evaluateJavaScript:script completionHandler:nil];
     }
-    if (popoverVisible) {
+    if (popover) {
         NSString *script = [NSString stringWithFormat:@"window.StatusMenu && window.StatusMenu.updateMetrics && window.StatusMenu.updateMetrics(%@);", json];
         [self.menuWebView evaluateJavaScript:script completionHandler:nil];
     }
@@ -1527,6 +1582,8 @@ static const CGFloat TMTitleBarHeight = 28;
     TMAppendHistory([self claudeWindowsForHistory], [self openAIWindowsForHistory], now);
     [self checkThresholdsForWindows:[self claudeWindowsForHistory] provider:@"Claude"];
     [self checkThresholdsForWindows:[self openAIWindowsForHistory] provider:@"OpenAI"];
+    [self notifyWindowResets:[self claudeWindowsForHistory] provider:@"Claude"];
+    [self notifyWindowResets:[self openAIWindowsForHistory] provider:@"OpenAI"];
 }
 
 // Fires a notification the first time a window crosses 80% and again at 95%, keyed by the window's
