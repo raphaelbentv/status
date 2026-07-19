@@ -33,7 +33,12 @@ xattr -cr "$OUTPUT"
 # retombe sur l'ad-hoc, qui fonctionne mais change d'empreinte à chaque compilation.
 # Voir ./scripts/create-signing-identity.sh
 SIGN_IDENTITY="${STATUS_SIGN_IDENTITY:-Status Local Signing}"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+# Sans -v, délibérément : « -v » ne liste que les identités approuvées comme racine de confiance.
+# Une identité auto-signée locale ne l'est pas, et n'a pas à l'être — on ne cherche pas une chaîne
+# vérifiable par des tiers (ce serait un Developer ID Apple), seulement une empreinte stable d'un
+# build à l'autre, pour que macOS reconnaisse la même app et conserve ses autorisations.
+# codesign, lui, accepte parfaitement une identité non approuvée.
+if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
   codesign --force --deep --sign "$SIGN_IDENTITY" "$OUTPUT"
   echo "signé avec : $SIGN_IDENTITY"
 else

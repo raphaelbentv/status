@@ -59,6 +59,15 @@ lancement au démarrage. Une fois pour toutes :
 Après le premier build signé, ré-accordez l'Accessibilité une dernière fois : la signature
 change d'ad-hoc à stable, donc macOS la redemande — puis plus jamais.
 
+Le certificat apparaît comme non approuvé (`CSSMERR_TP_NOT_TRUSTED`) et **c'est normal** : une
+racine auto-signée n'est pas approuvée par défaut. `codesign` l'accepte quand même, et c'est tout
+ce qu'il faut — on ne cherche pas une chaîne vérifiable par des tiers (ce serait un Developer ID
+Apple), seulement une empreinte stable d'un build à l'autre. Pour le vérifier :
+
+```bash
+codesign -d -r- outputs/Status.app   # l'exigence désignée doit être identique entre deux builds
+```
+
 ## Installer sur un autre Mac
 
 L'app n'est pas notarisée (cela exigerait un compte Apple Developer payant) : Gatekeeper la
