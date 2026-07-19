@@ -1,4 +1,19 @@
 #import "StatusSystemMonitor.h"
+#import <mach/mach.h>
+#import <sys/sysctl.h>
+#import <sys/mount.h>
+#import <ifaddrs.h>
+#import <net/if.h>
+#import <net/if_types.h>
+#import <IOKit/IOKitLib.h>
+#import <IOKit/ps/IOPowerSources.h>
+#import <IOKit/ps/IOPSKeys.h>
+#import <IOKit/storage/IOBlockStorageDriver.h>
+
+// Horloge monotone pour les débits : l'horloge murale peut reculer (NTP), pas celle-ci.
+static NSTimeInterval TMMonotonicNow(void) {
+    return (NSTimeInterval)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
+}
 
 const NSUInteger TMMetricRingCapacity = 300;
 
@@ -118,8 +133,251 @@ BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
 
 @end
 
+#pragma mark - Collecteurs (lisent la machine — pas de tests unitaires, contrat couvert par snapshot)
+
+// CPU par cœur et global, via host_processor_info. L'état précédent des ticks vit dans le bloc.
+typedef struct { uint64_t active, total; } TMCPUTicks;
+
+static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previousTicks) {
+    natural_t coreCount = 0;
+    processor_info_array_t info = NULL;
+    mach_msg_type_number_t infoCount = 0;
+    kern_return_t result = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
+                                               &coreCount, &info, &infoCount);
+    if (result != KERN_SUCCESS || coreCount == 0) return nil;
+
+    BOOL first = previousTicks.length == 0;
+    if (first) previousTicks.length = coreCount * sizeof(TMCPUTicks);
+    TMCPUTicks *previous = previousTicks.mutableBytes;
+    processor_cpu_load_info_t loads = (processor_cpu_load_info_t)info;
+
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    double percentSum = 0;
+    NSUInteger measured = 0;
+    for (natural_t core = 0; core < coreCount; core++) {
+        uint64_t active = (uint64_t)loads[core].cpu_ticks[CPU_STATE_USER]
+                        + (uint64_t)loads[core].cpu_ticks[CPU_STATE_SYSTEM]
+                        + (uint64_t)loads[core].cpu_ticks[CPU_STATE_NICE];
+        uint64_t total = active + (uint64_t)loads[core].cpu_ticks[CPU_STATE_IDLE];
+        double percent;
+        if (!first && TMCPUPercentBetweenTicks(previous[core].active, previous[core].total,
+                                               active, total, &percent)) {
+            values[[NSString stringWithFormat:@"core%u", core]] = @(round(percent));
+            percentSum += percent;
+            measured++;
+        }
+        previous[core] = (TMCPUTicks){ active, total };
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)info, infoCount * sizeof(natural_t));
+
+    // Premier appel : pas encore de delta. nil plutôt qu'un zéro inventé — la famille apparaît
+    // au tick suivant.
+    if (!measured) return nil;
+    values[@"total"] = @(round(percentSum / measured));
+    return values;
+}
+
+// RAM : occupation (active + wired + compressée) et niveau de pression mémoire du noyau.
+static NSDictionary<NSString *, NSNumber *> *TMCollectRAM(void) {
+    vm_statistics64_data_t stats;
+    mach_msg_type_number_t statsCount = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                          (host_info64_t)&stats, &statsCount) != KERN_SUCCESS) return nil;
+    uint64_t totalBytes = 0;
+    size_t totalSize = sizeof(totalBytes);
+    if (sysctlbyname("hw.memsize", &totalBytes, &totalSize, NULL, 0) != 0 || !totalBytes) return nil;
+
+    uint64_t pageSize = vm_kernel_page_size;
+    uint64_t usedBytes = ((uint64_t)stats.active_count + (uint64_t)stats.wire_count
+                        + (uint64_t)stats.compressor_page_count) * pageSize;
+    NSMutableDictionary *values = [NSMutableDictionary dictionaryWithObject:
+        @(round(100.0 * MIN((double)usedBytes / (double)totalBytes, 1.0))) forKey:@"usedPercent"];
+
+    // 1 = normale, 2 = avertissement, 4 = critique. Lisible sans privilège ; absent, tant pis.
+    int pressureLevel = 0;
+    size_t pressureSize = sizeof(pressureLevel);
+    if (sysctlbyname("kern.memorystatus_vm_pressure_level", &pressureLevel, &pressureSize, NULL, 0) == 0) {
+        values[@"pressureLevel"] = @(pressureLevel);
+    }
+    return values;
+}
+
+// GPU : « Device Utilization % » du registre IOAccelerator. Non documenté mais stable depuis des
+// années — et si la clé disparaît, la famille disparaît avec, par construction.
+static NSDictionary<NSString *, NSNumber *> *TMCollectGPU(void) {
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"),
+                                     &iterator) != KERN_SUCCESS) return nil;
+    NSNumber *usage = nil;
+    io_object_t service;
+    while ((service = IOIteratorNext(iterator))) {
+        CFTypeRef statistics = IORegistryEntryCreateCFProperty(service, CFSTR("PerformanceStatistics"),
+                                                               kCFAllocatorDefault, 0);
+        if (statistics && CFGetTypeID(statistics) == CFDictionaryGetTypeID()) {
+            NSDictionary *performance = (__bridge NSDictionary *)statistics;
+            NSNumber *device = performance[@"Device Utilization %"] ?: performance[@"GPU Activity(%)"];
+            if ([device isKindOfClass:NSNumber.class]) usage = device;
+        }
+        if (statistics) CFRelease(statistics);
+        IOObjectRelease(service);
+        if (usage) break;  // un seul GPU sur les machines visées
+    }
+    IOObjectRelease(iterator);
+    return usage ? @{ @"usage": @(round(usage.doubleValue)) } : nil;
+}
+
+// Réseau : somme des compteurs de toutes les interfaces physiques, débit par delta.
+static NSDictionary<NSString *, NSNumber *> *TMCollectNetwork(uint64_t *previousRx, uint64_t *previousTx,
+                                                              NSTimeInterval *previousAt) {
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0) return nil;
+    uint64_t rx = 0, tx = 0;
+    for (struct ifaddrs *interface = interfaces; interface; interface = interface->ifa_next) {
+        if (!interface->ifa_addr || interface->ifa_addr->sa_family != AF_LINK) continue;
+        if (interface->ifa_flags & IFF_LOOPBACK) continue;
+        const struct if_data *data = interface->ifa_data;
+        if (!data) continue;
+        rx += data->ifi_ibytes;
+        tx += data->ifi_obytes;
+    }
+    freeifaddrs(interfaces);
+
+    NSTimeInterval now = TMMonotonicNow();
+    double rxRate, txRate;
+    BOOL valid = *previousAt > 0
+              && TMRatePerSecond(*previousRx, rx, now - *previousAt, &rxRate)
+              && TMRatePerSecond(*previousTx, tx, now - *previousAt, &txRate);
+    *previousRx = rx; *previousTx = tx; *previousAt = now;
+    // Compteur 32 bits rebouclé ou premier appel : on saute ce point plutôt qu'inventer un pic.
+    if (!valid) return nil;
+    return @{ @"rxBytesPerSec": @(round(rxRate)), @"txBytesPerSec": @(round(txRate)) };
+}
+
+// Disque : espace du volume racine (statfs) + débits E/S cumulés de tous les pilotes de stockage.
+static NSDictionary<NSString *, NSNumber *> *TMCollectDisk(uint64_t *previousRead, uint64_t *previousWrite,
+                                                           NSTimeInterval *previousAt) {
+    struct statfs volume;
+    if (statfs("/", &volume) != 0) return nil;
+    uint64_t totalBytes = (uint64_t)volume.f_blocks * volume.f_bsize;
+    uint64_t freeBytes = (uint64_t)volume.f_bfree * volume.f_bsize;
+    if (!totalBytes) return nil;
+    NSMutableDictionary *values = [NSMutableDictionary dictionaryWithObject:
+        @(round(100.0 * (double)(totalBytes - freeBytes) / (double)totalBytes)) forKey:@"usedPercent"];
+
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(kIOBlockStorageDriverClass),
+                                     &iterator) == KERN_SUCCESS) {
+        uint64_t read = 0, write = 0;
+        io_object_t driver;
+        while ((driver = IOIteratorNext(iterator))) {
+            CFTypeRef statistics = IORegistryEntryCreateCFProperty(driver, CFSTR(kIOBlockStorageDriverStatisticsKey),
+                                                                   kCFAllocatorDefault, 0);
+            if (statistics && CFGetTypeID(statistics) == CFDictionaryGetTypeID()) {
+                NSDictionary *stats = (__bridge NSDictionary *)statistics;
+                read += [stats[@(kIOBlockStorageDriverStatisticsBytesReadKey)] unsignedLongLongValue];
+                write += [stats[@(kIOBlockStorageDriverStatisticsBytesWrittenKey)] unsignedLongLongValue];
+            }
+            if (statistics) CFRelease(statistics);
+            IOObjectRelease(driver);
+        }
+        IOObjectRelease(iterator);
+
+        NSTimeInterval now = TMMonotonicNow();
+        double readRate, writeRate;
+        if (*previousAt > 0
+            && TMRatePerSecond(*previousRead, read, now - *previousAt, &readRate)
+            && TMRatePerSecond(*previousWrite, write, now - *previousAt, &writeRate)) {
+            values[@"readBytesPerSec"] = @(round(readRate));
+            values[@"writeBytesPerSec"] = @(round(writeRate));
+        }
+        *previousRead = read; *previousWrite = write; *previousAt = now;
+    }
+    return values;  // l'espace disque reste utile même si les débits manquent ce tick-ci
+}
+
+#pragma mark - Capteurs (température via HID privé, batterie via IOPS public)
+
+// Les capteurs de température Apple Silicon ne sont accessibles que par l'event system HID, via
+// des fonctions IOKit non déclarées dans les en-têtes publics. Même famille de compromis que le
+// GPU : utilisées par tout l'écosystème open source, à dégradation silencieuse si Apple ferme.
+typedef struct __IOHIDEventSystemClient *TMHIDClientRef;
+typedef struct __IOHIDServiceClient *TMHIDServiceRef;
+typedef struct __IOHIDEvent *TMHIDEventRef;
+extern TMHIDClientRef IOHIDEventSystemClientCreate(CFAllocatorRef allocator);
+extern int IOHIDEventSystemClientSetMatching(TMHIDClientRef client, CFDictionaryRef matching);
+extern CFArrayRef IOHIDEventSystemClientCopyServices(TMHIDClientRef client);
+extern TMHIDEventRef IOHIDServiceClientCopyEvent(TMHIDServiceRef service, int64_t type,
+                                                 int32_t options, int64_t timestamp);
+extern double IOHIDEventGetFloatValue(TMHIDEventRef event, int32_t field);
+static const int64_t TMHIDEventTypeTemperature = 15;
+static const int32_t TMHIDEventFieldTemperature = 15 << 16;
+
+static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+
+    // Batterie — public, fiable. Absente sur un Mac de bureau : la clé manque, rien de plus.
+    CFTypeRef powerInfo = IOPSCopyPowerSourcesInfo();
+    if (powerInfo) {
+        CFArrayRef sources = IOPSCopyPowerSourcesList(powerInfo);
+        if (sources) {
+            for (CFIndex i = 0; i < CFArrayGetCount(sources); i++) {
+                NSDictionary *description = (__bridge NSDictionary *)
+                    IOPSGetPowerSourceDescription(powerInfo, CFArrayGetValueAtIndex(sources, i));
+                NSNumber *current = description[@kIOPSCurrentCapacityKey];
+                NSNumber *max = description[@kIOPSMaxCapacityKey];
+                if (current && max.doubleValue > 0) {
+                    values[@"batteryPercent"] = @(round(100.0 * current.doubleValue / max.doubleValue));
+                    values[@"batteryCharging"] = @([description[@kIOPSIsChargingKey] boolValue]);
+                    break;
+                }
+            }
+            CFRelease(sources);
+        }
+        CFRelease(powerInfo);
+    }
+
+    // Température — moyenne des capteurs HID plausibles. PrimaryUsagePage 0xff00 (AppleVendor),
+    // PrimaryUsage 5 : les capteurs thermiques.
+    TMHIDClientRef client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+    if (client) {
+        NSDictionary *matching = @{ @"PrimaryUsagePage": @(0xff00), @"PrimaryUsage": @5 };
+        IOHIDEventSystemClientSetMatching(client, (__bridge CFDictionaryRef)matching);
+        CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
+        if (services) {
+            double sum = 0;
+            NSUInteger sensorCount = 0;
+            for (CFIndex i = 0; i < CFArrayGetCount(services); i++) {
+                TMHIDServiceRef service = (TMHIDServiceRef)CFArrayGetValueAtIndex(services, i);
+                TMHIDEventRef event = IOHIDServiceClientCopyEvent(service, TMHIDEventTypeTemperature, 0, 0);
+                if (!event) continue;
+                double celsius = IOHIDEventGetFloatValue(event, TMHIDEventFieldTemperature);
+                CFRelease(event);
+                // Filtre de plausibilité : les capteurs fantômes rendent 0 ou des valeurs folles.
+                if (celsius > 10 && celsius < 120) { sum += celsius; sensorCount++; }
+            }
+            CFRelease(services);
+            if (sensorCount) values[@"tempC"] = @(round(sum / sensorCount));
+        }
+        CFRelease(client);
+    }
+
+    return values.count ? values : nil;
+}
+
+#pragma mark - Assemblage
+
 TMSystemMonitor *TMSystemMonitorCreate(void) {
-    // Les collecteurs réels arrivent avec la tâche suivante ; brancher un moniteur vide serait
-    // pire que ne rien brancher.
-    return nil;
+    // L'état inter-échantillons de chaque collecteur vit dans les captures des blocs.
+    NSMutableData *cpuTicks = [NSMutableData data];
+    __block uint64_t networkRx = 0, networkTx = 0, diskRead = 0, diskWrite = 0;
+    __block NSTimeInterval networkAt = 0, diskAt = 0;
+
+    return [[TMSystemMonitor alloc] initWithCollectors:@{
+        @"cpu":     ^{ return TMCollectCPU(cpuTicks); },
+        @"gpu":     ^{ return TMCollectGPU(); },
+        @"ram":     ^{ return TMCollectRAM(); },
+        @"network": ^{ return TMCollectNetwork(&networkRx, &networkTx, &networkAt); },
+        @"disk":    ^{ return TMCollectDisk(&diskRead, &diskWrite, &diskAt); },
+        @"sensors": ^{ return TMCollectSensors(); },
+    } familyOrder:@[@"cpu", @"gpu", @"ram", @"network", @"disk", @"sensors"]];
 }

@@ -415,6 +415,25 @@ static void TestSystemMonitorSnapshot(void) {
     Check([NSJSONSerialization isValidJSONObject:[monitor snapshot]], @"le snapshot est sérialisable tel quel");
 }
 
+// Fumée sur les collecteurs réels — même esprit que TestAwake : on interroge la vraie machine,
+// pas un mock. On ne vérifie que le contrat (familles plausibles, JSON valide), pas les valeurs.
+static void TestSystemMonitorLive(void) {
+    Section(@"TMSystemMonitorCreate — collecteurs réels (fumée)");
+    TMSystemMonitor *monitor = TMSystemMonitorCreate();
+    Check(monitor != nil, @"le moniteur de production se crée");
+    [monitor sample];
+    usleep(200000);  // les deltas (CPU, réseau, disque) ont besoin de deux points espacés
+    [monitor sample];
+    NSDictionary *snapshot = [monitor snapshot];
+    NSArray *families = snapshot[@"families"];
+    NSArray *ids = [families valueForKey:@"id"];
+    Check([ids containsObject:@"cpu"], @"le CPU répond après deux échantillons");
+    Check([ids containsObject:@"ram"], @"la RAM répond");
+    Check([ids containsObject:@"disk"], @"le disque répond");
+    Check([NSJSONSerialization isValidJSONObject:snapshot], @"snapshot réel sérialisable");
+    printf("  familles présentes : %s\n", [[ids componentsJoinedByString:@", "] UTF8String]);
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -437,6 +456,7 @@ int main(void) {
         TestRatePerSecond();
         TestCPUPercent();
         TestSystemMonitorSnapshot();
+        TestSystemMonitorLive();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);
