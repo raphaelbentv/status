@@ -66,10 +66,24 @@ static TMSeverity TMSeverityForPercent(double used) {
     return TMSeverityNormal;
 }
 
+// Palette de la barre des menus — distincte de celle de l'interface, et pour une raison mesurée :
+// le cyan #67E8F9 et l'ambre #FBBF24 de l'app tombent à 1,3:1 et 1,5:1 de contraste sur une barre
+// des menus claire, donc invisibles. Ces quatre teintes-ci passent le seuil de 3:1 sur fond clair
+// ET sombre. La couleur porte l'identité du fournisseur ; l'urgence la remplace quand elle parle.
+static NSColor *TMMenuBarInk(uint32_t rgb) {
+    return [NSColor colorWithSRGBRed:((rgb >> 16) & 0xFF) / 255.0
+                               green:((rgb >> 8) & 0xFF) / 255.0
+                                blue:(rgb & 0xFF) / 255.0 alpha:1];
+}
+#define TM_INK_OPENAI   TMMenuBarInk(0x0891B2)  // cyan foncé
+#define TM_INK_CLAUDE   TMMenuBarInk(0x8B5CF6)  // violet
+#define TM_INK_WARN     TMMenuBarInk(0xB45309)  // ambre foncé
+#define TM_INK_CRITICAL TMMenuBarInk(0xDC2626)  // rouge
+
 static NSColor *TMSeverityColor(TMSeverity severity) {
     switch (severity) {
-        case TMSeverityCritical: return [NSColor colorWithSRGBRed:0.98 green:0.44 blue:0.52 alpha:1];  // #FB7185
-        case TMSeverityWarn:     return [NSColor colorWithSRGBRed:0.98 green:0.75 blue:0.14 alpha:1];  // #FBBF24
+        case TMSeverityCritical: return TM_INK_CRITICAL;
+        case TMSeverityWarn:     return TM_INK_WARN;
         default:                 return NSColor.blackColor;  // ignoré : rendu en template
     }
 }
@@ -77,13 +91,19 @@ static NSColor *TMSeverityColor(TMSeverity severity) {
 // L'icône EST la jauge : l'anneau se remplit avec la consommation, au lieu d'un pictogramme
 // décoratif qui n'apprend rien. Lecture périphérique par la forme, lecture précise par le texte.
 //
-// Template en régime normal, pour que macOS l'inverse en clair/sombre et au survol. En alerte on
-// quitte le mode template : la couleur encode alors l'urgence, pas la marque — le seul cas qui
-// justifie de désobéir au thème. Ambre et rouge restent lisibles sur les deux fonds.
-static NSImage *TMGaugeIcon(double fraction, BOOL hasValue, TMSeverity severity) {
+// `providerInk` colore l'anneau à l'identité du fournisseur affiché — on sait d'un coup d'œil si
+// le chiffre parle d'OpenAI ou de Claude, ce que la forme seule ne disait pas. L'urgence prend le
+// dessus quand elle survient : à ce moment-là, savoir *qui* importe moins que savoir *que*.
+//
+// nil ⇒ rendu en template, et macOS inverse l'icône selon le thème et la surbrillance. C'est le
+// cas quand il n'y a rien à identifier : métrique système, ou pas encore de valeur. La couleur ne
+// sert jamais de décor ici — sa présence signifie qu'elle porte une information.
+static NSImage *TMGaugeIcon(double fraction, BOOL hasValue, TMSeverity severity, NSColor *providerInk) {
     const CGFloat side = 18, radius = 6.3, lineWidth = 2.0;
     NSPoint center = NSMakePoint(side / 2, side / 2);
-    NSColor *ink = TMSeverityColor(severity);
+    BOOL colored = providerInk != nil || severity != TMSeverityNormal;
+    NSColor *ink = (severity != TMSeverityNormal) ? TMSeverityColor(severity)
+                 : providerInk ?: NSColor.blackColor;
 
     NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(side, side)];
     [image lockFocus];
@@ -93,9 +113,11 @@ static NSImage *TMGaugeIcon(double fraction, BOOL hasValue, TMSeverity severity)
     // Elle reste neutre même en alerte. Teintée d'ambre ou de rouge comme l'arc, elle ne s'en
     // distinguait plus que par l'alpha, et l'anneau se lisait uniformément plein — le niveau
     // devenait illisible juste au moment où il compte. Le gris moyen tient sur les deux fonds.
-    NSColor *trackInk = (severity == TMSeverityNormal)
+    NSColor *trackInk = !colored
         ? [ink colorWithAlphaComponent:0.3]                 // template : seul l'alpha compte
-        : [NSColor colorWithWhite:0.55 alpha:0.6];
+        : (severity == TMSeverityNormal
+           ? [ink colorWithAlphaComponent:0.22]             // teintée : la piste reste de la famille
+           : [NSColor colorWithWhite:0.55 alpha:0.6]);
     NSBezierPath *track = [NSBezierPath bezierPath];
     [track appendBezierPathWithArcWithCenter:center radius:radius startAngle:0 endAngle:360];
     track.lineWidth = lineWidth;
@@ -124,7 +146,7 @@ static NSImage *TMGaugeIcon(double fraction, BOOL hasValue, TMSeverity severity)
     }
 
     [image unlockFocus];
-    image.template = (severity == TMSeverityNormal);
+    image.template = !colored;
     return image;
 }
 
@@ -602,7 +624,7 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     // L'icône n'est pas posée ici : updateStatusMenu la redessine à chaque cycle, puisqu'elle
     // représente la valeur courante. Un tiret le temps de la première lecture.
-    self.statusItem.button.image = TMGaugeIcon(0, NO, TMSeverityNormal);
+    self.statusItem.button.image = TMGaugeIcon(0, NO, TMSeverityNormal, nil);
     self.statusItem.button.imagePosition = NSImageLeading;
     self.statusItem.button.target = self;
     self.statusItem.button.action = @selector(toggleStatusPopover:);
@@ -741,13 +763,14 @@ static const CGFloat TMTitleBarHeight = 28;
     double shown = 0;
     BOOL hasValue = NO;
     NSString *label = nil;
+    NSColor *providerInk = nil;  // nil ⇒ template : rien à identifier
 
     if ([metric isEqualToString:@"claude:session"]) {
-        hasValue = hasClaudeSession; shown = claudeSession;
+        hasValue = hasClaudeSession; shown = claudeSession; providerInk = TM_INK_CLAUDE;
     } else if ([metric isEqualToString:@"claude:weekly"]) {
-        hasValue = hasClaudeWeekly; shown = claudeWeekly;
+        hasValue = hasClaudeWeekly; shown = claudeWeekly; providerInk = TM_INK_CLAUDE;
     } else if ([metric isEqualToString:@"openai:weekly"]) {
-        hasValue = hasOpenAIWeekly; shown = openAIWeekly;
+        hasValue = hasOpenAIWeekly; shown = openAIWeekly; providerInk = TM_INK_OPENAI;
     } else if ([metric hasPrefix:@"system:"]) {
         // Métriques système : mêmes valeurs que l'onglet Moniteur, rafraîchies par metricsTick.
         NSMutableDictionary *nowById = [NSMutableDictionary dictionary];
@@ -757,25 +780,34 @@ static const CGFloat TMTitleBarHeight = 28;
         label = [metric isEqualToString:@"system:temp"] ? @"temp" : @"cpu";
     } else {
         // « lowest » = la marge la plus faible, donc le pourcentage consommé le plus élevé.
+        // La couleur suit la fenêtre gagnante : elle change avec elle, ce qui est précisément
+        // l'information que ce mode doit transmettre.
         NSArray *candidates = @[
-            @[@(hasClaudeSession), @(claudeSession), @"C 5h"],
-            @[@(hasClaudeWeekly), @(claudeWeekly), @"C sem"],
-            @[@(hasOpenAIWeekly), @(openAIWeekly), @"AI sem"],
+            @[@(hasClaudeSession), @(claudeSession), @"C 5h", TM_INK_CLAUDE],
+            @[@(hasClaudeWeekly), @(claudeWeekly), @"C sem", TM_INK_CLAUDE],
+            @[@(hasOpenAIWeekly), @(openAIWeekly), @"AI sem", TM_INK_OPENAI],
         ];
         for (NSArray *candidate in candidates) {
             if (![candidate[0] boolValue]) continue;
             double value = [candidate[1] doubleValue];
-            if (!hasValue || value > shown) { hasValue = YES; shown = value; label = candidate[2]; }
+            if (!hasValue || value > shown) {
+                hasValue = YES; shown = value; label = candidate[2]; providerInk = candidate[3];
+            }
         }
     }
 
-    TMSeverity severity = hasValue ? TMSeverityForPercent(shown) : TMSeverityNormal;
+    // Les seuils d'alerte sont ceux d'un quota, pas d'une machine : un CPU à 85 % est un CPU qui
+    // travaille, pas une urgence. Les vraies alertes système passent par les notifications, avec
+    // leurs propres seuils. Colorer l'icône en ambre ici crierait au loup en permanence.
+    BOOL isQuotaMetric = ![metric hasPrefix:@"system:"];
+    TMSeverity severity = (hasValue && isQuotaMetric) ? TMSeverityForPercent(shown) : TMSeverityNormal;
+    if (!hasValue) providerInk = nil;  // le tiret « pas de donnée » n'identifie personne
     NSString *suffix = [metric isEqualToString:@"system:temp"] ? @"°" : @"%";
     NSString *title = hasValue
         ? [NSString stringWithFormat:@" %@%ld%@", label ? [label stringByAppendingString:@" "] : @"", (long)(shown + 0.5), suffix]
         : @" --";
 
-    self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity);
+    self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, providerInk);
     self.statusItem.button.image.accessibilityDescription = hasValue
         ? [NSString stringWithFormat:@"Quota %ld %% consommé", (long)(shown + 0.5)]
         : @"Quota indisponible";
