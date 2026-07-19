@@ -8,6 +8,7 @@
 #import "StatusQuota.h"
 #import "StatusAwake.h"
 #import "StatusSystemMonitor.h"
+#import "StatusKeyboardLock.h"
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -472,6 +473,7 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSArray *topProcesses;
 // États d'hystérésis des alertes système — un booléen par seuil surveillé.
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
+@property TMKeyboardLock *keyboardLock;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
 @property TMCodexAppServer *codexServer;
@@ -519,6 +521,9 @@ static const CGFloat TMTitleBarHeight = 28;
     [self buildStatusItem];
     [self scheduleRefresh];
     [self startSystemMonitor];
+    self.keyboardLock = [TMKeyboardLock new];
+    __weak typeof(self) weakLockSelf = self;
+    self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
     [self requestNotificationAuthorization];
     [self observeWakeNotifications];
     [self.window makeKeyAndOrderFront:nil];
@@ -535,6 +540,7 @@ static const CGFloat TMTitleBarHeight = 28;
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
+    [self.keyboardLock forceUnlock];  // même logique : le tap mourrait aussi, mais soyons explicites
     [self.metricsTimer invalidate];
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
@@ -903,6 +909,10 @@ static const CGFloat TMTitleBarHeight = 28;
         [NSUserDefaults.standardUserDefaults setObject:value forKey:@"menuBarMetric"];
         [self pushData];
     }
+    if ([action isEqualToString:@"toggleKeyboardLock"]) {
+        [self.statusPopover close];  // l'overlay va tout recouvrir ; un popover transient resterait orphelin
+        [self.keyboardLock toggle];
+    }
     if ([action isEqualToString:@"setMetricsInterval"]) {
         [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:@"metricsIntervalSeconds"];
         [self startSystemMonitor];  // recrée le timer à la nouvelle cadence
@@ -964,7 +974,11 @@ static const CGFloat TMTitleBarHeight = 28;
             @"metricsInterval": @([self metricsInterval]),
             @"notificationsAuthorized": @(self.notificationsAuthorized)
         },
-        @"tools": @{ @"awake": @{ @"active": @(self.awake.isEnabled) } },
+        @"tools": @{
+        @"awake": @{ @"active": @(self.awake.isEnabled) },
+        @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
+                                    : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
+    },
         @"backoffUntil": self.nextAllowedRefresh ? @(self.nextAllowedRefresh.timeIntervalSince1970 * 1000) : [NSNull null],
         @"refreshing": @(self.refreshing), @"updatedAt": @([[NSDate date] timeIntervalSince1970] * 1000)
     };

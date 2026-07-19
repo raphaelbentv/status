@@ -35,3 +35,18 @@ typedef NS_ENUM(NSInteger, TMLockState) {
 // Déverrouiller est toujours possible, même sans permission : elle peut être révoquée pendant le
 // verrou, et l'utilisateur ne doit pas se retrouver enfermé pour autant.
 TMLockState TMLockStateAfterToggle(TMLockState current, BOOL permissionGranted);
+
+#pragma mark - Contrôleur (tap HID + overlay — lit la machine, pas de tests unitaires)
+
+// Le verrou lui-même. `toggle` applique TMLockStateAfterToggle : il demande la permission
+// Accessibilité au premier usage (macOS affiche le panneau), verrouille si elle est accordée,
+// passe en Blocked sinon. Le clavier n'est intercepté qu'à l'état Locked ; le déverrouillage se
+// fait par maintien du clic sur l'overlay (TMHoldRequiredSeconds) ou par le garde-fou
+// (TMLockBackstopSeconds).
+@interface TMKeyboardLock : NSObject
+@property (readonly) TMLockState state;
+// Notifié sur le thread principal à chaque changement, y compris la levée automatique.
+@property (copy) void (^ _Nullable stateChanged)(TMLockState state);
+- (void)toggle;
+- (void)forceUnlock;  // arrêt de l'app : relâcher le tap explicitement
+@end

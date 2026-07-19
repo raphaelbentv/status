@@ -101,11 +101,13 @@ function provider(id,name,account){
   const sessionValue=used(session),weeklyValue=used(weekly),fableValue=used(fable);
   return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${sessionValue===null?'empty-value':''}">${sessionValue===null?'—':sessionValue+'<span class="unit">%</span>'}</div><div class="window">5h</div><div class="reset">reset ${reset(session)}</div><div class="weekly"><div class="weekly-head"><span>semaine</span><strong>${weeklyValue===null?'—':weeklyValue+' %'}</strong></div><div class="rail"><i style="width:${weeklyValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="weekly-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(sessionValue)}</section>`;
 }
-// La tâche 4 ajoutera ici le bouton du verrou clavier.
 function tools(t){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
-  const awake=t?.awake||{};
-  return btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active);
+  const awake=t?.awake||{},lock=t?.keyboardLock||{};
+  // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
+  // après l'avoir accordée dans Réglages système.
+  return btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
+    +btn('toggleKeyboardLock','⌨',lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
 }
 let lastData=null;
 function renderMenu(data){
