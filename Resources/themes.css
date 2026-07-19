@@ -16,7 +16,6 @@
   --grid:rgba(103,232,249,.045);
   --font:ui-monospace,"SF Mono","Menlo",monospace;
   --radius:2px;
-  --rail-fill:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);
 }
 
 [data-theme="phosphore"]{
@@ -44,9 +43,6 @@
   --grid:rgba(255,60,220,.05);
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --radius:0px;
-  --rail-fill:linear-gradient(90deg,var(--provider),color-mix(in srgb,var(--provider) 55%,#FF9E5C 45%));
-  --value-glow:0 0 14px color-mix(in srgb,var(--provider) 70%,transparent);
-  --edge-glow:0 0 8px color-mix(in srgb,var(--provider) 55%,transparent);
 }
 
 [data-theme="circuit"]{
@@ -60,8 +56,6 @@
   --grid:rgba(180,255,60,.04);
   --font:ui-monospace,"SF Mono","Menlo",monospace;
   --radius:0px;
-  --rail-fill:var(--provider);
-  --edge-glow:0 0 6px color-mix(in srgb,var(--provider) 60%,transparent);
   --clip:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px));
 }
 
@@ -78,7 +72,6 @@
   --radius:14px;
   --bg-image:radial-gradient(55% 55% at 10% -10%,rgba(80,180,255,.2),transparent 60%),radial-gradient(60% 55% at 100% 20%,rgba(200,110,255,.18),transparent 60%),radial-gradient(60% 55% at 40% 120%,rgba(255,120,190,.14),transparent 60%);
   --bg-size:auto;
-  --rail-fill:linear-gradient(90deg,color-mix(in srgb,var(--provider) 55%,white 45%),var(--provider));
 }
 
 [data-theme="ion"]{
@@ -92,9 +85,51 @@
   --grid:transparent;
   --font:ui-monospace,"SF Mono","Menlo",monospace;
   --radius:0px;
-  --rail-fill:var(--provider);
-  --value-glow:0 0 16px color-mix(in srgb,var(--provider) 70%,transparent);
-  --edge-glow:0 0 12px color-mix(in srgb,var(--provider) 30%,transparent) inset;
   --bg-image:none;
   --bg-size:auto;
+}
+
+/* ── Rendu dépendant de --provider ──────────────────────────────────────────
+   --provider n'est jamais un jeton de thème : il n'est défini qu'en ligne, par
+   instance (style="--provider:…" sur .provider / .quota-card). Une propriété
+   personnalisée déclarée ici (:root/[data-theme]) calcule ses var() internes à
+   SON propre niveau de déclaration, où --provider n'existe pas — un alias du
+   genre --rail-fill:…var(--provider)… se figerait donc invalide avant même
+   d'atteindre l'élément qui le lit. On cible donc directement les sélecteurs
+   consommateurs ci-dessous, où --provider est réellement hérité. Le préfixe
+   html[data-theme="…"] n'est pas qu'un scope de thème : sa spécificité plus
+   élevée l'emporte sur les .rail i/.quota-track i déjà déclarés dans les
+   <style> de menubar.html/dashboard.html, quel que soit l'ordre des feuilles. */
+
+html[data-theme="blueprint"] .rail i, html[data-theme="blueprint"] .quota-track i,
+html[data-theme="phosphore"] .rail i, html[data-theme="phosphore"] .quota-track i,
+html:not([data-theme]) .rail i, html:not([data-theme]) .quota-track i{
+  background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);
+}
+
+html[data-theme="synthwave"] .rail i, html[data-theme="synthwave"] .quota-track i{
+  background:linear-gradient(90deg,var(--provider),color-mix(in srgb,var(--provider) 55%,#FF9E5C 45%));
+  box-shadow:0 0 8px color-mix(in srgb,var(--provider) 55%,transparent);
+}
+html[data-theme="synthwave"] .name, html[data-theme="synthwave"] .value, html[data-theme="synthwave"] .subgauge-head strong,
+html[data-theme="synthwave"] .hero-value, html[data-theme="synthwave"] .quota-top strong{
+  text-shadow:0 0 14px color-mix(in srgb,var(--provider) 70%,transparent);
+}
+
+html[data-theme="circuit"] .rail i, html[data-theme="circuit"] .quota-track i{
+  background:var(--provider);
+  box-shadow:0 0 6px color-mix(in srgb,var(--provider) 60%,transparent);
+}
+
+html[data-theme="holograme"] .rail i, html[data-theme="holograme"] .quota-track i{
+  background:linear-gradient(90deg,color-mix(in srgb,var(--provider) 55%,white 45%),var(--provider));
+}
+
+html[data-theme="ion"] .rail i, html[data-theme="ion"] .quota-track i{
+  background:var(--provider);
+  box-shadow:0 0 12px color-mix(in srgb,var(--provider) 30%,transparent) inset;
+}
+html[data-theme="ion"] .name, html[data-theme="ion"] .value, html[data-theme="ion"] .subgauge-head strong,
+html[data-theme="ion"] .hero-value, html[data-theme="ion"] .quota-top strong{
+  text-shadow:0 0 16px color-mix(in srgb,var(--provider) 70%,transparent);
 }
