@@ -445,11 +445,11 @@ static const CGFloat TMTitleBarHeight = 28;
 @implementation TMTitleBarDragView
 - (BOOL)mouseDownCanMoveWindow { return YES; }
 // INSTRUMENTATION TEMPORAIRE — à retirer
-// Le déplacement implicite via mouseDownCanMoveWindow ne fonctionne pas sur cette machine alors
-// que toute la chaîne est valide (hitTest correct, movable=YES, styleMask complet). On passe par
-// l'API explicite : même mécanique que la barre de titre native, mais déclenchée par nous.
+// Le déplacement implicite (mouseDownCanMoveWindow) ne déclenche rien sur macOS 27 bêta alors que
+// toute la chaîne est valide — vérifié : hitTest correct, movable=YES, styleMask complet, et le
+// mouseDown arrive bien jusqu'ici. Le chemin explicite, lui, fonctionne : même mécanique que la
+// barre de titre native, mais déclenchée par nous.
 - (void)mouseDown:(NSEvent *)event {
-    NSLog(@"[DRAG] mouseDown reçu %@ -> performWindowDragWithEvent", NSStringFromPoint(event.locationInWindow));
     [self.window performWindowDragWithEvent:event];
 }
 @end
@@ -580,26 +580,6 @@ static const CGFloat TMTitleBarHeight = 28;
     titleBar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;  // collée en haut au redimensionnement
     [content addSubview:titleBar];
     self.window.contentView = content;
-
-    // INSTRUMENTATION TEMPORAIRE — à retirer
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        NSLog(@"[DRAG] window.frame=%@ movable=%d styleMask=%lu",
-              NSStringFromRect(self.window.frame), self.window.movable, (unsigned long)self.window.styleMask);
-        NSLog(@"[DRAG] contentView.frame=%@ classe=%@",
-              NSStringFromRect(self.window.contentView.frame), self.window.contentView.class);
-        for (NSView *sub in self.window.contentView.subviews) {
-            NSLog(@"[DRAG]   sous-vue %@ frame=%@", sub.class, NSStringFromRect(sub.frame));
-        }
-        // Qui reçoit un clic dans la bande du titre ? Testé par programme : la souris n'y passe pas
-        // forcément, et c'est le seul point qui tranche.
-        NSPoint dansLaBande = NSMakePoint(600, 746);
-        NSView *cible = [self.window.contentView hitTest:dansLaBande];
-        NSLog(@"[DRAG] hitTest(600,746) dans la bande -> %@ | mouseDownCanMoveWindow=%d",
-              cible.class, cible.mouseDownCanMoveWindow);
-        NSView *cibleMilieu = [self.window.contentView hitTest:NSMakePoint(100, 400)];
-        NSLog(@"[DRAG] hitTest(100,400) sidebar -> %@ | mouseDownCanMoveWindow=%d",
-              cibleMilieu.class, cibleMilieu.mouseDownCanMoveWindow);
-    });
 
     NSURL *url = [NSBundle.mainBundle URLForResource:@"dashboard" withExtension:@"html"];
     [self.webView loadFileURL:url allowingReadAccessToURL:url.URLByDeletingLastPathComponent];
