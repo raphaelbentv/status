@@ -10,6 +10,7 @@
 #import "StatusQuota.h"
 #import "StatusAwake.h"
 #import "StatusKeyboardLock.h"
+#import "StatusSystemMonitor.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
 
 static int gFailures = 0;
@@ -340,6 +341,80 @@ static void TestLockStateMachine(void) {
           @"permission révoquée pendant le verrou : on sort quand même");
 }
 
+#pragma mark - Moniteur système
+
+static void TestMetricRing(void) {
+    Section(@"TMMetricRing — fenêtre glissante");
+    TMMetricRing *ring = [[TMMetricRing alloc] initWithCapacity:3];
+    CheckEqual(ring.series, @[], @"anneau neuf : série vide");
+    [ring push:1]; [ring push:2];
+    CheckEqual(ring.series, (@[@1.0, @2.0]), @"avant remplissage : série partielle, ordonnée");
+    Check(ring.count == 2, @"count suit les insertions");
+    [ring push:3]; [ring push:4];
+    CheckEqual(ring.series, (@[@2.0, @3.0, @4.0]), @"plein : écrase le plus ancien, ordre préservé");
+    Check(ring.count == 3, @"count plafonne à la capacité");
+    [ring push:5]; [ring push:6]; [ring push:7];
+    CheckEqual(ring.series, (@[@5.0, @6.0, @7.0]), @"après plusieurs tours : toujours les N derniers");
+}
+
+static void TestRatePerSecond(void) {
+    Section(@"TMRatePerSecond — compteurs cumulatifs");
+    double rate = -1;
+    Check(TMRatePerSecond(1000, 3000, 2.0, &rate) && rate == 1000.0, @"cas nominal : (3000-1000)/2s");
+    Check(!TMRatePerSecond(3000, 1000, 1.0, &rate), @"compteur qui recule : échantillon écarté");
+    Check(!TMRatePerSecond(1000, 2000, 0, &rate), @"intervalle nul : écarté, pas de division par zéro");
+    Check(!TMRatePerSecond(1000, 2000, -1.0, &rate), @"intervalle négatif : écarté");
+    Check(TMRatePerSecond(500, 500, 1.0, &rate) && rate == 0.0, @"compteur immobile : débit nul, pas une erreur");
+}
+
+static void TestCPUPercent(void) {
+    Section(@"TMCPUPercentBetweenTicks — ticks vers pourcentage");
+    double pct = -1;
+    Check(TMCPUPercentBetweenTicks(100, 400, 150, 500, &pct) && pct == 50.0, @"50 actifs sur 100 écoulés = 50%");
+    Check(TMCPUPercentBetweenTicks(0, 0, 0, 100, &pct) && pct == 0.0, @"aucun tick actif = 0%");
+    Check(TMCPUPercentBetweenTicks(0, 0, 100, 100, &pct) && pct == 100.0, @"tous actifs = 100%");
+    Check(!TMCPUPercentBetweenTicks(100, 400, 150, 400, &pct), @"total figé : écarté");
+    Check(!TMCPUPercentBetweenTicks(400, 500, 100, 600, &pct), @"compteur actif qui recule : écarté");
+    Check(TMCPUPercentBetweenTicks(0, 400, 200, 500, &pct) && pct == 100.0, @"actifs > écoulés (arrondi noyau) : borné à 100");
+}
+
+static void TestSystemMonitorSnapshot(void) {
+    Section(@"TMSystemMonitor — collecteurs et snapshot");
+    __block BOOL gpuAvailable = YES;
+    TMSystemMonitor *monitor = [[TMSystemMonitor alloc] initWithCollectors:@{
+        @"cpu": ^{ return @{@"total": @25.0}; },
+        @"gpu": ^NSDictionary<NSString *, NSNumber *> *{ return gpuAvailable ? @{@"usage": @40.0} : nil; },
+    } familyOrder:@[@"cpu", @"gpu"]];
+
+    [monitor sample];
+    NSArray *families = [monitor snapshot][@"families"];
+    Check([families count] == 2, @"les deux collecteurs répondent : deux familles");
+    CheckEqual([families.firstObject objectForKey:@"id"], @"cpu", @"l'ordre du snapshot est familyOrder");
+    CheckEqual([families.firstObject valueForKeyPath:@"now.total"], @25.0, @"now expose la dernière valeur");
+    CheckEqual([families.firstObject valueForKeyPath:@"series.total"], (@[@25.0]), @"series accumule");
+
+    [monitor sample];
+    families = [monitor snapshot][@"families"];
+    CheckEqual([families.firstObject valueForKeyPath:@"series.total"], (@[@25.0, @25.0]), @"deux échantillons, deux points");
+
+    gpuAvailable = NO;
+    [monitor sample];
+    families = [monitor snapshot][@"families"];
+    Check([families count] == 1, @"collecteur à nil : la famille sort du snapshot, sans état d'erreur");
+    CheckEqual([families.firstObject objectForKey:@"id"], @"cpu", @"les familles restantes ne bougent pas");
+    CheckEqual([families.firstObject valueForKeyPath:@"series.total"], (@[@25.0, @25.0, @25.0]),
+               @"la panne d'une famille n'interrompt pas l'échantillonnage des autres");
+
+    gpuAvailable = YES;
+    [monitor sample];
+    families = [monitor snapshot][@"families"];
+    Check([families count] == 2, @"le collecteur revit : la famille réapparaît");
+    CheckEqual([[families lastObject] valueForKeyPath:@"series.usage"], (@[@40.0, @40.0, @40.0]),
+               @"série GPU : les échantillons du trou n'existent pas, pas de zéros inventés");
+
+    Check([NSJSONSerialization isValidJSONObject:[monitor snapshot]], @"le snapshot est sérialisable tel quel");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -358,6 +433,10 @@ int main(void) {
         TestAwake();
         TestHoldFraction();
         TestLockStateMachine();
+        TestMetricRing();
+        TestRatePerSecond();
+        TestCPUPercent();
+        TestSystemMonitorSnapshot();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);
