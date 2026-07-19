@@ -424,6 +424,12 @@ static const CGFloat TMTitleBarHeight = 28;
     NSRect frame = NSMakeRect(0, 0, 1180, 760);
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView;
     self.window = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
+    // Par défaut, une NSWindow créée par programme se libère à sa fermeture — alors que cette
+    // propriété forte continue de la pointer. Le bouton rouge laissait donc un pointeur mort, que
+    // metricsTick déréférençait à la seconde suivante en lisant window.isVisible. Ici l'app
+    // survit à la fermeture de sa fenêtre (applicationShouldTerminateAfterLastWindowClosed = NO)
+    // et la rouvre depuis le popover : c'est nous qui gérons son cycle de vie, pas AppKit.
+    self.window.releasedWhenClosed = NO;
     self.window.title = @"Status";
     self.window.titleVisibility = NSWindowTitleHidden;
     self.window.titlebarAppearsTransparent = YES;

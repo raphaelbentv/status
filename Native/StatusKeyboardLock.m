@@ -154,6 +154,7 @@ static CGEventRef TMLockTapCallback(CGEventTapProxy proxy, CGEventType type, CGE
         NSWindow *window = [[NSWindow alloc] initWithContentRect:screen.frame
                                                        styleMask:NSWindowStyleMaskBorderless
                                                          backing:NSBackingStoreBuffered defer:NO];
+        window.releasedWhenClosed = NO;  // même piège que la fenêtre principale : _overlays les retient
         window.level = CGShieldingWindowLevel();  // au-dessus de la barre des menus, comme documenté
         window.opaque = NO;
         window.backgroundColor = NSColor.clearColor;
