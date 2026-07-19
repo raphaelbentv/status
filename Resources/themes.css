@@ -112,11 +112,14 @@
    --panel-bg/--panel-bg-strong leur a donné les valeurs du tableau de bord
    (qui, elles, correspondaient déjà à l'historique). Pour que le popover en
    blueprint reste identique au pixel près à son apparence pré-branche, on
-   restaure ici ses littéraux d'origine, en ciblant uniquement le popover
-   (.provider/.mtile/.tool/.footer n'existent que dans menubar.html). On
-   inclut html:not([data-theme]) pour couvrir la fenêtre avant la première
-   peinture JS, comme pour le correctif --rail-fill ci-dessus. */
-html[data-theme="blueprint"] .provider, html:not([data-theme]) .provider{
+   restaure ici ses littéraux d'origine. dashboard.html a sa propre classe
+   .provider (l'étiquette nom+pastille dans .provider-block-head) : cibler
+   #providers .provider (l'identifiant du conteneur n'existe que dans
+   menubar.html) évite qu'un fond de panneau ne s'affiche par erreur
+   derrière cette étiquette dans le tableau de bord. On inclut
+   html:not([data-theme]) pour couvrir la fenêtre avant la première peinture
+   JS, comme pour le correctif --rail-fill ci-dessus. */
+html[data-theme="blueprint"] #providers .provider, html:not([data-theme]) #providers .provider{
   background:rgba(18,22,28,.55);
 }
 html[data-theme="blueprint"] .mtile, html[data-theme="blueprint"] .tool,
