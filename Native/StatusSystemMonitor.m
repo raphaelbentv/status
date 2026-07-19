@@ -77,6 +77,35 @@ BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
     return YES;
 }
 
+NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *current,
+                                        NSTimeInterval elapsed, NSUInteger count) {
+    if (elapsed <= 0) return @[];
+    NSMutableArray *measured = [NSMutableArray array];
+    [current enumerateKeysAndObjectsUsingBlock:^(NSString *pid, NSDictionary *proc, BOOL *stop) {
+        NSDictionary *before = previous[pid];
+        if (!before) return;  // apparu depuis le dernier relevé : pas de delta possible
+        uint64_t cpuBefore = [before[@"cpuTimeNs"] unsignedLongLongValue];
+        uint64_t cpuNow = [proc[@"cpuTimeNs"] unsignedLongLongValue];
+        if (cpuNow < cpuBefore) return;  // pid réutilisé par un autre processus
+        double percent = (double)(cpuNow - cpuBefore) / 1e9 / elapsed * 100.0;
+        [measured addObject:@{ @"pid": pid, @"name": proc[@"name"] ?: @"?",
+                               @"cpuPercent": @(percent), @"rssBytes": proc[@"rssBytes"] ?: @0 }];
+    }];
+    [measured sortUsingComparator:^(NSDictionary *a, NSDictionary *b) {
+        return [b[@"cpuPercent"] compare:a[@"cpuPercent"]];
+    }];
+    return measured.count > count ? [measured subarrayWithRange:NSMakeRange(0, count)] : measured;
+}
+
+BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, double rearmBelow) {
+    if (*wasAbove) {
+        if (value < rearmBelow) *wasAbove = NO;
+        return NO;
+    }
+    if (value >= threshold) { *wasAbove = YES; return YES; }
+    return NO;
+}
+
 #pragma mark - Moniteur
 
 @implementation TMSystemMonitor {

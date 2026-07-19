@@ -415,6 +415,53 @@ static void TestSystemMonitorSnapshot(void) {
     Check([NSJSONSerialization isValidJSONObject:[monitor snapshot]], @"le snapshot est sérialisable tel quel");
 }
 
+static NSDictionary *TMProc(NSString *name, uint64_t cpuNs, uint64_t rss) {
+    return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss) };
+}
+
+static void TestTopProcesses(void) {
+    Section(@"TMTopProcesses — deltas de temps CPU par processus");
+    NSDictionary *previous = @{ @"10": TMProc(@"chrome", 1000000000, 500), @"20": TMProc(@"node", 500000000, 300),
+                                @"30": TMProc(@"idle_app", 100000000, 100) };
+    NSDictionary *current  = @{ @"10": TMProc(@"chrome", 2000000000, 520), @"20": TMProc(@"node", 1750000000, 310),
+                                @"30": TMProc(@"idle_app", 100000000, 100) };
+    NSArray *top = TMTopProcesses(previous, current, 2.0, 5);
+    Check(top.count == 3, @"trois processus mesurés");
+    CheckEqual(top.firstObject[@"name"], @"node", @"trié par consommation : node (62,5 %) devant chrome (50 %)");
+    CheckEqual(top.firstObject[@"cpuPercent"], @62.5, @"1,25 s de CPU sur 2 s = 62,5 %");
+    CheckEqual([top.lastObject objectForKey:@"cpuPercent"], @0.0, @"processus immobile : 0 %, présent");
+    CheckEqual(top.firstObject[@"rssBytes"], @310, @"la RSS vient du relevé courant");
+    CheckEqual(top.firstObject[@"pid"], @"20", @"le pid accompagne chaque entrée");
+
+    Check(TMTopProcesses(previous, current, 2.0, 2).count == 2, @"count tronque après tri");
+    Check(TMTopProcesses(previous, current, 0, 5).count == 0, @"intervalle nul : rien, pas de division");
+
+    NSDictionary *reborn = @{ @"10": TMProc(@"chrome", 2000000000, 520), @"40": TMProc(@"nouveau", 900000000, 50) };
+    NSArray *rebornTop = TMTopProcesses(previous, reborn, 2.0, 5);
+    CheckEqual([rebornTop valueForKey:@"name"], @[@"chrome"], @"pid apparu depuis le dernier relevé : pas de delta, absent");
+    NSDictionary *reused = @{ @"10": TMProc(@"autre_app", 100, 60) };
+    Check(TMTopProcesses(previous, reused, 2.0, 5).count == 0, @"temps CPU qui recule (pid réutilisé) : écarté");
+
+    NSDictionary *burst = @{ @"10": TMProc(@"video_export", 7000000000, 800) };
+    NSArray *burstTop = TMTopProcesses(previous, burst, 2.0, 5);
+    CheckEqual(burstTop.firstObject[@"cpuPercent"], @300.0, @"multithread : 300 % légitime, non plafonné");
+}
+
+static void TestThresholdFire(void) {
+    Section(@"TMThresholdShouldFire — hystérésis");
+    BOOL above = NO;
+    Check(!TMThresholdShouldFire(&above, 70, 90, 85), @"sous le seuil : silence");
+    Check(TMThresholdShouldFire(&above, 92, 90, 85), @"franchissement montant : alerte");
+    Check(!TMThresholdShouldFire(&above, 95, 90, 85), @"toujours au-dessus : une seule alerte, pas une rafale");
+    Check(!TMThresholdShouldFire(&above, 88, 90, 85), @"redescend mais au-dessus du réarmement : silence armé");
+    Check(TMThresholdShouldFire(&above, 91, 90, 85) == NO && above, @"remonte sans être réarmé : toujours silencieux");
+    TMThresholdShouldFire(&above, 80, 90, 85);
+    Check(!above, @"sous le réarmement : désarmé");
+    Check(TMThresholdShouldFire(&above, 93, 90, 85), @"nouveau franchissement après réarmement : nouvelle alerte");
+    BOOL exact = NO;
+    Check(TMThresholdShouldFire(&exact, 90, 90, 85), @"la valeur exacte du seuil compte comme franchie");
+}
+
 // Fumée sur les collecteurs réels — même esprit que TestAwake : on interroge la vraie machine,
 // pas un mock. On ne vérifie que le contrat (familles plausibles, JSON valide), pas les valeurs.
 static void TestSystemMonitorLive(void) {
@@ -456,6 +503,8 @@ int main(void) {
         TestRatePerSecond();
         TestCPUPercent();
         TestSystemMonitorSnapshot();
+        TestTopProcesses();
+        TestThresholdFire();
         TestSystemMonitorLive();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",

@@ -36,6 +36,20 @@ BOOL TMRatePerSecond(uint64_t previous, uint64_t current, NSTimeInterval elapsed
 BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
                               uint64_t activeCurrent, uint64_t totalCurrent, double *outPercent);
 
+// Top des processus entre deux relevés. Chaque relevé : pid (clé texte) → { name, cpuTimeNs,
+// rssBytes }. Retourne les `count` plus gourmands en CPU sur l'intervalle, triés décroissant :
+// [{ pid, name, cpuPercent, rssBytes }]. Un pid absent du relevé précédent n'a pas de delta et
+// n'apparaît pas ; un temps CPU qui recule (pid réutilisé) écarte le processus. Le pourcentage
+// n'est pas plafonné à 100 : un processus multithread dépasse légitimement un cœur.
+NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *current,
+                                        NSTimeInterval elapsed, NSUInteger count);
+
+// Alerte à seuil avec hystérésis. `wasAbove` est l'état persistant, mis à jour par l'appel.
+// YES au franchissement montant uniquement ; l'alerte se réarme quand la valeur redescend sous
+// `rearmBelow` (< threshold), pas dès qu'elle repasse sous le seuil — sinon une valeur qui
+// oscille autour du seuil mitraille de notifications.
+BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, double rearmBelow);
+
 #pragma mark - Moniteur
 
 // Un collecteur échantillonne une famille de métriques : dictionnaire clé → NSNumber, ou nil si
