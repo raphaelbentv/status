@@ -101,10 +101,30 @@
    élevée l'emporte sur les .rail i/.quota-track i déjà déclarés dans les
    <style> de menubar.html/dashboard.html, quel que soit l'ordre des feuilles. */
 
-html[data-theme="blueprint"] .rail i, html[data-theme="blueprint"] .quota-track i,
-html[data-theme="phosphore"] .rail i, html[data-theme="phosphore"] .quota-track i,
-html:not([data-theme]) .rail i, html:not([data-theme]) .quota-track i{
-  background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);
+/* blueprint et phosphore veulent la même hachure que celle désormais posée en dur dans les
+   règles de base .rail i/.quota-track i de menubar.html/dashboard.html — pas besoin d'override
+   ici. Un futur thème qui l'oublierait obtient donc ce rendu par défaut au lieu d'un rail
+   invisible ; synthwave/circuit/holograme/ion ci-dessous le remplacent explicitement. */
+
+/* ── Parité pixel du popover en blueprint ───────────────────────────────────
+   Resources/menubar.html avait ses propres littéraux de fond de panneau,
+   différents de ceux de dashboard.html. Le passage aux jetons partagés
+   --panel-bg/--panel-bg-strong leur a donné les valeurs du tableau de bord
+   (qui, elles, correspondaient déjà à l'historique). Pour que le popover en
+   blueprint reste identique au pixel près à son apparence pré-branche, on
+   restaure ici ses littéraux d'origine, en ciblant uniquement le popover
+   (.provider/.mtile/.tool/.footer n'existent que dans menubar.html). On
+   inclut html:not([data-theme]) pour couvrir la fenêtre avant la première
+   peinture JS, comme pour le correctif --rail-fill ci-dessus. */
+html[data-theme="blueprint"] .provider, html:not([data-theme]) .provider{
+  background:rgba(18,22,28,.55);
+}
+html[data-theme="blueprint"] .mtile, html[data-theme="blueprint"] .tool,
+html:not([data-theme]) .mtile, html:not([data-theme]) .tool{
+  background:rgba(18,22,28,.85);
+}
+html[data-theme="blueprint"] .footer, html:not([data-theme]) .footer{
+  background:rgba(14,18,23,.9);
 }
 
 html[data-theme="synthwave"] .rail i, html[data-theme="synthwave"] .quota-track i{
@@ -112,8 +132,14 @@ html[data-theme="synthwave"] .rail i, html[data-theme="synthwave"] .quota-track 
   box-shadow:0 0 8px color-mix(in srgb,var(--provider) 55%,transparent);
 }
 html[data-theme="synthwave"] .name, html[data-theme="synthwave"] .value, html[data-theme="synthwave"] .subgauge-head strong,
-html[data-theme="synthwave"] .hero-value, html[data-theme="synthwave"] .quota-top strong{
+html[data-theme="synthwave"] .quota-top strong{
   text-shadow:0 0 14px color-mix(in srgb,var(--provider) 70%,transparent);
+}
+html[data-theme="synthwave"] .hero{
+  box-shadow:0 0 8px color-mix(in srgb,var(--hero,var(--blue)) 55%,transparent);
+}
+html[data-theme="synthwave"] .hero-value{
+  text-shadow:0 0 14px color-mix(in srgb,var(--hero,var(--blue)) 70%,transparent);
 }
 
 html[data-theme="circuit"] .rail i, html[data-theme="circuit"] .quota-track i{
@@ -130,6 +156,12 @@ html[data-theme="ion"] .rail i, html[data-theme="ion"] .quota-track i{
   box-shadow:0 0 12px color-mix(in srgb,var(--provider) 30%,transparent) inset;
 }
 html[data-theme="ion"] .name, html[data-theme="ion"] .value, html[data-theme="ion"] .subgauge-head strong,
-html[data-theme="ion"] .hero-value, html[data-theme="ion"] .quota-top strong{
+html[data-theme="ion"] .quota-top strong{
   text-shadow:0 0 16px color-mix(in srgb,var(--provider) 70%,transparent);
+}
+html[data-theme="ion"] .hero{
+  box-shadow:0 0 12px color-mix(in srgb,var(--hero,var(--blue)) 30%,transparent) inset;
+}
+html[data-theme="ion"] .hero-value{
+  text-shadow:0 0 16px color-mix(in srgb,var(--hero,var(--blue)) 70%,transparent);
 }

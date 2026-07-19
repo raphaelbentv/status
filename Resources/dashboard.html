@@ -71,10 +71,12 @@
   .quota-top{display:flex;justify-content:space-between;gap:12px}
   .quota-top span{font-weight:700;font-size:11px;color:var(--text)}
   .quota-top strong{font-variant-numeric:tabular-nums;color:var(--provider);text-shadow:var(--value-glow,none)}
-  /* Trame par défaut : la mesure dit « mesure », pas « barre de progression » — un thème peut
-     remplacer --rail-fill par un aplat ou un dégradé (voir themes.css). */
+  /* Trame par défaut : la mesure dit « mesure », pas « barre de progression » — hachure par
+     défaut (blueprint/phosphore), qu'un thème peut remplacer par un aplat ou un dégradé
+     (voir themes.css). --provider est réellement hérité ici, contrairement à un alias
+     --rail-fill qui figerait var(--provider) invalide à son propre niveau de déclaration. */
   .quota-track{height:14px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin:8px 0 6px;overflow:hidden}
-  .quota-track i{display:block;height:100%;background:var(--rail-fill);box-shadow:var(--edge-glow,none);transition:width .3s ease}
+  .quota-track i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);box-shadow:var(--edge-glow,none);transition:width .3s ease}
   .quota-card small,.quota-empty{color:var(--muted);font-size:10px;line-height:1.45}
   .quota-empty{padding:13px;border:1px dashed var(--hair-strong);border-radius:var(--radius)}
   .quota-error,.quota-stale{font-size:10px;margin-top:10px}.quota-error{color:var(--danger)}.quota-stale{color:var(--amber)}

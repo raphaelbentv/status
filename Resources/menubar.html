@@ -27,10 +27,12 @@
   .subgauge{border-top:1px solid var(--hair);margin-top:16px;padding-top:13px;text-align:left}
   .subgauge-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
   .subgauge-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;text-shadow:var(--value-glow,none)}
-  /* Même trame que la fenêtre principale : une mesure, pas une progression — sauf thème qui
-     remplace --rail-fill par un aplat ou un dégradé (voir themes.css). */
+  /* Même trame que la fenêtre principale : une mesure, pas une progression — hachure par
+     défaut (blueprint/phosphore), qu'un thème peut remplacer par un aplat ou un dégradé
+     (voir themes.css). --provider est réellement hérité ici, contrairement à un alias
+     --rail-fill qui figerait var(--provider) invalide à son propre niveau de déclaration. */
   .rail{height:10px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin-top:7px;overflow:hidden}
-  .rail i{display:block;height:100%;background:var(--rail-fill);box-shadow:var(--edge-glow,none);transition:width .3s ease}
+  .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);box-shadow:var(--edge-glow,none);transition:width .3s ease}
   .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
   .account-note.stale{color:var(--amber)}
