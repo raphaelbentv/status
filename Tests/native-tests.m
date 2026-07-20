@@ -706,6 +706,28 @@ static void TestDuoIdentifiers(void) {
     Check(!TMDuoSplitFromIdentifier(nil, &split), @"nil refusé");
 }
 
+static void TestStaleAlert(void) {
+    Section(@"TMStaleAlertShouldFire — une alerte par épisode de péremption");
+    BOOL was = NO;
+    Check(!TMStaleAlertShouldFire(&was, NO), @"source fraîche : rien");
+    Check(TMStaleAlertShouldFire(&was, YES), @"passe périmée : alerte");
+    Check(!TMStaleAlertShouldFire(&was, YES), @"toujours périmée : pas de rafale");
+    Check(!TMStaleAlertShouldFire(&was, NO), @"redevient fraîche : rien, mais réarme");
+    Check(TMStaleAlertShouldFire(&was, YES), @"nouvelle péremption : réalerte");
+}
+
+static void TestWatchdog(void) {
+    Section(@"TMWatchdogShouldReload — rechargement après N échecs");
+    NSInteger fails = 0;
+    Check(!TMWatchdogShouldReload(&fails, NO, 3), @"1er échec : patiente");
+    Check(!TMWatchdogShouldReload(&fails, NO, 3), @"2e échec : patiente");
+    Check(TMWatchdogShouldReload(&fails, NO, 3), @"3e échec : recharge");
+    Check(!TMWatchdogShouldReload(&fails, NO, 3), @"réarmé : le 4e échec repart de zéro");
+    Check(!TMWatchdogShouldReload(&fails, NO, 3), @"5e (2e depuis réarmement) : patiente");
+    Check(!TMWatchdogShouldReload(&fails, YES, 3), @"un succès remet le compteur à zéro");
+    Check(!TMWatchdogShouldReload(&fails, NO, 3), @"après succès : on repart bien de 1");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -737,6 +759,8 @@ int main(void) {
         TestWindowMoveToScreen();
         TestDuoLayouts();
         TestDuoIdentifiers();
+        TestStaleAlert();
+        TestWatchdog();
         TestForecastExhaustion();
         TestTopProcesses();
         TestThresholdFire();

@@ -333,6 +333,8 @@ static const CGFloat TMTitleBarHeight = 28;
 // Le secret ne change que quand l'utilisateur le change : on invalide le cache à ce moment-là.
 @property (copy) NSString *usageCookieCache;
 @property BOOL usageCookieLoaded;
+@property BOOL directWasStale;      // front pour l'alerte de péremption (feature 1)
+@property NSInteger directFailures; // compteur du chien de garde (feature 3)
 @property id globalShortcutMonitor, localShortcutMonitor;
 @property TMWindowManager *windowManager;
 @property NSPanel *pickerPanel;
@@ -534,6 +536,17 @@ static const CGFloat TMTitleBarHeight = 28;
     self.usageWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 1024, 768) configuration:configuration];
     self.usageWebView.navigationDelegate = self;
     return self.usageWebView;
+}
+
+// Rechargement dur de la WebView usage : on repart de la session stockée dans le Trousseau et on
+// force un rechargement complet. Utile quand un défi Cloudflare persistant a laissé la WebView
+// coincée hors de la vraie page — plutôt qu'attendre un rétablissement qui peut ne pas venir.
+- (void)hardReloadUsageWebView {
+    NSString *cookie = [self usageCookie];
+    if (!cookie.length) return;
+    self.usageWebLoaded = NO;
+    self.usageWebLoadCompletion = nil;  // abandonne un chargement en cours éventuellement bloqué
+    [self seedUsageCookies:cookie completion:^{ [self refresh:nil]; }];
 }
 
 - (void)seedUsageCookies:(NSString *)cookieHeader completion:(void (^)(void))completion {
@@ -1556,8 +1569,28 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"actionRunning": @(self.claudeActionRunning), @"error": error ?: @""
         };
         [self pushData];
+        [self monitorDirectSourceHealth:usageCookie.length > 0 live:live usageError:usageError];
         if (completion) completion();
     });
+}
+
+// Fraîcheur de la source directe (features 1 et 3). N'agit que si le cookie « direct » est
+// configuré : sans lui, l'app est censée être sur la status line, et « figé » n'aurait pas de sens.
+- (void)monitorDirectSourceHealth:(BOOL)directConfigured live:(BOOL)live usageError:(NSString *)usageError {
+    if (!directConfigured) { self.directWasStale = NO; self.directFailures = 0; return; }
+
+    // Feature 1 — alerte de péremption : la source directe est configurée mais ne renvoie plus de
+    // données vivantes. On alerte une fois par épisode, pas à chaque tick.
+    if (TMStaleAlertShouldFire(&_directWasStale, !live)) {
+        [self postNotificationTitle:@"Jauges Claude figées"
+                               body:@"La source directe claude.ai ne répond plus. Rouvrez l’app si cela persiste."];
+    }
+
+    // Feature 3 — chien de garde : après plusieurs échecs consécutifs du fetch direct, recharger la
+    // WebView de zéro plutôt que d'attendre indéfiniment un rétablissement.
+    if (TMWatchdogShouldReload(&_directFailures, live, 3)) {
+        [self hardReloadUsageWebView];
+    }
 }
 
 - (void)configureClaudeFableCookie:(id)sender {

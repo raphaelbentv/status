@@ -241,7 +241,21 @@ NSString *TMHistoryPath(void) {
     return [TMSupportDirectory() stringByAppendingPathComponent:@"quota-history.json"];
 }
 
-const NSTimeInterval TMForecastMinimumSpan = 900;  // 15 min : sous ce seuil, la pente est du bruit
+const NSTimeInterval TMForecastMinimumSpan = 900;
+
+BOOL TMStaleAlertShouldFire(BOOL *wasStale, BOOL isStale) {
+    BOOL fire = isStale && !*wasStale;  // uniquement le front montant
+    *wasStale = isStale;
+    return fire;
+}
+
+BOOL TMWatchdogShouldReload(NSInteger *failures, BOOL success, NSInteger threshold) {
+    if (success) { *failures = 0; return NO; }
+    (*failures)++;
+    if (*failures >= threshold) { *failures = 0; return YES; }  // réarme pour ne pas boucler
+    return NO;
+}
+  // 15 min : sous ce seuil, la pente est du bruit
 
 BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resetsAt, NSTimeInterval *outAt) {
     if (!key.length) return NO;

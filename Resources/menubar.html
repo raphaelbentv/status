@@ -35,7 +35,8 @@
   .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);box-shadow:var(--edge-glow,none);transition:width .3s ease}
   .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
-  .account-note.stale{color:var(--amber)}
+  .account-note.stale{color:var(--amber);font-weight:700}
+  .account-note.live{color:var(--green)}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
   .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
@@ -103,13 +104,18 @@ function provider(id,name,account){
   const connected=id==='openai'?account?.connected:(account?.authenticated||account?.trackingConfigured);
   const action=id==='openai'?'loginOpenAI':account?.cliAvailable?'loginClaude':'installClaudeCLI';
   const actionLabel=id==='openai'?'connecter':'configurer';
+  // Badge de fraîcheur (feature 2). « figé » doit crier plus fort qu'une simple mesure ancienne :
+  // c'est le signal qui manquait quand les jauges restaient périmées en silence.
   const noteText=(primaryValue)=>{
     if(!connected)return 'non connecté';
-    if(account?.liveSource)return 'en direct';
-    if(account?.capturedAt)return `${account.stale?'⚠ figé ':'mesure '}${ageLabel(account.capturedAt)}`;
+    if(account?.liveSource)return '⟳ en direct';
+    if(account?.stale)return `⚠ figé · ${ageLabel(account.capturedAt)}`;
+    if(account?.capturedAt)return `mesure ${ageLabel(account.capturedAt)}`;
     return primaryValue===null?'connecté · en attente':'quota en direct';
   };
-  const noteAndAction=(primaryValue)=>`<div class="account-note ${account?.stale?'stale':''}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${action}')">${actionLabel}</button>`}`;
+  // ⟳ : la source directe répond, badge discret. classe .live pour la couleur verte.
+  const noteClass=account?.liveSource?'live':(account?.stale?'stale':'');
+  const noteAndAction=(primaryValue)=>`<div class="account-note ${noteClass}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${action}')">${actionLabel}</button>`}`;
   if(id==='openai'){
     const weeklyValue=used(weekly);
     return `<section class="provider" style="--provider:var(--blue)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div>${noteAndAction(weeklyValue)}</section>`;

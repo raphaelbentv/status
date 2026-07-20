@@ -57,6 +57,18 @@ NSArray *TMLoadHistory(void);
 //     est une réponse en soi et non une prévision.
 // Les points antérieurs à la dernière réinitialisation sont écartés : la chute de 90 % à 5 %
 // qu'elle provoque donnerait une pente absurde.
+// Santé de la source directe claude.ai.
+
+// Détecteur de front : YES seulement au passage de « frais » à « périmé », pour n'alerter qu'une
+// fois par épisode. `wasStale` est l'état persistant, mis à jour par l'appel ; il se réarme dès
+// que la source redevient fraîche, de sorte qu'une nouvelle péremption réalerte.
+BOOL TMStaleAlertShouldFire(BOOL *wasStale, BOOL isStale);
+
+// Chien de garde de la WebView. `failures` est le compteur persistant. Un succès le remet à zéro
+// et renvoie NO. Un échec l'incrémente ; quand il atteint `threshold`, renvoie YES *une fois* et
+// se réarme (retour à zéro) — sinon on rechargerait la WebView à chaque tick d'un échec durable.
+BOOL TMWatchdogShouldReload(NSInteger *failures, BOOL success, NSInteger threshold);
+
 extern const NSTimeInterval TMForecastMinimumSpan;
 BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resetsAt, NSTimeInterval *outAt);
 NSArray *TMAppendHistory(NSArray *claudeWindows, NSArray *openAIWindows, long long now);
