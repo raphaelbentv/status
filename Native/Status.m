@@ -153,6 +153,56 @@ static NSImage *TMGaugeIcon(double fraction, BOOL hasValue, TMSeverity severity,
     return image;
 }
 
+// Sparkline pour la barre des menus (feature 9) : la tendance récente de la fenêtre épinglée,
+// dessinée là où l'anneau montrerait le niveau. Même sémantique de couleur que l'anneau — teinte
+// du fournisseur en régime normal, sévérité en alerte, template quand il n'y a rien à identifier.
+// `series` va du plus ancien au plus récent, en pourcents.
+static NSImage *TMSparklineIcon(NSArray<NSNumber *> *series, BOOL hasValue, TMSeverity severity, NSColor *providerInk) {
+    const CGFloat w = 26, h = 18, pad = 2;
+    BOOL colored = providerInk != nil || severity != TMSeverityNormal;
+    NSColor *ink = (severity != TMSeverityNormal) ? TMSeverityColor(severity)
+                 : providerInk ?: NSColor.blackColor;
+
+    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
+    [image lockFocus];
+
+    if (!hasValue || series.count < 2) {
+        // Pas encore de tendance : un tiret, comme l'anneau sans donnée.
+        NSBezierPath *dash = [NSBezierPath bezierPath];
+        dash.lineWidth = 1.6;
+        dash.lineCapStyle = NSLineCapStyleRound;
+        [dash moveToPoint:NSMakePoint(w / 2 - 3, h / 2)];
+        [dash lineToPoint:NSMakePoint(w / 2 + 3, h / 2)];
+        [[ink colorWithAlphaComponent:0.55] setStroke];
+        [dash stroke];
+    } else {
+        // Échelle fixe 0–100 : la hauteur d'un point dit son pourcentage absolu, pas relatif à la
+        // fenêtre visible — sinon une variation de 2 % remplirait toute la hauteur et alarmerait.
+        NSUInteger n = series.count;
+        CGFloat plotW = w - 2 * pad, plotH = h - 2 * pad;
+        NSBezierPath *line = [NSBezierPath bezierPath];
+        line.lineWidth = 1.3;
+        line.lineJoinStyle = NSLineJoinStyleRound;
+        for (NSUInteger i = 0; i < n; i++) {
+            CGFloat x = pad + (CGFloat)i / (n - 1) * plotW;
+            CGFloat y = pad + MIN(MAX(series[i].doubleValue, 0), 100) / 100.0 * plotH;
+            if (i == 0) [line moveToPoint:NSMakePoint(x, y)];
+            else [line lineToPoint:NSMakePoint(x, y)];
+        }
+        [ink setStroke];
+        [line stroke];
+        // Point terminal accentué : « où j'en suis maintenant ».
+        CGFloat lastX = pad + plotW, lastY = pad + MIN(MAX(series.lastObject.doubleValue, 0), 100) / 100.0 * plotH;
+        NSRect dot = NSMakeRect(lastX - 1.5, lastY - 1.5, 3, 3);
+        [ink setFill];
+        [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
+    }
+
+    [image unlockFocus];
+    image.template = !colored;
+    return image;
+}
+
 // Chiffres tabulaires : l'élément ne doit pas frétiller latéralement quand la valeur change.
 static NSAttributedString *TMMenuBarTitle(NSString *text, TMSeverity severity) {
     NSMutableDictionary *attributes = [@{
@@ -642,6 +692,45 @@ static const CGFloat TMTitleBarHeight = 28;
     return TMMaxUsedPercent(@[windows ?: @[]], predicate, out);
 }
 
+// Série récente de la fenêtre épinglée, pour la sparkline de la barre des menus (feature 9).
+// Métriques système : depuis les anneaux du moniteur. Quotas : depuis l'historique horodaté, en
+// prenant par point le max des clés concernées — ce qui reflète exactement la valeur affichée
+// (openai:weekly et « lowest » retiennent déjà le maximum). Les ~24 derniers points suffisent à
+// une tendance lisible dans 26 px.
+- (NSArray<NSNumber *> *)menuBarSeriesForMetric:(NSString *)metric {
+    if ([metric hasPrefix:@"system:"]) {
+        NSString *fam = [metric isEqualToString:@"system:temp"] ? @"sensors" : @"cpu";
+        NSString *key = [metric isEqualToString:@"system:temp"] ? @"tempC" : @"total";
+        for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) {
+            if ([family[@"id"] isEqualToString:fam]) {
+                NSArray *series = family[@"series"][key];
+                return [series isKindOfClass:NSArray.class] ? series : @[];
+            }
+        }
+        return @[];
+    }
+
+    BOOL (^matches)(NSString *) = ^BOOL(NSString *key) {
+        if ([metric isEqualToString:@"claude:session"]) return [key isEqualToString:@"claude:five_hour"];
+        if ([metric isEqualToString:@"claude:weekly"])  return [key isEqualToString:@"claude:seven_day"];
+        if ([metric isEqualToString:@"openai:weekly"])  return [key hasPrefix:@"openai:"];
+        return YES;  // « lowest » : toutes les fenêtres, on garde le max par point
+    };
+
+    NSArray *history = TMLoadHistory();
+    NSMutableArray<NSNumber *> *series = [NSMutableArray array];
+    for (NSDictionary *row in history) {
+        NSDictionary *points = [row[@"p"] isKindOfClass:NSDictionary.class] ? row[@"p"] : nil;
+        if (!points) continue;
+        double best = -1;
+        for (NSString *key in points) if (matches(key)) best = MAX(best, TMNumber(points[key]));
+        if (best >= 0) [series addObject:@(best)];
+    }
+    NSUInteger keep = 24;
+    if (series.count > keep) [series removeObjectsInRange:NSMakeRange(0, series.count - keep)];
+    return series;
+}
+
 - (void)updateStatusMenu {
     NSArray *claudeWindows = self.claudeAccount[@"windows"] ?: @[];
     NSArray *openAIWindows = self.openAIAccount[@"windows"] ?: @[];
@@ -712,7 +801,10 @@ static const CGFloat TMTitleBarHeight = 28;
         ? [NSString stringWithFormat:@" %@%ld%@", label ? [label stringByAppendingString:@" "] : @"", (long)(shown + 0.5), suffix]
         : @" --";
 
-    self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, providerInk);
+    BOOL sparkStyle = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] isEqualToString:@"spark"];
+    self.statusItem.button.image = sparkStyle
+        ? TMSparklineIcon([self menuBarSeriesForMetric:metric], hasValue, severity, providerInk)
+        : TMGaugeIcon(shown / 100.0, hasValue, severity, providerInk);
     self.statusItem.button.image.accessibilityDescription = hasValue
         ? [NSString stringWithFormat:@"Quota %ld %% consommé", (long)(shown + 0.5)]
         : @"Quota indisponible";
@@ -1108,6 +1200,10 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"duoPick"]) [self completeDuoWithIndex:[body[@"index"] integerValue]];
     if ([action isEqualToString:@"duoCancel"]) [self closePicker];
     if ([action isEqualToString:@"exportHistoryCSV"]) [self exportHistoryCSV];
+    if ([action isEqualToString:@"setMenuBarIconStyle"]) {
+        [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconStyle"];
+        [self updateStatusMenu];
+    }
     if ([action isEqualToString:@"toggleWindowManager"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"windowManagerEnabled"] forKey:@"windowManagerEnabled"];
@@ -1186,6 +1282,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
             @"hoverPopover": @([self hoverPopoverEnabled]),
             @"metricsInterval": @([self metricsInterval]),
+            @"menuBarIconStyle": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring",
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"windowManager": @([self windowManagerEnabled]),
