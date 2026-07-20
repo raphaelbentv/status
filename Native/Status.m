@@ -327,6 +327,12 @@ static const CGFloat TMTitleBarHeight = 28;
 // États d'hystérésis des alertes système — un booléen par seuil surveillé.
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
 @property TMKeyboardLock *keyboardLock;
+// Le cookie claude.ai, lu une seule fois au lancement. Le relire à chaque rafraîchissement
+// déclenchait une demande d'accès au Trousseau à chaque fois — et comme le survol de l'icône
+// ouvre le popover, donc rafraîchit, cela produisait plusieurs demandes par minute.
+// Le secret ne change que quand l'utilisateur le change : on invalide le cache à ce moment-là.
+@property (copy) NSString *usageCookieCache;
+@property BOOL usageCookieLoaded;
 @property id globalShortcutMonitor, localShortcutMonitor;
 @property TMWindowManager *windowManager;
 @property NSPanel *pickerPanel;
@@ -408,7 +414,7 @@ static const CGFloat TMTitleBarHeight = 28;
     // Re-seed sessionKey into the WebView store before the first poll. The store is persistent, so
     // this is usually a no-op; it matters on the first launch after the cookie is set, and after
     // anything clears the store.
-    NSString *cookie = TMKeychainRead(TMClaudeSessionCookieAccount);
+    NSString *cookie = [self usageCookie];
     if (cookie.length) [self seedUsageCookies:cookie completion:^{ [self refresh:nil]; }];
     else [self refresh:nil];
 }
@@ -1199,6 +1205,22 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
 }
 
+// Cookie de session claude.ai, mémorisé. Un seul accès au Trousseau par lancement, au lieu d'un
+// par rafraîchissement.
+- (NSString *)usageCookie {
+    if (!self.usageCookieLoaded) {
+        self.usageCookieCache = TMKeychainRead(TMClaudeSessionCookieAccount);
+        self.usageCookieLoaded = YES;
+    }
+    return self.usageCookieCache ?: @"";
+}
+
+// À appeler après toute écriture du cookie : la prochaine lecture repassera par le Trousseau.
+- (void)invalidateUsageCookieCache {
+    self.usageCookieLoaded = NO;
+    self.usageCookieCache = nil;
+}
+
 - (void)pushData {
     NSData *data = [NSJSONSerialization dataWithJSONObject:[self payload] options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -1439,7 +1461,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     NSString *claudePath = TMClaudeExecutablePath();
     NSString *pythonPath = TMPythonExecutablePath();
     NSString *bridgePath = [self claudeBridgePath];
-    NSString *usageCookie = TMKeychainRead(TMClaudeSessionCookieAccount);
+    NSString *usageCookie = [self usageCookie];
     __block NSDictionary *authJSON;
     __block NSDictionary *bridgeJSON;
     __block NSDictionary *usageJSONResult;
@@ -1531,7 +1553,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         @"de ce Mac, n’est envoyé qu’à claude.ai, et se périme à votre prochaine déconnexion.";
     [alert addButtonWithTitle:@"Enregistrer"];
     [alert addButtonWithTitle:@"Annuler"];
-    if (TMKeychainRead(TMClaudeSessionCookieAccount).length) [alert addButtonWithTitle:@"Effacer"];
+    if ([self usageCookie].length) [alert addButtonWithTitle:@"Effacer"];
 
     NSSecureTextField *field = [NSSecureTextField textFieldWithString:@""];
     field.placeholderString = @"Collez le cURL (ou le cookie brut)";
@@ -1542,6 +1564,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
         if (response == NSAlertThirdButtonReturn) {
             TMKeychainSave(TMClaudeSessionCookieAccount, @"");
+            [self invalidateUsageCookieCache];
             self.usageWebLoaded = NO;
             [self refresh:nil];
             return;
@@ -1557,6 +1580,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             return;
         }
         TMKeychainSave(TMClaudeSessionCookieAccount, cookie);
+        [self invalidateUsageCookieCache];
         // Manual: a fresh cookie is precisely the fix for whatever caused the backoff, so don't
         // make the user wait it out.
         [self seedUsageCookies:cookie completion:^{ [self refresh:self]; }];
