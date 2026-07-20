@@ -10,6 +10,7 @@
 #import "StatusSystemMonitor.h"
 #import "StatusKeyboardLock.h"
 #import "StatusCodexServer.h"
+#import "StatusWindowManager.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
@@ -327,6 +328,8 @@ static const CGFloat TMTitleBarHeight = 28;
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
 @property TMKeyboardLock *keyboardLock;
 @property id globalShortcutMonitor, localShortcutMonitor;
+@property TMWindowManager *windowManager;
+@property id windowGlobalMonitor, windowLocalMonitor;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
 @property TMCodexAppServer *codexServer;
@@ -381,6 +384,7 @@ static const CGFloat TMTitleBarHeight = 28;
     __weak typeof(self) weakLockSelf = self;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
     [self installGlobalShortcut];
+    [self installWindowShortcuts];
     [self requestNotificationAuthorization];
     [self observeWakeNotifications];
     [self.window makeKeyAndOrderFront:nil];
@@ -398,7 +402,8 @@ static const CGFloat TMTitleBarHeight = 28;
 - (void)applicationWillTerminate:(NSNotification *)notification {
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.keyboardLock forceUnlock];
-    [self removeGlobalShortcut];  // même logique : le tap mourrait aussi, mais soyons explicites
+    [self removeGlobalShortcut];
+    [self removeWindowShortcuts];  // même logique : le tap mourrait aussi, mais soyons explicites
     [self.metricsTimer invalidate];
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
@@ -762,6 +767,91 @@ static const CGFloat TMTitleBarHeight = 28;
     if (self.localShortcutMonitor) { [NSEvent removeMonitor:self.localShortcutMonitor]; self.localShortcutMonitor = nil; }
 }
 
+#pragma mark - Gestionnaire de fenêtres
+
+// Table des raccourcis : modificateurs exacts + touche, vers une action. Les modificateurs sont
+// comparés à l'identique et non par masquage — ⌃⌥← et ⌃⌥⇧← doivent rester distincts.
+static const NSEventModifierFlags TMModCtrlAltShift = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift;
+static const NSEventModifierFlags TMModCtrlAltCmd = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand;
+
+// Codes de touches virtuels : les flèches et Entrée n'ont pas de caractère exploitable dans
+// charactersIgnoringModifiers une fois les modificateurs appliqués.
+enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMKeyUp = 126,
+       TMKeyY = 16, TMKeyO = 31, TMKeyU = 32, TMKeyI = 34, TMKeyL = 37, TMKeyJ = 38, TMKeyK = 40 };
+
+- (BOOL)windowManagerEnabled {
+    return [NSUserDefaults.standardUserDefaults boolForKey:@"windowManagerEnabled"];
+}
+
+// Retourne l'identifiant de disposition pour un événement, ou nil si aucun raccourci ne
+// correspond. Séparé de l'exécution pour rester lisible et pour que les deux moniteurs
+// (global et local) partagent exactement la même table.
+- (NSString *)windowActionForEvent:(NSEvent *)event {
+    // Masquer sur les seuls modificateurs d'intention. Les touches fléchées activent aussi
+    // Function et NumericPad — vérifié : flags=0xae0000 sur ⌃⌥⇧→ — et une comparaison stricte
+    // avec DeviceIndependentFlagsMask ne correspondait donc jamais. CapsLock est écarté pour la
+    // même raison.
+    const NSEventModifierFlags intent = NSEventModifierFlagControl | NSEventModifierFlagOption
+                                      | NSEventModifierFlagShift | NSEventModifierFlagCommand;
+    NSEventModifierFlags flags = event.modifierFlags & intent;
+    unsigned short key = event.keyCode;
+
+    // Base ⌃⌥⇧ et non ⌃⌥ : macOS 15+ s'est approprié ⌃⌥ + flèches pour son propre pavage.
+    // Vérifié empiriquement, Status éteint — ⌃⌥← déplaçait la fenêtre sans nous. Toute la série
+    // ⌃⌥⇧ a été testée libre, de même que ⌃⌥⌘ réservé aux changements d'écran.
+    if (flags == TMModCtrlAltShift) {
+        if (key == TMKeyLeft)   return @"left-half";
+        if (key == TMKeyRight)  return @"right-half";
+        if (key == TMKeyUp)     return @"maximize";
+        if (key == TMKeyDown)   return @"center";
+        if (key == TMKeyU)      return @"left-two-thirds";
+        if (key == TMKeyI)      return @"right-two-thirds";
+        if (key == TMKeyJ)      return @"left-third";
+        if (key == TMKeyK)      return @"center-third";
+        if (key == TMKeyL)      return @"right-third";
+        if (key == TMKeyY)      return @"left-three-quarters";
+        if (key == TMKeyO)      return @"right-three-quarters";
+    } else if (flags == TMModCtrlAltCmd) {
+        if (key == TMKeyRight) return @"screen-next";
+        if (key == TMKeyLeft)  return @"screen-prev";
+    }
+    return nil;
+}
+
+- (void)performWindowAction:(NSString *)action {
+    if ([action isEqualToString:@"screen-next"]) { [self.windowManager moveToAdjacentScreen:YES]; return; }
+    if ([action isEqualToString:@"screen-prev"]) { [self.windowManager moveToAdjacentScreen:NO]; return; }
+    TMWindowLayout layout;
+    if (TMWindowLayoutFromIdentifier(action, &layout)) [self.windowManager applyLayout:layout];
+}
+
+// Même mécanique que le raccourci du popover, et pour les mêmes raisons : le moniteur global ne
+// reçoit rien quand Status est l'app active, le local ne reçoit que ces cas-là.
+- (void)installWindowShortcuts {
+    [self removeWindowShortcuts];
+    if (!self.windowManager) self.windowManager = [TMWindowManager new];
+    if (![self windowManagerEnabled]) return;
+
+    __weak typeof(self) weakSelf = self;
+    self.windowGlobalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                                      handler:^(NSEvent *event) {
+        NSString *action = [weakSelf windowActionForEvent:event];
+        if (action) dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf performWindowAction:action]; });
+    }];
+    self.windowLocalMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                                    handler:^NSEvent *(NSEvent *event) {
+        NSString *action = [weakSelf windowActionForEvent:event];
+        if (!action) return event;
+        [weakSelf performWindowAction:action];
+        return nil;  // consommé : ne pas le laisser filer vers la webview
+    }];
+}
+
+- (void)removeWindowShortcuts {
+    if (self.windowGlobalMonitor) { [NSEvent removeMonitor:self.windowGlobalMonitor]; self.windowGlobalMonitor = nil; }
+    if (self.windowLocalMonitor) { [NSEvent removeMonitor:self.windowLocalMonitor]; self.windowLocalMonitor = nil; }
+}
+
 - (void)toggleStatusPopover:(id)sender {
     (void)sender;
     [self.hoverOpenTimer invalidate];
@@ -844,6 +934,23 @@ static const CGFloat TMTitleBarHeight = 28;
         [self installGlobalShortcut];
         [self pushData];
     }
+    if ([action isEqualToString:@"toggleWindowManager"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:![defaults boolForKey:@"windowManagerEnabled"] forKey:@"windowManagerEnabled"];
+        [self installWindowShortcuts];
+        [self pushData];
+    }
+    if ([action isEqualToString:@"setWindowGap"]) {
+        NSString *which = [body[@"which"] isKindOfClass:NSString.class] ? body[@"which"] : @"between";
+        NSString *key = [which isEqualToString:@"edge"] ? @"windowGapEdge" : @"windowGapBetween";
+        [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:key];
+        [self pushData];
+    }
+    if ([action isEqualToString:@"toggleWindowReservedAreas"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:![defaults boolForKey:@"windowIgnoreReservedAreas"] forKey:@"windowIgnoreReservedAreas"];
+        [self pushData];
+    }
     if ([action isEqualToString:@"setMetricsInterval"]) {
         [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:@"metricsIntervalSeconds"];
         [self startSystemMonitor];  // recrée le timer à la nouvelle cadence
@@ -907,6 +1014,10 @@ static const CGFloat TMTitleBarHeight = 28;
             @"metricsInterval": @([self metricsInterval]),
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
+            @"windowManager": @([self windowManagerEnabled]),
+            @"windowGapBetween": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapBetween"]),
+            @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
+            @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),
             @"notificationsAuthorized": @(self.notificationsAuthorized),
             @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint"
         },

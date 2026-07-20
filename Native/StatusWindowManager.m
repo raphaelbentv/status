@@ -123,6 +123,9 @@ static CGRect TMFlipFromAX(CGRect axRect) {
 - (AXUIElementRef _Nullable)copyFocusedWindow CF_RETURNS_RETAINED {
     if (!AXIsProcessTrusted()) return NULL;
     NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
+    // Status au premier plan : on ne déplace pas sa propre fenêtre. Le cas se produit quand le
+    // tableau de bord a le focus — le raccourci reste alors sans effet, ce qui vaut mieux que de
+    // voir Status se pousser lui-même pendant qu'on règle ses préférences.
     if (!front || front.processIdentifier == NSRunningApplication.currentApplication.processIdentifier) return NULL;
 
     AXUIElementRef app = AXUIElementCreateApplication(front.processIdentifier);

@@ -119,6 +119,9 @@
   .metric-badge{font-size:10px;padding:2px 7px;border:1px solid var(--hair);color:var(--muted)}
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
+  .shortcut-table{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:5px 14px;max-width:430px}
+  .shortcut-row{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--muted)}
+  .shortcut-row kbd{font:inherit;font-size:11px;color:var(--text);background:var(--soft);border:1px solid var(--hair);border-radius:var(--radius);padding:2px 6px;min-width:46px;text-align:center;flex:none}
   .metric-empty{color:var(--muted);padding:26px 0;text-align:center;font-size:11px}
   .forecast{margin-top:7px;font-size:10px;color:var(--muted);border-top:1px dashed var(--hair);padding-top:6px}
   .forecast.soon{color:var(--amber)}
@@ -192,6 +195,16 @@ const windowsFor=(providerId,account)=>{const windows=account?.windows||[];retur
 const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
 // Gardez ces couleurs synchronisées avec Resources/themes.css : le JS ne peut pas lire les
 // jetons d'un thème non actif, donc l'aperçu de chaque pastille est dupliqué ici à la main.
+// Doit rester synchronisée avec windowActionForEvent: dans Status.m — c'est la seule source
+// de vérité des raccourcis, et l'affichage ne doit pas mentir sur ce qui est réellement câblé.
+const WINDOW_SHORTCUTS=[
+  ['⌃⌥⇧←','Moitié gauche'],['⌃⌥⇧→','Moitié droite'],
+  ['⌃⌥⇧U','2/3 gauche'],['⌃⌥⇧I','2/3 droite'],
+  ['⌃⌥⇧J','Tiers gauche'],['⌃⌥⇧K','Tiers centre'],['⌃⌥⇧L','Tiers droite'],
+  ['⌃⌥⇧Y','3/4 gauche'],['⌃⌥⇧O','3/4 droite'],
+  ['⌃⌥⇧↑','Plein écran'],['⌃⌥⇧↓','Centrer'],
+  ['⌃⌥⌘→','Écran suivant'],['⌃⌥⌘←','Écran précédent'],
+];
 const THEMES=[
   {id:'blueprint',label:'Blueprint',blue:'#67E8F9',purple:'#A78BFA'},
   {id:'phosphore',label:'Phosphore',blue:'#59FFB0',purple:'#2E8F5E'},
@@ -235,6 +248,13 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></div>
+  ${p.windowManager?`
+  <div class="setting"><div class="setting-copy"><strong>Marge entre fenêtres</strong><small>Espace laissé entre deux fenêtres voisines. À 0 elles se touchent.</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapBetween||0)===v?'on':''}" onclick="send('setWindowGap',{which:'between',value:${v}})">${v}</button>`).join('')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Marge des bords d’écran</strong><small>Indépendante de la précédente : utile si vous gardez un Dock latéral visible.</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapEdge||0)===v?'on':''}" onclick="send('setWindowGap',{which:'edge',value:${v}})">${v}</button>`).join('')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Respecter la barre des menus et le Dock</strong><small>Désactivé, les fenêtres occupent l’écran physique entier et passent dessous.</small></div><button class="button ${p.windowReservedAreas?'on':''}" onclick="send('toggleWindowReservedAreas')">${p.windowReservedAreas?'Activé':'Désactivé'}</button></div>
+  <div class="setting"><div class="setting-copy"><strong>Raccourcis</strong><small>Non modifiables pour l’instant.</small></div><div class="shortcut-table">${WINDOW_SHORTCUTS.map(([k,l])=>`<div class="shortcut-row"><kbd>${k}</kbd><span>${l}</span></div>`).join('')}</div></div>
+  `:''}
   <div class="setting"><div class="setting-copy"><strong>Raccourci clavier global</strong><small>⌘⇧S ouvre et ferme le panneau depuis n’importe quelle application. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.globalShortcut&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : le raccourci ne répondra pas.</strong>':''}</small></div><button class="button ${p.globalShortcut?'on':''}" onclick="send('toggleGlobalShortcut')">${p.globalShortcut?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></div>
