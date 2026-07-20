@@ -68,6 +68,32 @@ Apple), seulement une empreinte stable d'un build à l'autre. Pour le vérifier 
 codesign -d -r- outputs/Status.app   # l'exigence désignée doit être identique entre deux builds
 ```
 
+## Demandes d'accès au Trousseau pendant le développement
+
+Recompiler l'app provoque une demande d'accès au Trousseau à son lancement suivant, et
+« Toujours autoriser » ne l'empêche pas de revenir. Ce n'est pas un défaut de configuration :
+
+- le Trousseau classique attache l'autorisation à l'**empreinte du binaire**, pas au certificat ;
+- chaque compilation change cette empreinte, donc l'autorisation accordée ne vaut que pour le
+  binaire qu'on vient de remplacer.
+
+Le Trousseau « protection des données », lui, indexe sur l'identité de signature et n'aurait pas
+ce défaut — mais il exige l'entitlement `keychain-access-groups`, réservé aux identifiants
+d'équipe Apple Developer. Mesuré : sans cet identifiant, `SecItemAdd` renvoie `-34018`
+(entitlement manquant), et déclarer l'entitlement quand même fait **tuer le binaire au lancement**
+par le système. Cette voie est fermée pour un certificat auto-signé.
+
+En usage normal — sans recompilation — l'empreinte ne change pas et aucune demande n'apparaît.
+La friction est donc limitée aux sessions de développement. Deux façons de la réduire :
+
+- grouper les déploiements plutôt que réinstaller après chaque modification ;
+- ou désactiver la source « direct » le temps de la session : sans cookie configuré, l'app ne
+  touche jamais au Trousseau.
+
+Le cookie est lu **une seule fois par lancement** et mémorisé (voir `usageCookie` dans
+`Native/Status.m`) : le relire à chaque rafraîchissement multipliait les demandes, puisque le
+survol de l'icône ouvre le popover, ce qui déclenche un rafraîchissement.
+
 ## Installer sur un autre Mac
 
 L'app n'est pas notarisée (cela exigerait un compte Apple Developer payant) : Gatekeeper la
