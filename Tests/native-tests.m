@@ -666,6 +666,46 @@ static void TestWindowMoveToScreen(void) {
     Check(CGRectContainsRect(ecranPetit, bornee), @"bornée à l'écran d'arrivée, jamais hors champ");
 }
 
+static void TestDuoLayouts(void) {
+    Section(@"TMDuoLayoutsForSplit — les deux moitiés d'un duo");
+    CGRect zone = CGRectMake(0, 0, 1001, 799);  // largeur indivisible : le pire cas d'arrondi
+    TMWindowGaps none = { 0, 0 };
+    struct { TMDuoSplit split; NSString *nom; double partActive; } cas[] = {
+        { TMDuoHalf,            @"50/50",  0.5      },
+        { TMDuoActiveTwoThirds, @"2/3",    2.0 / 3  },
+        { TMDuoActiveThird,     @"1/3",    1.0 / 3  },
+    };
+    for (int i = 0; i < 3; i++) {
+        TMWindowLayout active, partner;
+        TMDuoLayoutsForSplit(cas[i].split, &active, &partner);
+        CGRect a = TMWindowFrameForLayout(zone, active, none);
+        CGRect b = TMWindowFrameForLayout(zone, partner, none);
+
+        CheckEqual(@(CGRectGetMinX(a)), @(CGRectGetMinX(zone)),
+                   ([NSString stringWithFormat:@"%@ : l'active part du bord gauche", cas[i].nom]));
+        CheckEqual(@(CGRectGetMaxX(a)), @(CGRectGetMinX(b)),
+                   ([NSString stringWithFormat:@"%@ : les deux se touchent exactement", cas[i].nom]));
+        CheckEqual(@(CGRectGetMaxX(b)), @(CGRectGetMaxX(zone)),
+                   ([NSString stringWithFormat:@"%@ : la partenaire atteint le bord droit", cas[i].nom]));
+        Check(fabs(CGRectGetWidth(a) / CGRectGetWidth(zone) - cas[i].partActive) < 0.01,
+              ([NSString stringWithFormat:@"%@ : l'active occupe la bonne part", cas[i].nom]));
+    }
+
+    TMWindowLayout active, partner;
+    TMDuoLayoutsForSplit(TMDuoActiveTwoThirds, &active, &partner);
+    Check(active != partner, @"les deux dispositions d'un duo sont distinctes");
+}
+
+static void TestDuoIdentifiers(void) {
+    Section(@"TMDuoSplitFromIdentifier — entrée venue de la webview");
+    TMDuoSplit split;
+    Check(TMDuoSplitFromIdentifier(@"duo-half", &split) && split == TMDuoHalf, @"duo-half");
+    Check(TMDuoSplitFromIdentifier(@"duo-two-thirds", &split) && split == TMDuoActiveTwoThirds, @"duo-two-thirds");
+    Check(TMDuoSplitFromIdentifier(@"duo-third", &split) && split == TMDuoActiveThird, @"duo-third");
+    Check(!TMDuoSplitFromIdentifier(@"duo-quart", &split), @"partage inconnu refusé");
+    Check(!TMDuoSplitFromIdentifier(nil, &split), @"nil refusé");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -695,6 +735,8 @@ int main(void) {
         TestWindowLayoutCenter();
         TestWindowLayoutIdentifiers();
         TestWindowMoveToScreen();
+        TestDuoLayouts();
+        TestDuoIdentifiers();
         TestForecastExhaustion();
         TestTopProcesses();
         TestThresholdFire();

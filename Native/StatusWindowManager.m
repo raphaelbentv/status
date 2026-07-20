@@ -99,6 +99,31 @@ CGRect TMWindowFrameMovedToScreen(CGRect frame, CGRect fromScreen, CGRect toScre
     return CGRectMake(x, y, w, h);
 }
 
+// Les paires réutilisent les dispositions simples : leur complémentarité est donc garantie par
+// la même arithmétique en fractions, et non par un second calcul qui pourrait diverger.
+void TMDuoLayoutsForSplit(TMDuoSplit split, TMWindowLayout *outActive, TMWindowLayout *outPartner) {
+    TMWindowLayout active, partner;
+    switch (split) {
+        case TMDuoActiveTwoThirds: active = TMLayoutLeftTwoThirds; partner = TMLayoutRightThird;     break;
+        case TMDuoActiveThird:     active = TMLayoutLeftThird;     partner = TMLayoutRightTwoThirds; break;
+        case TMDuoHalf:
+        default:                   active = TMLayoutLeftHalf;      partner = TMLayoutRightHalf;      break;
+    }
+    if (outActive) *outActive = active;
+    if (outPartner) *outPartner = partner;
+}
+
+BOOL TMDuoSplitFromIdentifier(NSString *identifier, TMDuoSplit *outSplit) {
+    if (![identifier isKindOfClass:NSString.class]) return NO;
+    TMDuoSplit split;
+    if ([identifier isEqualToString:@"duo-half"]) split = TMDuoHalf;
+    else if ([identifier isEqualToString:@"duo-two-thirds"]) split = TMDuoActiveTwoThirds;
+    else if ([identifier isEqualToString:@"duo-third"]) split = TMDuoActiveThird;
+    else return NO;
+    if (outSplit) *outSplit = split;
+    return YES;
+}
+
 #pragma mark - Application (parle aux autres processus)
 
 // L'API d'Accessibilité travaille en coordonnées « écran » avec l'origine en haut à gauche du
@@ -115,6 +140,16 @@ static CGRect TMFlipFromAX(CGRect axRect) {
     return CGRectMake(CGRectGetMinX(axRect), maxY - CGRectGetMaxY(axRect),
                       CGRectGetWidth(axRect), CGRectGetHeight(axRect));
 }
+
+@interface TMWindowCandidate ()
+@property AXUIElementRef element;
+@property NSString *appName, *title;
+@property pid_t pid;
+@end
+
+@implementation TMWindowCandidate
+- (void)dealloc { if (_element) CFRelease(_element); }
+@end
 
 @implementation TMWindowManager
 
@@ -215,6 +250,78 @@ static CGRect TMFlipFromAX(CGRect axRect) {
     }
     CFRelease(window);
     return ok;
+}
+
+// Parcourt les applications ordinaires (celles qui ont une icône au Dock) et relève leurs
+// fenêtres. Les agents de fond n'ont pas de fenêtre à paver, et les inclure ralentirait le
+// sélecteur pour rien.
+- (NSArray<TMWindowCandidate *> *)candidatesForDuo {
+    if (!AXIsProcessTrusted()) return @[];
+    NSMutableArray<TMWindowCandidate *> *candidates = [NSMutableArray array];
+    pid_t mine = NSRunningApplication.currentApplication.processIdentifier;
+    pid_t frontPid = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
+
+    AXUIElementRef focused = [self copyFocusedWindow];
+    CGRect focusedFrame = focused ? [self frameOf:focused] : CGRectNull;
+    if (focused) CFRelease(focused);
+
+    for (NSRunningApplication *app in NSWorkspace.sharedWorkspace.runningApplications) {
+        if (app.activationPolicy != NSApplicationActivationPolicyRegular) continue;
+        if (app.processIdentifier == mine) continue;  // ne jamais se proposer soi-même
+
+        AXUIElementRef axApp = AXUIElementCreateApplication(app.processIdentifier);
+        if (!axApp) continue;
+        CFTypeRef windowList = NULL;
+        if (AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute, &windowList) == kAXErrorSuccess && windowList) {
+            for (id windowRef in (__bridge NSArray *)windowList) {
+                AXUIElementRef window = (__bridge AXUIElementRef)windowRef;
+                if ([self isFullScreen:window]) continue;
+
+                // Une fenêtre non redimensionnable ne peut pas participer à un duo : l'écarter
+                // ici évite de la proposer puis d'échouer silencieusement.
+                Boolean settable = false;
+                if (AXUIElementIsAttributeSettable(window, kAXSizeAttribute, &settable) != kAXErrorSuccess || !settable) continue;
+
+                // La fenêtre déjà active n'est pas sa propre partenaire.
+                if (app.processIdentifier == frontPid && !CGRectIsNull(focusedFrame)
+                    && CGRectEqualToRect([self frameOf:window], focusedFrame)) continue;
+
+                CFTypeRef titleValue = NULL;
+                NSString *title = @"";
+                if (AXUIElementCopyAttributeValue(window, kAXTitleAttribute, &titleValue) == kAXErrorSuccess && titleValue) {
+                    title = [(__bridge NSString *)titleValue copy] ?: @"";
+                    CFRelease(titleValue);
+                }
+                TMWindowCandidate *candidate = [TMWindowCandidate new];
+                candidate.element = (AXUIElementRef)CFRetain(window);
+                candidate.appName = app.localizedName ?: @"?";
+                candidate.title = title.length ? title : (app.localizedName ?: @"");
+                candidate.pid = app.processIdentifier;
+                [candidates addObject:candidate];
+            }
+            CFRelease(windowList);
+        }
+        CFRelease(axApp);
+    }
+    return candidates;
+}
+
+- (BOOL)applyDuo:(TMDuoSplit)split withPartner:(TMWindowCandidate *)partner {
+    AXUIElementRef active = [self copyFocusedWindow];
+    if (!active || !partner.element) { if (active) CFRelease(active); return NO; }
+
+    TMWindowLayout activeLayout, partnerLayout;
+    TMDuoLayoutsForSplit(split, &activeLayout, &partnerLayout);
+    NSScreen *screen = [self screenForFrame:[self frameOf:active]];
+    CGRect zone = [self zoneForScreen:screen];
+    TMWindowGaps gaps = [self currentGaps];
+
+    // La partenaire d'abord : la placer peut la faire passer devant, et terminer par l'active
+    // rend le focus à celle d'où l'on vient.
+    BOOL partnerOK = [self setFrame:TMWindowFrameForLayout(zone, partnerLayout, gaps) on:partner.element];
+    BOOL activeOK = [self setFrame:TMWindowFrameForLayout(zone, activeLayout, gaps) on:active];
+    CFRelease(active);
+    return partnerOK && activeOK;
 }
 
 - (BOOL)moveToAdjacentScreen:(BOOL)next {

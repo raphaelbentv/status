@@ -329,6 +329,12 @@ static const CGFloat TMTitleBarHeight = 28;
 @property TMKeyboardLock *keyboardLock;
 @property id globalShortcutMonitor, localShortcutMonitor;
 @property TMWindowManager *windowManager;
+@property NSPanel *pickerPanel;
+@property WKWebView *pickerWebView;
+@property NSArray<TMWindowCandidate *> *pickerCandidates;
+@property TMDuoSplit pickerSplit;
+@property id pickerDismissObserver;
+@property pid_t duoOriginPid;
 @property id windowGlobalMonitor, windowLocalMonitor;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
@@ -346,6 +352,15 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSMutableDictionary *notifiedThresholds;  // "windowId@resetsAt" -> highest % already alerted
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
+@end
+
+// Sans bordure, une fenêtre refuse d'être clé — canBecomeKeyWindow vaut NO par défaut. Le
+// sélecteur vit du clavier : il doit donc le redéclarer explicitement.
+@interface TMPickerPanel : NSPanel
+@end
+@implementation TMPickerPanel
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return NO; }  // il ne remplace pas la fenêtre principale de l'app
 @end
 
 @implementation TMAppDelegate
@@ -814,11 +829,26 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     } else if (flags == TMModCtrlAltCmd) {
         if (key == TMKeyRight) return @"screen-next";
         if (key == TMKeyLeft)  return @"screen-prev";
+        if (key == TMKeyU)     return @"duo-half";
+        if (key == TMKeyI)     return @"duo-two-thirds";
+        if (key == TMKeyO)     return @"duo-third";
     }
     return nil;
 }
 
 - (void)performWindowAction:(NSString *)action {
+    TMDuoSplit split;
+    if (TMDuoSplitFromIdentifier(action, &split)) {
+        // Mémoriser d'où l'on vient : ouvrir le panneau donne le focus à Status, et « la fenêtre
+        // active » ne doit pas devenir la nôtre.
+        // Même garde-fou que pour le placement simple : si c'est Status qui a le focus, il n'y a
+        // pas de « fenêtre active » à apparier — mieux vaut ne rien faire que de se paver soi-même.
+        pid_t origin = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
+        if (origin == NSRunningApplication.currentApplication.processIdentifier) return;
+        self.duoOriginPid = origin;
+        [self openPickerForSplit:split];
+        return;
+    }
     if ([action isEqualToString:@"screen-next"]) { [self.windowManager moveToAdjacentScreen:YES]; return; }
     if ([action isEqualToString:@"screen-prev"]) { [self.windowManager moveToAdjacentScreen:NO]; return; }
     TMWindowLayout layout;
@@ -850,6 +880,104 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
 - (void)removeWindowShortcuts {
     if (self.windowGlobalMonitor) { [NSEvent removeMonitor:self.windowGlobalMonitor]; self.windowGlobalMonitor = nil; }
     if (self.windowLocalMonitor) { [NSEvent removeMonitor:self.windowLocalMonitor]; self.windowLocalMonitor = nil; }
+}
+
+#pragma mark - Sélecteur de duo
+
+// Panneau flottant portant une WKWebView : le sélecteur hérite ainsi de themes.css et suit le
+// thème choisi sans une ligne de CSS dupliquée.
+- (void)buildPickerIfNeeded {
+    if (self.pickerPanel) return;
+    NSRect frame = NSMakeRect(0, 0, 520, 400);
+    // Pas de NonactivatingPanel : ce style empêche justement la prise de focus clavier, et le
+    // sélecteur ne vit que du clavier. Vérifié — avec lui, isKeyWindow restait à 0.
+    self.pickerPanel = [[TMPickerPanel alloc] initWithContentRect:frame
+                                                        styleMask:NSWindowStyleMaskBorderless
+                                                          backing:NSBackingStoreBuffered defer:NO];
+    self.pickerPanel.releasedWhenClosed = NO;  // même piège que la fenêtre principale
+    self.pickerPanel.level = NSFloatingWindowLevel;
+    self.pickerPanel.opaque = NO;
+    self.pickerPanel.backgroundColor = NSColor.clearColor;
+    self.pickerPanel.hidesOnDeactivate = NO;
+
+    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+    [configuration.userContentController addScriptMessageHandler:self name:@"native"];
+    self.pickerWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+    self.pickerWebView.navigationDelegate = self;
+    self.pickerWebView.underPageBackgroundColor = NSColor.clearColor;
+    self.pickerPanel.contentView = self.pickerWebView;
+    NSURL *url = [NSBundle.mainBundle URLForResource:@"picker" withExtension:@"html"];
+    [self.pickerWebView loadFileURL:url allowingReadAccessToURL:url.URLByDeletingLastPathComponent];
+}
+
+- (void)openPickerForSplit:(TMDuoSplit)split {
+    NSArray<TMWindowCandidate *> *candidates = [self.windowManager candidatesForDuo];
+    if (!candidates.count) return;  // rien à choisir : ne pas ouvrir un panneau vide
+
+    [self buildPickerIfNeeded];
+    self.pickerCandidates = candidates;
+    self.pickerSplit = split;
+
+    NSMutableArray *payload = [NSMutableArray array];
+    for (TMWindowCandidate *candidate in candidates) {
+        [payload addObject:@{ @"appName": candidate.appName ?: @"", @"title": candidate.title ?: @"" }];
+    }
+    NSString *splitId = split == TMDuoActiveTwoThirds ? @"duo-two-thirds"
+                      : split == TMDuoActiveThird ? @"duo-third" : @"duo-half";
+    NSDictionary *data = @{ @"windows": payload, @"split": splitId,
+                            @"activeApp": NSWorkspace.sharedWorkspace.frontmostApplication.localizedName ?: @"" };
+    NSData *json = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
+    NSString *script = [NSString stringWithFormat:@"window.StatusPicker && window.StatusPicker.open(%@);",
+                        [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]];
+
+    // Le thème suit celui du tableau de bord.
+    NSString *theme = [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint";
+    [self.pickerWebView evaluateJavaScript:
+        [NSString stringWithFormat:@"document.documentElement.setAttribute('data-theme','%@');", theme]
+                         completionHandler:nil];
+    [self.pickerWebView evaluateJavaScript:script completionHandler:nil];
+
+    NSScreen *screen = NSScreen.mainScreen;
+    NSRect visible = screen.visibleFrame;
+    [self.pickerPanel setFrameOrigin:NSMakePoint(NSMidX(visible) - 260, NSMidY(visible) - 200)];
+    // Activer l'app AVANT de demander la fenêtre clé : tant que l'application n'est pas active,
+    // makeKeyAndOrderFront: ordonne devant sans jamais donner le focus clavier.
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.pickerPanel makeKeyAndOrderFront:nil];
+    [self.pickerPanel makeFirstResponder:self.pickerWebView];
+
+    // Le panneau ne survit pas à un changement d'application — mais on écoute la désactivation
+    // de l'app, pas la perte de fenêtre clé : cette dernière se produit pendant la séquence
+    // d'activation elle-même et refermait le panneau 0,4 s après l'avoir ouvert.
+    __weak typeof(self) weakSelf = self;
+    if (!self.pickerDismissObserver) {
+        self.pickerDismissObserver = [NSNotificationCenter.defaultCenter
+            addObserverForName:NSApplicationDidResignActiveNotification object:nil queue:nil
+                    usingBlock:^(NSNotification *note) { [weakSelf closePicker]; }];
+    }
+}
+
+- (void)closePicker {
+    [self.pickerPanel orderOut:nil];
+    self.pickerCandidates = nil;
+}
+
+// La fenêtre active est celle d'avant l'ouverture du panneau : il faut donc rendre le focus à
+// l'application précédente avant de placer quoi que ce soit, sinon « l'active » serait Status.
+- (void)completeDuoWithIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.pickerCandidates.count) { [self closePicker]; return; }
+    TMWindowCandidate *partner = self.pickerCandidates[index];
+    TMDuoSplit split = self.pickerSplit;
+    [self closePicker];
+
+    for (NSRunningApplication *app in NSWorkspace.sharedWorkspace.runningApplications) {
+        if (app.processIdentifier == self.duoOriginPid) { [app activateWithOptions:0]; break; }
+    }
+    // Laisser l'activation aboutir avant de lire la fenêtre focalisée.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf.windowManager applyDuo:split withPartner:partner];
+    });
 }
 
 - (void)toggleStatusPopover:(id)sender {
@@ -934,6 +1062,8 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [self installGlobalShortcut];
         [self pushData];
     }
+    if ([action isEqualToString:@"duoPick"]) [self completeDuoWithIndex:[body[@"index"] integerValue]];
+    if ([action isEqualToString:@"duoCancel"]) [self closePicker];
     if ([action isEqualToString:@"toggleWindowManager"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"windowManagerEnabled"] forKey:@"windowManagerEnabled"];
