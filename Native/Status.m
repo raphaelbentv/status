@@ -557,13 +557,37 @@ static const CGFloat TMTitleBarHeight = 28;
     self.usageWebLoadCompletion = completion;
     WKWebView *webView = [self ensureUsageWebView];
     [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://claude.ai/settings/usage"]]];
-    // Cloudflare may interpose a challenge page; give WebKit room to solve it before giving up.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        void (^pending)(BOOL) = self.usageWebLoadCompletion;
-        if (!pending) return;
+    // Cloudflare interpose parfois un défi qui se résout par une redirection JavaScript que WebKit
+    // ne signale pas toujours comme une nouvelle navigation : se fier au seul didFinishNavigation
+    // laissait l'app bloquée après un redémarrage, quand la réputation IP force un défi persistant.
+    // On sonde donc le titre activement, jusqu'à sortir de l'interstitiel ou expirer.
+    [self pollUsageWebViewReadyWithDeadline:[NSDate dateWithTimeIntervalSinceNow:25]];
+}
+
+- (void)pollUsageWebViewReadyWithDeadline:(NSDate *)deadline {
+    void (^pending)(BOOL) = self.usageWebLoadCompletion;
+    if (!pending) return;  // déjà résolu par didFinishNavigation ou une sonde antérieure
+    if ([deadline timeIntervalSinceNow] <= 0) {
         self.usageWebLoadCompletion = nil;
         pending(NO);
-    });
+        return;
+    }
+    [self.usageWebView evaluateJavaScript:@"document.title" completionHandler:^(id title, NSError *error) {
+        if (!self.usageWebLoadCompletion) return;  // résolu entre-temps
+        BOOL challenging = [title isKindOfClass:NSString.class] && [(NSString *)title containsString:@"Just a moment"];
+        BOOL loaded = [title isKindOfClass:NSString.class] && [(NSString *)title length] && !challenging;
+        if (loaded) {
+            self.usageWebLoaded = YES;
+            void (^done)(BOOL) = self.usageWebLoadCompletion;
+            self.usageWebLoadCompletion = nil;
+            done(YES);
+            return;
+        }
+        // Toujours sur le défi (ou page vide) : réessayer dans une seconde jusqu'à l'échéance.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self pollUsageWebViewReadyWithDeadline:deadline];
+        });
+    }];
 }
 
 - (void)fetchClaudeUsageViaWeb:(NSString *)orgId completion:(void (^)(NSDictionary *json, NSError *error))completion {
