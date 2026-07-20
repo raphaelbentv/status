@@ -46,6 +46,13 @@ NSString *TMSupportDirectory(void);
 NSString *TMHistoryPath(void);
 NSArray *TMLoadHistory(void);
 
+// Historique en CSV, format long : une ligne par (instant, fenêtre). Colonnes
+// timestamp_unix, date_iso_utc, fenetre, pourcent. Le format long tient sans peine des fenêtres
+// qui apparaissent et disparaissent (Fable, limites OpenAI), là où un format large laisserait des
+// trous et changerait de colonnes au fil du temps. Trié par instant croissant.
+NSString *TMHistoryToCSV(NSArray *history);
+
+
 // Instant d'épuisement prévu d'une fenêtre, extrapolé de son historique récent — « au rythme
 // actuel, épuisé jeudi à 16 h », l'information qui fait décider là où « 78 % » ne fait que
 // constater. `history` est le format de TMLoadHistory : [{ t: secondes, p: { clé: pourcent } }].

@@ -1107,6 +1107,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
     if ([action isEqualToString:@"duoPick"]) [self completeDuoWithIndex:[body[@"index"] integerValue]];
     if ([action isEqualToString:@"duoCancel"]) [self closePicker];
+    if ([action isEqualToString:@"exportHistoryCSV"]) [self exportHistoryCSV];
     if ([action isEqualToString:@"toggleWindowManager"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"windowManagerEnabled"] forKey:@"windowManagerEnabled"];
@@ -1256,6 +1257,20 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
 - (void)invalidateUsageCookieCache {
     self.usageCookieLoaded = NO;
     self.usageCookieCache = nil;
+}
+
+// Export de l'historique en CSV (feature 15). Panneau de sauvegarde système ; l'utilisateur
+// choisit où écrire — l'app n'envoie rien nulle part.
+- (void)exportHistoryCSV {
+    NSString *csv = TMHistoryToCSV(TMLoadHistory());
+    NSSavePanel *panel = [NSSavePanel savePanel];
+    panel.nameFieldStringValue = @"status-historique.csv";
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSModalResponseOK || !panel.URL) return;
+        NSError *error = nil;
+        [csv writeToURL:panel.URL atomically:YES encoding:NSUTF8StringEncoding error:&error];
+        if (error) NSLog(@"Export CSV échoué : %@", error);
+    }];
 }
 
 - (void)pushData {

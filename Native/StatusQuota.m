@@ -306,6 +306,32 @@ BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resets
     return YES;
 }
 
+NSString *TMHistoryToCSV(NSArray *history) {
+    NSMutableString *csv = [NSMutableString stringWithString:@"timestamp_unix,date_iso_utc,fenetre,pourcent\n"];
+    static NSDateFormatter *iso;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        iso = [NSDateFormatter new];
+        iso.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+        iso.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+        iso.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    });
+    NSArray *sorted = [history sortedArrayUsingComparator:^(NSDictionary *a, NSDictionary *b) {
+        return [@(TMInteger(a[@"t"])) compare:@(TMInteger(b[@"t"]))];
+    }];
+    for (NSDictionary *row in sorted) {
+        if (![row isKindOfClass:NSDictionary.class]) continue;
+        long long t = TMInteger(row[@"t"]);
+        NSString *date = [iso stringFromDate:[NSDate dateWithTimeIntervalSince1970:t]];
+        NSDictionary *points = [row[@"p"] isKindOfClass:NSDictionary.class] ? row[@"p"] : @{};
+        // Clés triées pour un export déterministe d'un lancement à l'autre.
+        for (NSString *key in [points.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            [csv appendFormat:@"%lld,%@,%@,%ld\n", t, date, key, (long)TMNumber(points[key])];
+        }
+    }
+    return csv;
+}
+
 NSArray *TMLoadHistory(void) {
     NSData *data = [NSData dataWithContentsOfFile:TMHistoryPath()];
     NSArray *history = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;

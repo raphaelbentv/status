@@ -728,6 +728,27 @@ static void TestWatchdog(void) {
     Check(!TMWatchdogShouldReload(&fails, NO, 3), @"après succès : on repart bien de 1");
 }
 
+static void TestHistoryCSV(void) {
+    Section(@"TMHistoryToCSV — export format long");
+    NSArray *history = @[
+        @{ @"t": @1700000000, @"p": @{ @"claude:seven_day": @44, @"openai:codex-10080": @30 } },
+        @{ @"t": @1700000300, @"p": @{ @"claude:seven_day": @45 } },
+    ];
+    NSString *csv = TMHistoryToCSV(history);
+    NSArray<NSString *> *lines = [csv componentsSeparatedByString:@"\n"];
+    CheckEqual(lines.firstObject, @"timestamp_unix,date_iso_utc,fenetre,pourcent", @"en-tête présent");
+    Check([csv containsString:@"1700000000,"], @"le timestamp brut est écrit");
+    Check([csv containsString:@"2023-11-14T"], @"la date ISO est dérivée du timestamp");
+    Check([csv containsString:@",claude:seven_day,44"], @"une ligne par fenêtre");
+    Check([csv containsString:@",openai:codex-10080,30"], @"OpenAI exporté aussi");
+    Check([csv containsString:@",claude:seven_day,45"], @"le second instant est présent");
+    // 1 en-tête + 2 fenêtres au 1er instant + 1 au 2e = 4 lignes (hors ligne vide finale)
+    NSInteger nonEmpty = 0; for (NSString *l in lines) if (l.length) nonEmpty++;
+    CheckEqual(@(nonEmpty), @4, @"une ligne d'en-tête et trois lignes de données");
+
+    Check([TMHistoryToCSV(@[]) hasPrefix:@"timestamp_unix"], @"historique vide : en-tête seul, pas de crash");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -759,6 +780,7 @@ int main(void) {
         TestWindowMoveToScreen();
         TestDuoLayouts();
         TestDuoIdentifiers();
+        TestHistoryCSV();
         TestStaleAlert();
         TestWatchdog();
         TestForecastExhaustion();
