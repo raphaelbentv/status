@@ -11,6 +11,7 @@
 #import "StatusKeyboardLock.h"
 #import "StatusCodexServer.h"
 #import "StatusWindowManager.h"
+#import "StatusCost.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
@@ -383,6 +384,8 @@ static const CGFloat TMTitleBarHeight = 28;
 // Le secret ne change que quand l'utilisateur le change : on invalide le cache à ce moment-là.
 @property (copy) NSString *usageCookieCache;
 @property BOOL usageCookieLoaded;
+@property NSDictionary *costScan;    // dernier balayage des coûts terminal (feature 16)
+@property BOOL costScanning;
 @property BOOL directWasStale;      // front pour l'alerte de péremption (feature 1)
 @property NSInteger directFailures; // compteur du chien de garde (feature 3)
 @property id globalShortcutMonitor, localShortcutMonitor;
@@ -453,6 +456,7 @@ static const CGFloat TMTitleBarHeight = 28;
     [self buildStatusItem];
     [self scheduleRefresh];
     [self startSystemMonitor];
+    [self refreshCostsInBackground];
     self.keyboardLock = [TMKeyboardLock new];
     __weak typeof(self) weakLockSelf = self;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
@@ -1276,6 +1280,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"claude": self.claudeAccount ?: TMEmptyClaudeAccount()
         },
         @"history": history,
+        @"costs": [self costPayload],
         @"forecasts": [self forecastsFromHistory:history],
         @"prefs": @{
             @"launchAtLogin": @([self launchAtLoginEnabled]),
@@ -1368,6 +1373,42 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [csv writeToURL:panel.URL atomically:YES encoding:NSUTF8StringEncoding error:&error];
         if (error) NSLog(@"Export CSV échoué : %@", error);
     }];
+}
+
+// Coût équivalent API (feature 16). Le premier balayage lit ~700 Mo de logs (~20 s) : en fond,
+// avec « calcul en cours ». Les suivants sont incrémentaux (~0,2 s) grâce au cache token-usage.json.
+- (void)refreshCostsInBackground {
+    if (self.costScanning) return;
+    self.costScanning = YES;
+    [self pushData];  // affiche « calcul en cours » au premier passage
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary *scan = TMScanTerminalCosts();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.costScan = scan;
+            self.costScanning = NO;
+            [self pushData];
+        });
+    });
+}
+
+// Coûts par fenêtre, dérivés du dernier balayage. nil tant que le premier n'a pas abouti.
+- (NSDictionary *)costPayload {
+    if (!self.costScan) return @{ @"scanning": @(self.costScanning) };
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSDictionary *claude = self.costScan[@"claude"], *codex = self.costScan[@"codex"];
+    NSDictionary *cb = claude[@"buckets"], *xb = codex[@"buckets"];
+    return @{
+        @"scanning": @NO,
+        @"asOf": TMPricesAsOfDate,
+        // Étiquette « usage terminal » côté web : le web (claude.ai, chatgpt.com) n'est pas journalisé.
+        @"claude": @{ @"session": @(TMCostSince(cb, now - 5 * 3600)),
+                      @"weekly": @(TMCostSince(cb, now - 7 * 86400)),
+                      @"total8d": @(TMCostSince(cb, 0)) },
+        // Codex : « approximatif » — deux signaux de tokens divergent, et des modèles sans tarif.
+        @"codex": @{ @"weekly": @(TMCostSince(xb, now - 7 * 86400)),
+                     @"total8d": @(TMCostSince(xb, 0)),
+                     @"unpricedTokens": codex[@"unpriced"] ?: @0 },
+    };
 }
 
 - (void)pushData {
@@ -1883,6 +1924,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         self.refreshing = NO;
         [self applyBackoffFromCurrentState];
         [self recordHistoryAndNotify];
+        [self refreshCostsInBackground];  // incrémental, ~0,2 s à chaud
         [self pushData];
     });
 }

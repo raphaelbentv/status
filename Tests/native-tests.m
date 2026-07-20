@@ -12,6 +12,7 @@
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
 #import "StatusWindowManager.h"
+#import "StatusCost.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
 
 static int gFailures = 0;
@@ -749,6 +750,75 @@ static void TestHistoryCSV(void) {
     Check([TMHistoryToCSV(@[]) hasPrefix:@"timestamp_unix"], @"historique vide : en-tête seul, pas de crash");
 }
 
+static void TestCostCacheSemantics(void) {
+    Section(@"TMCostForTokens — les deux sémantiques de cache (LE test)");
+    // Claude : compartiments DISJOINTS. input hors cache + cache_read + cache_write.
+    TMPrices opus = { 5.0, 25.0, 0.5, 6.25 };  // par 1M
+    TMTokens claude = { .input = 1000, .output = 200, .cacheRead = 9000, .cacheWrite = 500 };
+    double c = TMCostForTokens(claude, opus, TMCostProviderClaude);
+    // (1000*5 + 200*25 + 9000*0.5 + 500*6.25) / 1e6 = 17625 / 1e6
+    Check(fabs(c - 0.017625) < 1e-9, @"Claude : somme des trois compartiments disjoints");
+
+    // OpenAI : input INCLUT le cache. On facture (input - cached) au plein tarif, cached au rabais.
+    TMPrices gpt = { 5.0, 30.0, 0.5, 6.25 };
+    TMTokens openai = { .input = 10000, .output = 200, .cacheRead = 9000, .cacheWrite = 0 };
+    double o = TMCostForTokens(openai, gpt, TMCostProviderOpenAI);
+    // ((10000-9000)*5 + 9000*0.5 + 200*30) / 1e6 = 15500 / 1e6
+    Check(fabs(o - 0.0155) < 1e-9, @"OpenAI : (input − cache) au plein tarif, cache au rabais");
+
+    // Le piège : traiter l'input OpenAI comme disjoint surcompterait massivement.
+    double faux = TMCostForTokens(openai, gpt, TMCostProviderClaude);  // sémantique Claude sur des tokens OpenAI
+    Check(faux > o * 3, @"la mauvaise sémantique surcompterait d'un facteur ~4 — d'où l'importance du test");
+
+    TMTokens vide = {0};
+    Check(TMCostForTokens(vide, opus, TMCostProviderClaude) == 0, @"aucun token : coût nul");
+}
+
+static void TestPriceTable(void) {
+    Section(@"TMPricesForModel — table datée, jamais de prix fabriqué");
+    TMPrices p;
+    Check(TMPricesForModel(@"claude-opus-4-8", &p) && p.output == 25.0, @"opus 4.8 connu");
+    Check(TMPricesForModel(@"claude-fable-5", &p) && p.input == 10.0, @"fable 5 connu");
+    Check(!TMPricesForModel(@"gpt-5.4", &p), @"modèle sans tarif : refusé, pas de prix inventé");
+    Check(!TMPricesForModel(@"", &p), @"chaîne vide refusée");
+    Check(!TMPricesForModel(nil, &p), @"nil refusé");
+}
+
+static void TestParseClaudeLine(void) {
+    Section(@"TMParseClaudeUsageLine — forme réelle");
+    NSDictionary *line = @{ @"message": @{ @"model": @"claude-fable-5", @"usage": @{
+        @"input_tokens": @20368, @"cache_creation_input_tokens": @6654,
+        @"cache_read_input_tokens": @23786, @"output_tokens": @1179 } } };
+    TMTokens t; NSString *model = nil;
+    Check(TMParseClaudeUsageLine(line, &t, &model), @"ligne chiffrable reconnue");
+    Check(t.input == 20368 && t.output == 1179, @"input hors cache et output");
+    Check(t.cacheRead == 23786 && t.cacheWrite == 6654, @"les deux compartiments de cache");
+    CheckEqual(model, @"claude-fable-5", @"modèle extrait");
+    Check(!TMParseClaudeUsageLine(@{@"type": @"summary"}, &t, &model), @"ligne sans usage : ignorée");
+}
+
+static void TestParseCodex(void) {
+    Section(@"TMParseCodexTokenCount — forme réelle, reasoning en sortie");
+    NSDictionary *info = @{ @"total_token_usage": @{
+        @"input_tokens": @22018, @"cached_input_tokens": @9984, @"cache_write_input_tokens": @0,
+        @"output_tokens": @128, @"reasoning_output_tokens": @47, @"total_tokens": @22146 } };
+    TMTokens t; NSString *model = nil;
+    Check(TMParseCodexTokenCount(info, &t, &model), @"token_count chiffrable reconnu");
+    Check(t.input == 22018, @"input total (cache inclus)");
+    Check(t.cacheRead == 9984, @"cached_input en sous-ensemble");
+    Check(t.output == 128 + 47, @"reasoning compté comme de la sortie");
+    Check(!TMParseCodexTokenCount(@{}, &t, &model), @"info sans total_token_usage : ignoré");
+}
+
+static void TestCostSince(void) {
+    Section(@"TMCostSince — somme des tranches depuis une fenêtre");
+    NSDictionary *buckets = @{ @"1000000": @1.5, @"1003600": @2.0, @"1007200": @0.5 };
+    Check(fabs(TMCostSince(buckets, 1003600) - 2.5) < 1e-9, @"depuis la 2e tranche : 2.0 + 0.5");
+    Check(fabs(TMCostSince(buckets, 0) - 4.0) < 1e-9, @"depuis le début : tout");
+    Check(TMCostSince(buckets, 9999999) == 0, @"après la dernière tranche : rien");
+    Check(TMCostSince(@{}, 0) == 0, @"vide : zéro");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -780,6 +850,11 @@ int main(void) {
         TestWindowMoveToScreen();
         TestDuoLayouts();
         TestDuoIdentifiers();
+        TestCostSince();
+        TestCostCacheSemantics();
+        TestPriceTable();
+        TestParseClaudeLine();
+        TestParseCodex();
         TestHistoryCSV();
         TestStaleAlert();
         TestWatchdog();
