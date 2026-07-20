@@ -16,7 +16,7 @@
   .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:var(--radius);padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
   .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:11px;line-height:1}
-  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="settings"]::before{content:"03"}.nav button[data-view="monitor"]::before{content:"04"}
+  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="monitor"]::before{content:"03"}.nav button[data-view="settings"]::before{content:"04"}
   .nav button.active{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--blue);font-weight:700}
   .nav button.active::before{opacity:1;color:var(--blue)}
   .sidebar-spacer{flex:1}.sidebar-bottom{border-top:1px solid var(--hair);padding-top:10px}
@@ -154,8 +154,8 @@
     <nav class="nav">
       <button class="active" data-view="overview">Status</button>
       <button data-view="connections">Connexions</button>
-      <button data-view="settings">Réglages</button>
       <button data-view="monitor">Moniteur</button>
+      <button data-view="settings">Réglages</button>
     </nav>
     <div class="sidebar-spacer"></div>
     <div class="sidebar-bottom">
@@ -165,8 +165,8 @@
   <main>
     <section class="view active" id="overview"></section>
     <section class="view" id="connections"></section>
-    <section class="view" id="settings"></section>
     <section class="view" id="monitor"></section>
+    <section class="view" id="settings"></section>
   </main>
 </div>
 <script>
