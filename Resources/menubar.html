@@ -100,12 +100,13 @@ const reset=w=>{
 };
 const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
 // Coût équivalent compact (feature 16), les deux devises. lastData porte costs.
-const fmtCost=v=>v>=1000?`${(v/1000).toFixed(1)} k$`:v>=10?`${Math.round(v)} $`:`${v.toFixed(2)} $`;
-const fmtCostEur=v=>{const e=v*(lastData?.costs?.eurPerUsd||0.92);return e>=1000?`${(e/1000).toFixed(1)} k€`:e>=10?`${Math.round(e)} €`:`${e.toFixed(2)} €`;};
+// Popover compact : une seule devise, en chiffres entiers (jamais « k »). L'équivalent € vit dans
+// le tableau de bord, où la place existe ; ici on tient sur une ligne étroite (2 colonnes).
+const fmtCost=v=>v>=10?`${Math.round(v).toLocaleString('fr-FR')} $`:`${v.toFixed(2)} $`;
 function providerCost(id){
   const c=lastData?.costs; if(!c||c.scanning)return '';
   const d=id==='openai'?c.codex:c.claude; if(!d||d.total8d==null)return '';
-  return `<div class="mb-cost">${id==='openai'?'~ ':''}${fmtCost(d.total8d)} · ${fmtCostEur(d.total8d)}<span class="mb-cost-lbl"> · API 8 j</span></div>`;
+  return `<div class="mb-cost">${id==='openai'?'~ ':''}${fmtCost(d.total8d)}<span class="mb-cost-lbl"> · API 8 j</span></div>`;
 }
 function provider(id,name,account){
   const windows=account?.windows||[];
