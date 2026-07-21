@@ -554,7 +554,7 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusItem.button.action = @selector(toggleStatusPopover:);
     [self installHoverTracking];
 
-    NSRect frame = NSMakeRect(0, 0, 400, 500);
+    NSRect frame = NSMakeRect(0, 0, 400, 540);  // 540 : le coût équivalent ajoute une rangée par fournisseur
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.menuWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];

@@ -15,7 +15,9 @@
     background-size:var(--bg-size,22px 22px,22px 22px)}
   button{font:inherit;color:inherit}
   .popover{height:100%;display:flex;flex-direction:column;clip-path:var(--clip,none)}
-  .providers{display:grid;grid-template-columns:1fr 1fr;flex:1}
+  /* min-height:0 + overflow-y:auto : filet de sécurité — si le contenu dépasse (Fable +
+     coût + métriques), la zone défile au lieu de pousser le pied de page hors du popover. */
+  .providers{display:grid;grid-template-columns:1fr 1fr;flex:1;min-height:0;overflow-y:auto}
   .provider{padding:18px 16px 14px;text-align:center;min-width:0;position:relative;background:var(--panel-bg)}
   .provider:before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--provider)}
   .provider+.provider{border-left:1px solid var(--hair)}
@@ -37,7 +39,7 @@
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
   .account-note.stale{color:var(--amber);font-weight:700}
   .account-note.live{color:var(--green)}
-  .mb-cost{margin-top:9px;font-size:11px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums}
+  .mb-cost{margin-top:6px;font-size:10.5px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
   .mb-cost-lbl{color:var(--muted);font-weight:400;font-size:9px}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
