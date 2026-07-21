@@ -753,15 +753,22 @@ static void TestHistoryCSV(void) {
 
 static void TestCostCacheSemantics(void) {
     Section(@"TMCostForTokens — les deux sémantiques de cache (LE test)");
-    // Claude : compartiments DISJOINTS. input hors cache + cache_read + cache_write.
-    TMPrices opus = { 5.0, 25.0, 0.5, 6.25 };  // par 1M
-    TMTokens claude = { .input = 1000, .output = 200, .cacheRead = 9000, .cacheWrite = 500 };
+    // Claude : compartiments DISJOINTS. input hors cache + cache_read + cache_write 5m + cache_write 1h.
+    // L'écriture 1 h se facture 2× l'input (10 pour opus) ; la 5 min 1,25× (6,25). Vérifié sur la
+    // page de prix officielle Anthropic (2026).
+    TMPrices opus = { .input = 5.0, .output = 25.0, .cacheRead = 0.5, .cacheWrite = 6.25, .cacheWrite1h = 10.0 };
+    TMTokens claude = { .input = 1000, .output = 200, .cacheRead = 9000, .cacheWrite = 500, .cacheWrite1h = 300 };
     double c = TMCostForTokens(claude, opus, TMCostProviderClaude);
-    // (1000*5 + 200*25 + 9000*0.5 + 500*6.25) / 1e6 = 17625 / 1e6
-    Check(fabs(c - 0.017625) < 1e-9, @"Claude : somme des trois compartiments disjoints");
+    // (1000*5 + 200*25 + 9000*0.5 + 500*6.25 + 300*10) / 1e6 = 20625 / 1e6
+    Check(fabs(c - 0.020625) < 1e-9, @"Claude : quatre compartiments disjoints, cache 1 h à 2×");
+
+    // Le cache 1 h coûte plus cher que le 5 min à volume égal.
+    TMTokens seul5m = { .cacheWrite = 1000 }, seul1h = { .cacheWrite1h = 1000 };
+    Check(TMCostForTokens(seul1h, opus, TMCostProviderClaude) > TMCostForTokens(seul5m, opus, TMCostProviderClaude),
+          @"1 000 tokens d'écriture 1 h coûtent plus que 1 000 en 5 min");
 
     // OpenAI : input INCLUT le cache. On facture (input - cached) au plein tarif, cached au rabais.
-    TMPrices gpt = { 5.0, 30.0, 0.5, 6.25 };
+    TMPrices gpt = { .input = 5.0, .output = 30.0, .cacheRead = 0.5, .cacheWrite = 6.25 };
     TMTokens openai = { .input = 10000, .output = 200, .cacheRead = 9000, .cacheWrite = 0 };
     double o = TMCostForTokens(openai, gpt, TMCostProviderOpenAI);
     // ((10000-9000)*5 + 9000*0.5 + 200*30) / 1e6 = 15500 / 1e6
@@ -779,27 +786,43 @@ static void TestPriceTable(void) {
     Section(@"TMPricesForModel — table datée, jamais de prix fabriqué");
     TMPrices p;
     Check(TMPricesForModel(@"claude-opus-4-8", &p) && p.output == 25.0, @"opus 4.8 connu");
-    Check(TMPricesForModel(@"claude-fable-5", &p) && p.input == 10.0, @"fable 5 connu");
+    // Le tarif d'écriture cache 1 h vaut le double de l'input (règle Anthropic vérifiée).
+    Check(TMPricesForModel(@"claude-opus-4-8", &p) && p.cacheWrite1h == 10.0 && p.cacheWrite == 6.25,
+          @"opus : cache 1 h à 2× input (10), 5 min à 1,25× (6,25)");
+    Check(TMPricesForModel(@"claude-fable-5", &p) && p.input == 10.0 && p.cacheWrite1h == 20.0, @"fable 5 : input 10, cache 1 h 20");
+    Check(TMPricesForModel(@"claude-haiku-4-5", &p) && p.cacheWrite1h == 2.0, @"haiku : cache 1 h 2");
     Check(!TMPricesForModel(@"gpt-5.4", &p), @"modèle sans tarif : refusé, pas de prix inventé");
     Check(!TMPricesForModel(@"", &p), @"chaîne vide refusée");
     Check(!TMPricesForModel(nil, &p), @"nil refusé");
 }
 
 static void TestParseClaudeLine(void) {
-    Section(@"TMParseClaudeUsageLine — forme réelle");
+    Section(@"TMParseClaudeUsageLine — forme réelle, cache 5m/1h séparés");
+    // Forme récente : cache_creation détaille ephemeral_5m / ephemeral_1h. Les écritures 1 h
+    // dominent l'usage réel (≈70 %) et coûtent 2×, d'où l'importance de les distinguer.
     NSDictionary *line = @{ @"message": @{ @"model": @"claude-fable-5", @"usage": @{
         @"input_tokens": @20368, @"cache_creation_input_tokens": @6654,
-        @"cache_read_input_tokens": @23786, @"output_tokens": @1179 } } };
+        @"cache_read_input_tokens": @23786, @"output_tokens": @1179,
+        @"cache_creation": @{ @"ephemeral_5m_input_tokens": @654, @"ephemeral_1h_input_tokens": @6000 } } } };
     TMTokens t; NSString *model = nil;
     Check(TMParseClaudeUsageLine(line, &t, &model), @"ligne chiffrable reconnue");
     Check(t.input == 20368 && t.output == 1179, @"input hors cache et output");
-    Check(t.cacheRead == 23786 && t.cacheWrite == 6654, @"les deux compartiments de cache");
+    Check(t.cacheRead == 23786, @"cache read");
+    Check(t.cacheWrite == 654 && t.cacheWrite1h == 6000, @"écritures 5 min et 1 h séparées");
     CheckEqual(model, @"claude-fable-5", @"modèle extrait");
+
+    // Forme ancienne, sans détail ephemeral : tout le cache_creation compte comme du 5 min (prudent).
+    NSDictionary *old = @{ @"message": @{ @"model": @"claude-opus-4-8", @"usage": @{
+        @"input_tokens": @10, @"cache_creation_input_tokens": @500, @"cache_read_input_tokens": @0, @"output_tokens": @5 } } };
+    Check(TMParseClaudeUsageLine(old, &t, &model) && t.cacheWrite == 500 && t.cacheWrite1h == 0,
+          @"sans détail ephemeral : cache_creation entier en 5 min, 1 h à zéro");
     Check(!TMParseClaudeUsageLine(@{@"type": @"summary"}, &t, &model), @"ligne sans usage : ignorée");
 }
 
 static void TestParseCodex(void) {
-    Section(@"TMParseCodexTokenCount — forme réelle, reasoning en sortie");
+    Section(@"TMParseCodexTokenCount — output inclut DÉJÀ le reasoning");
+    // Vérifié sur logs réels : input_tokens + output_tokens == total_tokens, donc reasoning_output
+    // est un sous-ensemble d'output_tokens. L'ajouter le compterait deux fois (sur-facturation).
     NSDictionary *info = @{ @"total_token_usage": @{
         @"input_tokens": @22018, @"cached_input_tokens": @9984, @"cache_write_input_tokens": @0,
         @"output_tokens": @128, @"reasoning_output_tokens": @47, @"total_tokens": @22146 } };
@@ -807,7 +830,8 @@ static void TestParseCodex(void) {
     Check(TMParseCodexTokenCount(info, &t, &model), @"token_count chiffrable reconnu");
     Check(t.input == 22018, @"input total (cache inclus)");
     Check(t.cacheRead == 9984, @"cached_input en sous-ensemble");
-    Check(t.output == 128 + 47, @"reasoning compté comme de la sortie");
+    Check(t.output == 128, @"output tel quel : le reasoning y est déjà inclus, pas réadditionné");
+    Check(t.input + t.output == 22146, @"input + output == total_tokens, cohérent avec les logs");
     Check(!TMParseCodexTokenCount(@{}, &t, &model), @"info sans total_token_usage : ignoré");
 }
 

@@ -1405,7 +1405,8 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         TMPrices p;
         if (row[@"cost"] && TMPricesForModel(row[@"model"], &p)) {
             prices[row[@"model"]] = @{ @"input": @(p.input), @"output": @(p.output),
-                                       @"cacheRead": @(p.cacheRead), @"cacheWrite": @(p.cacheWrite) };
+                                       @"cacheRead": @(p.cacheRead), @"cacheWrite": @(p.cacheWrite),
+                                       @"cacheWrite1h": @(p.cacheWrite1h) };
         } else {
             unpriced += [row[@"tokens"] doubleValue];  // modèle sans tarif : tokens comptés à part
         }

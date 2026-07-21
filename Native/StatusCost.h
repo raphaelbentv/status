@@ -18,13 +18,17 @@ NS_ASSUME_NONNULL_BEGIN
 typedef NS_ENUM(NSInteger, TMCostProvider) { TMCostProviderClaude, TMCostProviderOpenAI };
 
 // Compteurs de tokens d'un message. La sémantique de `input`/`cacheRead` dépend du fournisseur :
-//   — Claude  : `input` = entrée HORS cache ; `cacheRead`/`cacheWrite` = compartiments séparés.
+//   — Claude  : `input` = entrée HORS cache ; `cacheRead`/`cacheWrite`/`cacheWrite1h` = compartiments
+//               séparés. `cacheWrite` = écritures de cache 5 min ; `cacheWrite1h` = écritures 1 h,
+//               facturées 2× l'input (contre 1,25× pour le 5 min) — distinction indispensable, ~70 %
+//               des écritures réelles étant en 1 h.
 //   — OpenAI  : `input` = entrée TOTALE (cache inclus) ; `cacheRead` = sous-ensemble mis en cache ;
-//               `cacheWrite` inutilisé (pas de notion côté OpenAI).
-typedef struct { double input, output, cacheRead, cacheWrite; } TMTokens;
+//               `cacheWrite`/`cacheWrite1h` inutilisés (pas de notion côté OpenAI).
+typedef struct { double input, output, cacheRead, cacheWrite, cacheWrite1h; } TMTokens;
 
-// Prix par million de tokens, un par compartiment.
-typedef struct { double input, output, cacheRead, cacheWrite; } TMPrices;
+// Prix par million de tokens, un par compartiment. `cacheWrite` = écriture 5 min ; `cacheWrite1h`
+// = écriture 1 h (2× l'input).
+typedef struct { double input, output, cacheRead, cacheWrite, cacheWrite1h; } TMPrices;
 
 // Coût en dollars. Applique la bonne sémantique de cache selon `provider` — c'est ici que se joue
 // la correctness. Claude somme les trois compartiments disjoints ; OpenAI facture (input − cache)

@@ -12,9 +12,10 @@ double TMCostForTokens(TMTokens t, TMPrices p, TMCostProvider provider) {
         double fullInput = MAX(t.input - t.cacheRead, 0);
         return (fullInput * p.input + t.cacheRead * p.cacheRead + t.output * p.output) / 1e6;
     }
-    // Claude : trois compartiments DISJOINTS, on somme chacun à son tarif.
-    return (t.input * p.input + t.output * p.output
-          + t.cacheRead * p.cacheRead + t.cacheWrite * p.cacheWrite) / 1e6;
+    // Claude : compartiments DISJOINTS, on somme chacun à son tarif. Les écritures de cache 5 min
+    // (1,25× input) et 1 h (2× input) sont facturées séparément.
+    return (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead
+          + t.cacheWrite * p.cacheWrite + t.cacheWrite1h * p.cacheWrite1h) / 1e6;
 }
 
 BOOL TMParseClaudeUsageLine(NSDictionary *line, TMTokens *outTokens, NSString **outModel) {
@@ -22,11 +23,24 @@ BOOL TMParseClaudeUsageLine(NSDictionary *line, TMTokens *outTokens, NSString **
     NSDictionary *message = [line[@"message"] isKindOfClass:NSDictionary.class] ? line[@"message"] : nil;
     NSDictionary *usage = [message[@"usage"] isKindOfClass:NSDictionary.class] ? message[@"usage"] : nil;
     if (!usage) return NO;
+    // Les écritures de cache se répartissent 5 min / 1 h dans `cache_creation`. Les logs récents
+    // détaillent ephemeral_5m/ephemeral_1h ; sur les anciens (détail absent), on range tout le
+    // cache_creation_input_tokens en 5 min — prudent, c'est le tarif le plus bas.
+    NSDictionary *cc = [usage[@"cache_creation"] isKindOfClass:NSDictionary.class] ? usage[@"cache_creation"] : nil;
+    double write5m, write1h;
+    if (cc) {
+        write5m = TMNumber(cc[@"ephemeral_5m_input_tokens"]);
+        write1h = TMNumber(cc[@"ephemeral_1h_input_tokens"]);
+    } else {
+        write5m = TMNumber(usage[@"cache_creation_input_tokens"]);
+        write1h = 0;
+    }
     if (outTokens) *outTokens = (TMTokens){
         .input = TMNumber(usage[@"input_tokens"]),
         .output = TMNumber(usage[@"output_tokens"]),
         .cacheRead = TMNumber(usage[@"cache_read_input_tokens"]),
-        .cacheWrite = TMNumber(usage[@"cache_creation_input_tokens"]),
+        .cacheWrite = write5m,
+        .cacheWrite1h = write1h,
     };
     if (outModel) *outModel = [message[@"model"] isKindOfClass:NSString.class] ? message[@"model"] : nil;
     return YES;
@@ -38,9 +52,12 @@ BOOL TMParseCodexTokenCount(NSDictionary *info, TMTokens *outTokens, NSString **
     if (!total) return NO;
     if (outTokens) *outTokens = (TMTokens){
         .input = TMNumber(total[@"input_tokens"]),                                  // total, cache inclus
-        .output = TMNumber(total[@"output_tokens"]) + TMNumber(total[@"reasoning_output_tokens"]),  // reasoning = sortie
+        // output_tokens INCLUT déjà reasoning_output_tokens (vérifié : input+output == total_tokens).
+        // Le réadditionner double-compterait le raisonnement (sur-facturation).
+        .output = TMNumber(total[@"output_tokens"]),
         .cacheRead = TMNumber(total[@"cached_input_tokens"]),                        // sous-ensemble
         .cacheWrite = 0,
+        .cacheWrite1h = 0,
     };
     if (outModel) *outModel = [info[@"model"] isKindOfClass:NSString.class] ? info[@"model"] : nil;
     return YES;
@@ -50,21 +67,23 @@ BOOL TMPricesForModel(NSString *model, TMPrices *outPrices) {
     if (![model isKindOfClass:NSString.class] || !model.length) return NO;
     // Tarifs par 1M de tokens, relevés le 19 juillet 2026 (voir la spec pour les sources).
     // Modèle inconnu → NO, jamais un prix fabriqué : ses tokens seront comptés à part.
-    static NSDictionary<NSString *, NSArray<NSNumber *> *> *table;  // [input, output, cacheRead, cacheWrite]
+    static NSDictionary<NSString *, NSArray<NSNumber *> *> *table;  // [input, output, cacheRead, write5m, write1h]
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        // Tarifs vérifiés sur les pages officielles Anthropic et OpenAI (juillet 2026). L'écriture
+        // de cache 1 h vaut 2× l'input ; la 5 min 1,25×. Côté OpenAI, write1h est inutilisé.
         table = @{
-            @"claude-opus-4-8":   @[@5.0,  @25.0, @0.5,   @6.25],
-            @"claude-opus-4-7":   @[@5.0,  @25.0, @0.5,   @6.25],
-            @"claude-sonnet-5":   @[@2.0,  @10.0, @0.2,   @2.50],   // tarif d'intro jusqu'au 31/08/2026
-            @"claude-sonnet-4-6": @[@3.0,  @15.0, @0.3,   @3.75],
-            @"claude-fable-5":    @[@10.0, @50.0, @1.0,   @12.50],
-            @"claude-haiku-4-5":  @[@1.0,  @5.0,  @0.1,   @1.25],
-            @"gpt-5.6-sol":       @[@5.0,  @30.0, @0.5,   @6.25],
-            @"gpt-5.6-terra":     @[@2.5,  @15.0, @0.25,  @3.125],
-            @"gpt-5.6-luna":      @[@1.0,  @6.0,  @0.1,   @1.25],
-            @"gpt-5.5":           @[@5.0,  @30.0, @0.5,   @6.25],
-            @"gpt-5.3-codex-spark": @[@1.75, @14.0, @0.175, @2.1875],
+            @"claude-opus-4-8":   @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
+            @"claude-opus-4-7":   @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
+            @"claude-sonnet-5":   @[@2.0,  @10.0, @0.2,   @2.50,   @4.0],    // tarif d'intro jusqu'au 31/08/2026
+            @"claude-sonnet-4-6": @[@3.0,  @15.0, @0.3,   @3.75,   @6.0],
+            @"claude-fable-5":    @[@10.0, @50.0, @1.0,   @12.50,  @20.0],
+            @"claude-haiku-4-5":  @[@1.0,  @5.0,  @0.1,   @1.25,   @2.0],
+            @"gpt-5.6-sol":       @[@5.0,  @30.0, @0.5,   @6.25,   @10.0],
+            @"gpt-5.6-terra":     @[@2.5,  @15.0, @0.25,  @3.125,  @5.0],
+            @"gpt-5.6-luna":      @[@1.0,  @6.0,  @0.1,   @1.25,   @2.0],
+            @"gpt-5.5":           @[@5.0,  @30.0, @0.5,   @6.25,   @10.0],
+            @"gpt-5.3-codex-spark": @[@1.75, @14.0, @0.175, @2.1875, @3.50],
         };
     });
     // Certains modèles Claude portent un suffixe de date (claude-haiku-4-5-20251001) : on tolère
@@ -77,7 +96,8 @@ BOOL TMPricesForModel(NSString *model, TMPrices *outPrices) {
     }
     if (!prices) return NO;
     if (outPrices) *outPrices = (TMPrices){ prices[0].doubleValue, prices[1].doubleValue,
-                                            prices[2].doubleValue, prices[3].doubleValue };
+                                            prices[2].doubleValue, prices[3].doubleValue,
+                                            prices[4].doubleValue };
     return YES;
 }
 
@@ -176,7 +196,7 @@ static void TMAccumulate(NSMutableDictionary *buckets, TMTokens t, NSString *mod
                          TMCostProvider provider, NSTimeInterval epoch) {
     NSString *hour = TMHourKey(epoch);
     NSString *modelKey = (model.length ? model : @"(inconnu)");
-    double tokens = t.input + t.output + t.cacheRead + t.cacheWrite;
+    double tokens = t.input + t.output + t.cacheRead + t.cacheWrite + t.cacheWrite1h;
 
     NSMutableDictionary *models = buckets[hour];
     if (!models) { models = [NSMutableDictionary dictionary]; buckets[hour] = models; }
@@ -300,9 +320,10 @@ static void TMMergeBuckets(NSMutableDictionary *dst, NSDictionary *src) {
     }
 }
 
-// Version du format de token-usage.json. v2 : tranches heure→modèle→{cost?,tokens}. Un cache d'une
-// autre version est ignoré (rescan complet), pas migré.
-static NSInteger const TMCostCacheVersion = 2;
+// Version du format de token-usage.json. v3 : coûts recalculés avec le cache 1 h à 2× et sans
+// double-comptage du reasoning Codex. Un cache d'une autre version est ignoré (rescan complet),
+// pas migré — les coûts mémorisés d'une version antérieure seraient faux.
+static NSInteger const TMCostCacheVersion = 3;
 
 NSDictionary *TMScanTerminalCosts(void) {
     NSDictionary *cache = [NSJSONSerialization JSONObjectWithData:
