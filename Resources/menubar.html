@@ -37,6 +37,8 @@
   .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
   .account-note.stale{color:var(--amber);font-weight:700}
   .account-note.live{color:var(--green)}
+  .mb-cost{margin-top:9px;font-size:11px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums}
+  .mb-cost-lbl{color:var(--muted);font-weight:400;font-size:9px}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
   .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
@@ -95,6 +97,14 @@ const reset=w=>{
   return `dans ${m} min`;
 };
 const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
+// Coût équivalent compact (feature 16), les deux devises. lastData porte costs.
+const fmtCost=v=>v>=1000?`${(v/1000).toFixed(1)} k$`:v>=10?`${Math.round(v)} $`:`${v.toFixed(2)} $`;
+const fmtCostEur=v=>{const e=v*(lastData?.costs?.eurPerUsd||0.92);return e>=1000?`${(e/1000).toFixed(1)} k€`:e>=10?`${Math.round(e)} €`:`${e.toFixed(2)} €`;};
+function providerCost(id){
+  const c=lastData?.costs; if(!c||c.scanning)return '';
+  const d=id==='openai'?c.codex:c.claude; if(!d||d.total8d==null)return '';
+  return `<div class="mb-cost">${id==='openai'?'~ ':''}${fmtCost(d.total8d)} · ${fmtCostEur(d.total8d)}<span class="mb-cost-lbl"> · API 8 j</span></div>`;
+}
 function provider(id,name,account){
   const windows=account?.windows||[];
   // OpenAI expose plusieurs limites hebdo : prendre la première venue afficherait 1 % pendant que
@@ -118,14 +128,14 @@ function provider(id,name,account){
   const noteAndAction=(primaryValue)=>`<div class="account-note ${noteClass}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${action}')">${actionLabel}</button>`}`;
   if(id==='openai'){
     const weeklyValue=used(weekly);
-    return `<section class="provider" style="--provider:var(--blue)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div>${noteAndAction(weeklyValue)}</section>`;
+    return `<section class="provider" style="--provider:var(--blue)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div>${noteAndAction(weeklyValue)}${providerCost(id)}</section>`;
   }
   const session=windows.find(isSession),fable=windows.find(isFable);
   const sessionValue=used(session),weeklyValue=used(weekly),fableValue=used(fable);
   // La semaine en grand, comme pour OpenAI juste au-dessus : c'est la fenêtre qui engage
   // réellement, celle des 5 h se rechargeant d'elle-même dans la demi-journée. Les deux
   // panneaux se lisent donc de la même façon.
-  return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div><div class="subgauge"><div class="subgauge-head"><span>5h</span><strong>${sessionValue===null?'—':sessionValue+' %'}</strong></div><div class="rail"><i style="width:${sessionValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="subgauge-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(weeklyValue)}</section>`;
+  return `<section class="provider" style="--provider:var(--purple)"><div class="name">${name}</div><div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div><div class="window">semaine</div><div class="reset">reset ${reset(weekly)}</div><div class="subgauge"><div class="subgauge-head"><span>5h</span><strong>${sessionValue===null?'—':sessionValue+' %'}</strong></div><div class="rail"><i style="width:${sessionValue??0}%"></i></div></div>${fable?`<div class="fable"><div class="subgauge-head"><span>fable</span><strong>${fableValue===null?'—':fableValue+' %'}</strong></div><div class="rail"><i style="width:${fableValue??0}%"></i></div></div>`:''}${noteAndAction(weeklyValue)}${providerCost(id)}</section>`;
 }
 function tools(t){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;

@@ -54,6 +54,12 @@ double TMCostSince(NSDictionary<NSString *, NSNumber *> *buckets, NSTimeInterval
 // Retourne @{ @"claude": @{ @"buckets": {...}, @"unpriced": @(tokens) }, @"codex": {...} }.
 NSDictionary *TMScanTerminalCosts(void);
 
+// Taux de change indicatif, daté comme la table de prix — pas d'appel réseau. Sert à afficher
+// l'équivalent en euros à côté du dollar. Approximatif et surchargeable, jamais présenté comme
+// un taux de facturation exact.
+extern const double TMEurPerUsd;
+extern NSString *const TMFxAsOfDate;
+
 // Date de relevé des tarifs, pour l'afficher dans les Réglages.
 extern NSString *const TMPricesAsOfDate;
 

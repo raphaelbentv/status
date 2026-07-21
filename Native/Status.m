@@ -1400,6 +1400,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     return @{
         @"scanning": @NO,
         @"asOf": TMPricesAsOfDate,
+        @"eurPerUsd": @(TMEurPerUsd),
         // Étiquette « usage terminal » côté web : le web (claude.ai, chatgpt.com) n'est pas journalisé.
         @"claude": @{ @"session": @(TMCostSince(cb, now - 5 * 3600)),
                       @"weekly": @(TMCostSince(cb, now - 7 * 86400)),

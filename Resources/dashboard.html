@@ -122,10 +122,16 @@
   .shortcut-table{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:5px 14px;max-width:430px}
   .shortcut-row{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--muted)}
   .shortcut-row kbd{font:inherit;font-size:11px;color:var(--text);background:var(--soft);border:1px solid var(--hair);border-radius:var(--radius);padding:2px 6px;min-width:46px;text-align:center;flex:none}
-  .cost{display:block;margin-top:6px;font-size:10.5px;color:var(--green);font-weight:700}
-  .cost-lbl{color:var(--muted);font-weight:400}
-  .cost-total{margin-top:14px;padding-top:11px;border-top:1px solid var(--hair);font-size:10.5px;color:var(--muted)}
-  .cost-warn{color:var(--amber)}
+  .cost{margin-top:7px;display:flex;flex-direction:column;gap:1px}
+  .cost-amount{font-size:12.5px;color:var(--green);font-weight:700;font-variant-numeric:tabular-nums}
+  .cost-lbl{color:var(--muted);font-weight:400;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em}
+  /* Total accentué : un cartouche mis en avant, le chiffre en grand dans les deux devises. */
+  .cost-total{margin-top:16px;padding:13px 14px;border:1px solid var(--green);border-radius:var(--radius);
+    background:color-mix(in srgb,var(--green) 8%,transparent)}
+  .cost-total.scanning{border-color:var(--hair-strong);background:var(--soft);color:var(--muted);font-size:11px;padding:11px 14px}
+  .cost-total-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px}
+  .cost-total-amount{font-size:22px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;line-height:1}
+  .cost-warn{color:var(--amber);font-size:10px;margin-top:6px}
   .weekly{margin-top:30px}
   .wk-svg{display:block;width:100%;height:150px;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft)}
   .wk-legend{display:flex;gap:18px;margin-top:10px;font-size:10.5px;color:var(--muted)}
@@ -251,26 +257,31 @@ function forecastLine(key){
   return `<div class="forecast ${hours<12?'soon':''}">au rythme actuel, épuisé ${hours<24?'à ':''}${when}</div>`;
 }
 // Coût équivalent API (feature 16). « usage terminal » partout : le web n'est pas journalisé.
-const fmtUSD=v=>v==null?'':v>=1000?`${(v/1000).toFixed(1)} k$`:v>=10?`${Math.round(v)} $`:`${v.toFixed(2)} $`;
-function windowCost(id,w){
-  const c=appData?.costs; if(!c||c.scanning)return '';
+// Deux devises côte à côte. L'euro vient d'un taux daté (costs.eurPerUsd), pas d'un appel réseau.
+const fmt1=(v,sym)=>v>=1000?`${(v/1000).toFixed(1)} k${sym}`:v>=10?`${Math.round(v)} ${sym}`:`${v.toFixed(2)} ${sym}`;
+const fmtUSD=v=>v==null?'':fmt1(v,'$');
+const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; return r?`${fmt1(v,'$')} · ${fmt1(v*r,'€')}`:fmt1(v,'$');};
+function windowCostValue(id,w){
+  const c=appData?.costs; if(!c||c.scanning)return null;
   const wid=w.windowId||'';
-  let val=null, approx=false;
-  if(id==='claude'&&wid==='five_hour')val=c.claude?.session;
-  else if(id==='claude'&&wid==='seven_day')val=c.claude?.weekly;
-  else if(id==='openai')val={val:c.codex?.weekly,approx:true}.val, approx=true;
-  if(val==null)return '';
-  return `<span class="cost">${approx?'~ ':''}${fmtUSD(val)} <span class="cost-lbl">API · terminal</span></span>`;
+  if(id==='claude'&&wid==='five_hour')return {v:c.claude?.session,approx:false};
+  if(id==='claude'&&wid==='seven_day')return {v:c.claude?.weekly,approx:false};
+  if(id==='openai')return {v:c.codex?.weekly,approx:true};
+  return null;
+}
+function windowCost(id,w){
+  const r=windowCostValue(id,w); if(!r||r.v==null)return '';
+  return `<div class="cost"><span class="cost-amount">${r.approx?'~ ':''}${fmtDual(r.v)}</span><span class="cost-lbl">équivalent API · usage terminal</span></div>`;
 }
 function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}${windowCost(id,w)}</div>`}
 function providerCostTotal(id){
   const c=appData?.costs;
   if(!c)return '';
-  if(c.scanning)return `<div class="cost-total">calcul du coût équivalent en cours…</div>`;
+  if(c.scanning)return `<div class="cost-total scanning">⟳ calcul du coût équivalent en cours…</div>`;
   const d=id==='openai'?c.codex:c.claude;
   if(!d||d.total8d==null)return '';
-  const unpriced=id==='openai'&&d.unpricedTokens>0?` · <span class="cost-warn">~ ${Math.round(d.unpricedTokens/1e6)} M tokens sans tarif</span>`:'';
-  return `<div class="cost-total">${id==='openai'?'~ ':''}${fmtUSD(d.total8d)} en équivalent API sur 8 j${id==='openai'?' (approximatif)':''}${unpriced}</div>`;
+  const unpriced=id==='openai'&&d.unpricedTokens>0?`<div class="cost-warn">~ ${Math.round(d.unpricedTokens/1e6)} M tokens de modèles sans tarif, non chiffrés</div>`:'';
+  return `<div class="cost-total"><div class="cost-total-label">Équivalent API sur 8 jours${id==='openai'?' · approximatif':''}</div><div class="cost-total-amount">${id==='openai'?'~ ':''}${fmtDual(d.total8d)}</div>${unpriced}</div>`;
 }
 function providerBlock(provider,account,history){const windows=windowsFor(provider.id,account),connected=isConnected(provider.id,account),state=connected?(account?.error?'Attention':'Connecté'):'Non connecté',cards=windows.length?windows.map(w=>quotaCard(w,provider.id,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`,freshness=account?.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${state}</span></div>${freshness}<div class="quota-grid">${cards}</div>${providerCostTotal(provider.id)}${account?.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</section>`}
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur

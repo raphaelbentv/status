@@ -2,6 +2,8 @@
 #import "StatusQuota.h"  // TMNumber
 
 NSString *const TMPricesAsOfDate = @"19 juillet 2026";
+const double TMEurPerUsd = 0.92;            // 1 $ ≈ 0,92 € — taux indicatif du 19 juillet 2026
+NSString *const TMFxAsOfDate = @"19 juillet 2026";
 
 double TMCostForTokens(TMTokens t, TMPrices p, TMCostProvider provider) {
     if (provider == TMCostProviderOpenAI) {
