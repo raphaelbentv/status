@@ -280,7 +280,9 @@ function windowCost(id,w){
   return `<div class="cost"><span class="cost-amount">${r.approx?'~ ':''}${fmtDual(r.v)}</span><span class="cost-lbl">équivalent API · usage terminal</span></div>`;
 }
 function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}${windowCost(id,w)}</div>`}
-const fmtTokens=v=>v==null?'':v>=1e9?`${(v/1e9).toFixed(1)} G`:v>=1e6?`${(v/1e6).toFixed(1)} M`:v>=1e3?`${(v/1e3).toFixed(0)} k`:`${Math.round(v)}`;
+// Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
+// entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
+const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
 // Infobulle des tarifs appliqués, par million de tokens, pour les modèles présents dans la fenêtre.
 function tariffTitle(prices){
   const models=Object.keys(prices||{});
