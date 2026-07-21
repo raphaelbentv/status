@@ -44,14 +44,21 @@ BOOL TMParseCodexTokenCount(NSDictionary *info, TMTokens *outTokens, NSString * 
 // (impossible) de « modèle inconnu ».
 BOOL TMPricesForModel(NSString *model, TMPrices *outPrices);
 
-// Somme des coûts des tranches horaires postérieures à `startEpoch`. Pure : `buckets` est un
-// dictionnaire heure_epoch(chaîne) → coût. Le coût d'une fenêtre = ce total depuis son début.
-double TMCostSince(NSDictionary<NSString *, NSNumber *> *buckets, NSTimeInterval startEpoch);
+// Somme des coûts des tranches horaires postérieures à `startEpoch`. Pure. Chaque tranche est un
+// nid heure_epoch(chaîne) → modèle → @{ @"cost": prix, @"tokens": total } ; un modèle sans clé
+// `cost` est non tarifé et ne contribue pas au total. Le coût d'une fenêtre = ce total depuis son
+// début.
+double TMCostSince(NSDictionary *buckets, NSTimeInterval startEpoch);
+
+// Ventilation par modèle sur la fenêtre [startEpoch, ∞). Pure. Retourne une liste
+// @[ @{ @"model": nom, @"cost": prix (absent si non tarifé), @"tokens": total } ], triée par coût
+// décroissant, les modèles non tarifés (sans `cost`) en fin de liste.
+NSArray<NSDictionary *> *TMModelBreakdownSince(NSDictionary *buckets, NSTimeInterval startEpoch);
 
 // Balaye les logs terminal (Claude + Codex), de façon incrémentale : un cache token-usage.json
-// retient l'empreinte (taille+date) de chaque fichier déjà lu et ses tranches de coût, seuls les
-// fichiers nouveaux ou modifiés sont relus. I/O — vérifié en exécutant, pas en testant.
-// Retourne @{ @"claude": @{ @"buckets": {...}, @"unpriced": @(tokens) }, @"codex": {...} }.
+// (versionné) retient l'empreinte (taille+date) de chaque fichier déjà lu et ses tranches, seuls
+// les fichiers nouveaux ou modifiés sont relus. I/O — vérifié en exécutant, pas en testant.
+// Retourne @{ @"claude": @{ @"buckets": {...} }, @"codex": {...} } au format nid ci-dessus.
 NSDictionary *TMScanTerminalCosts(void);
 
 // Taux de change indicatif, daté comme la table de prix — pas d'appel réseau. Sert à afficher

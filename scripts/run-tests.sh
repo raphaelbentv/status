@@ -10,7 +10,7 @@ echo "── Tests natifs (StatusQuota) ──"
 clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit -framework Cocoa \
   "$ROOT/Tests/native-tests.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusKeyboardLock.m" "$ROOT/Native/StatusSystemMonitor.m" \
-  "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
+  "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" "$ROOT/Native/StatusFx.m" \
   -o "$BUILD/native-tests"
 "$BUILD/native-tests"
 native_status=$?

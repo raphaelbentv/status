@@ -12,6 +12,7 @@
 #import "StatusCodexServer.h"
 #import "StatusWindowManager.h"
 #import "StatusCost.h"
+#import "StatusFx.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
@@ -457,6 +458,7 @@ static const CGFloat TMTitleBarHeight = 28;
     [self scheduleRefresh];
     [self startSystemMonitor];
     [self refreshCostsInBackground];
+    [[TMFxRate shared] refreshIfStale];  // taux de change USD→EUR, en fond, si le cache est périmé
     self.keyboardLock = [TMKeyboardLock new];
     __weak typeof(self) weakLockSelf = self;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
@@ -1391,24 +1393,50 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     });
 }
 
+// Ventilation par modèle sur toute la fenêtre affichée (8 j), plus les tarifs appliqués (pour
+// l'infobulle) et le total de tokens non tarifés. La ventilation explique le total accentué.
+- (NSDictionary *)modelDetailForBuckets:(NSDictionary *)buckets {
+    NSMutableArray<NSDictionary *> *breakdown = [NSMutableArray array];
+    NSMutableDictionary *prices = [NSMutableDictionary dictionary];
+    double unpriced = 0;
+    for (NSDictionary *row in TMModelBreakdownSince(buckets, 0)) {
+        if ([row[@"tokens"] doubleValue] <= 0) continue;  // pseudo-modèles à 0 token (<synthetic>…) : bruit
+        [breakdown addObject:row];
+        TMPrices p;
+        if (row[@"cost"] && TMPricesForModel(row[@"model"], &p)) {
+            prices[row[@"model"]] = @{ @"input": @(p.input), @"output": @(p.output),
+                                       @"cacheRead": @(p.cacheRead), @"cacheWrite": @(p.cacheWrite) };
+        } else {
+            unpriced += [row[@"tokens"] doubleValue];  // modèle sans tarif : tokens comptés à part
+        }
+    }
+    return @{ @"breakdown": breakdown, @"prices": prices, @"unpricedTokens": @(unpriced) };
+}
+
 // Coûts par fenêtre, dérivés du dernier balayage. nil tant que le premier n'a pas abouti.
 - (NSDictionary *)costPayload {
     if (!self.costScan) return @{ @"scanning": @(self.costScanning) };
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     NSDictionary *claude = self.costScan[@"claude"], *codex = self.costScan[@"codex"];
     NSDictionary *cb = claude[@"buckets"], *xb = codex[@"buckets"];
+    NSDictionary *cd = [self modelDetailForBuckets:cb], *xd = [self modelDetailForBuckets:xb];
+    TMFxRate *fx = [TMFxRate shared];
     return @{
         @"scanning": @NO,
         @"asOf": TMPricesAsOfDate,
-        @"eurPerUsd": @(TMEurPerUsd),
+        @"eurPerUsd": @(fx.eurPerUsd),        // taux live si dispo, repli sur la constante compilée
+        @"fxAsOf": fx.asOfDate,               // date du relevé de change réellement utilisé
         // Étiquette « usage terminal » côté web : le web (claude.ai, chatgpt.com) n'est pas journalisé.
         @"claude": @{ @"session": @(TMCostSince(cb, now - 5 * 3600)),
                       @"weekly": @(TMCostSince(cb, now - 7 * 86400)),
-                      @"total8d": @(TMCostSince(cb, 0)) },
+                      @"total8d": @(TMCostSince(cb, 0)),
+                      @"breakdown": cd[@"breakdown"], @"prices": cd[@"prices"],
+                      @"unpricedTokens": cd[@"unpricedTokens"] },
         // Codex : « approximatif » — deux signaux de tokens divergent, et des modèles sans tarif.
         @"codex": @{ @"weekly": @(TMCostSince(xb, now - 7 * 86400)),
                      @"total8d": @(TMCostSince(xb, 0)),
-                     @"unpricedTokens": codex[@"unpriced"] ?: @0 },
+                     @"breakdown": xd[@"breakdown"], @"prices": xd[@"prices"],
+                     @"unpricedTokens": xd[@"unpricedTokens"] },
     };
 }
 

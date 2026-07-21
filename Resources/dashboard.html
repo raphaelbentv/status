@@ -130,8 +130,14 @@
     background:color-mix(in srgb,var(--green) 8%,transparent)}
   .cost-total.scanning{border-color:var(--hair-strong);background:var(--soft);color:var(--muted);font-size:11px;padding:11px 14px}
   .cost-total-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px}
-  .cost-total-amount{font-size:22px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;line-height:1}
+  .cost-total-amount{font-size:22px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;line-height:1;cursor:help}
   .cost-warn{color:var(--amber);font-size:10px;margin-top:6px}
+  .model-table{width:100%;margin-top:11px;border-collapse:collapse;font-size:10.5px;font-variant-numeric:tabular-nums}
+  .model-table th{text-align:left;font-weight:400;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:0 0 4px;border-bottom:1px solid var(--hair)}
+  .model-table td{padding:3px 0;border-bottom:1px solid var(--hair)}
+  .model-table .num{text-align:right;font-variant-numeric:tabular-nums}
+  .model-table tbody tr:last-child td{border-bottom:none}
+  .model-table .unpriced td{color:var(--muted)}
   .weekly{margin-top:30px}
   .wk-svg{display:block;width:100%;height:150px;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft)}
   .wk-legend{display:flex;gap:18px;margin-top:10px;font-size:10.5px;color:var(--muted)}
@@ -274,6 +280,21 @@ function windowCost(id,w){
   return `<div class="cost"><span class="cost-amount">${r.approx?'~ ':''}${fmtDual(r.v)}</span><span class="cost-lbl">équivalent API · usage terminal</span></div>`;
 }
 function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}${windowCost(id,w)}</div>`}
+const fmtTokens=v=>v==null?'':v>=1e9?`${(v/1e9).toFixed(1)} G`:v>=1e6?`${(v/1e6).toFixed(1)} M`:v>=1e3?`${(v/1e3).toFixed(0)} k`:`${Math.round(v)}`;
+// Infobulle des tarifs appliqués, par million de tokens, pour les modèles présents dans la fenêtre.
+function tariffTitle(prices){
+  const models=Object.keys(prices||{});
+  if(!models.length)return '';
+  const lines=models.map(m=>`${m} — entrée ${prices[m].input} · sortie ${prices[m].output} · lecture cache ${prices[m].cacheRead} · écriture cache ${prices[m].cacheWrite}`);
+  return `Tarifs appliqués ($ par million de tokens) :\n${lines.join('\n')}`;
+}
+// Tableau Modèle | Tokens | Coût, trié par coût décroissant (côté natif) ; non tarifés en fin, coût «—».
+function modelBreakdown(d){
+  const rows=d.breakdown||[];
+  if(!rows.length)return '';
+  const body=rows.map(r=>`<tr class="model-row${r.cost==null?' unpriced':''}"><td>${esc(r.model)}</td><td class="num">${fmtTokens(r.tokens)}</td><td class="num">${r.cost==null?'—':fmtDual(r.cost)}</td></tr>`).join('');
+  return `<table class="model-table"><thead><tr><th>Modèle</th><th class="num">Tokens</th><th class="num">Coût</th></tr></thead><tbody>${body}</tbody></table>`;
+}
 function providerCostTotal(id){
   const c=appData?.costs;
   if(!c)return '';
@@ -281,7 +302,8 @@ function providerCostTotal(id){
   const d=id==='openai'?c.codex:c.claude;
   if(!d||d.total8d==null)return '';
   const unpriced=id==='openai'&&d.unpricedTokens>0?`<div class="cost-warn">~ ${Math.round(d.unpricedTokens/1e6)} M tokens de modèles sans tarif, non chiffrés</div>`:'';
-  return `<div class="cost-total"><div class="cost-total-label">Équivalent API sur 8 jours${id==='openai'?' · approximatif':''}</div><div class="cost-total-amount">${id==='openai'?'~ ':''}${fmtDual(d.total8d)}</div>${unpriced}</div>`;
+  const title=tariffTitle(d.prices);
+  return `<div class="cost-total"><div class="cost-total-label">Équivalent API sur 8 jours${id==='openai'?' · approximatif':''}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(d.total8d)}</div>${unpriced}${modelBreakdown(d)}</div>`;
 }
 function providerBlock(provider,account,history){const windows=windowsFor(provider.id,account),connected=isConnected(provider.id,account),state=connected?(account?.error?'Attention':'Connecté'):'Non connecté',cards=windows.length?windows.map(w=>quotaCard(w,provider.id,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`,freshness=account?.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${state}</span></div>${freshness}<div class="quota-grid">${cards}</div>${providerCostTotal(provider.id)}${account?.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</section>`}
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur
@@ -332,7 +354,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Raccourci clavier global</strong><small>⌘⇧S ouvre et ferme le panneau depuis n’importe quelle application. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.globalShortcut&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : le raccourci ne répondra pas.</strong>':''}</small></div><button class="button ${p.globalShortcut?'on':''}" onclick="send('toggleGlobalShortcut')">${p.globalShortcut?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></div>
-  <div class="setting"><div class="setting-copy"><strong>Coût équivalent API</strong><small>Calculé sur les logs de session terminal (Claude Code, Codex). L\'usage web n\'est pas journalisé et n\'est pas inclus. Tarifs relevés le ${data.costs?.asOf||'—'} ; Codex approximatif.</small></div><span class="setting-state">${data.costs?.scanning?'calcul en cours':'actif'}</span></div>
+  <div class="setting"><div class="setting-copy"><strong>Coût équivalent API</strong><small>Calculé sur les logs de session terminal (Claude Code, Codex). L\'usage web n\'est pas journalisé et n\'est pas inclus. Tarifs relevés le ${data.costs?.asOf||'—'} ; Codex approximatif. Taux de change USD→EUR indicatif (BCE), relevé du ${data.costs?.fxAsOf||'—'}, rafraîchi automatiquement.</small></div><span class="setting-state">${data.costs?.scanning?'calcul en cours':'actif'}</span></div>
   <div class="setting"><div class="setting-copy"><strong>Exporter l\'historique</strong><small>Toute la consommation enregistrée, au format CSV (une ligne par instant et par fenêtre) — pour l\'analyser ailleurs.</small></div><button class="button" onclick="send('exportHistoryCSV')">Exporter…</button></div>
   <div class="setting"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Une notification à 80 % puis à 95 % de chaque fenêtre.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></div>
   <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>

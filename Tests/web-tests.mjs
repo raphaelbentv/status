@@ -105,5 +105,25 @@ checkEqual(menubar('used')({ usedPercent: -5 }), 0, 'borné en bas : jamais de n
 checkEqual(menubar('used')({ usedPercent: 130 }), 100, 'borné en haut');
 checkEqual(menubar('used')(null), null, 'fenêtre absente : null, distinct de 0');
 
+// ── Coût par modèle (dashboard) ─────────────────────────────────────────────
+section('fmtTokens — volumes de tokens');
+checkEqual(dashboard('fmtTokens')(999), '999', 'sous le millier : brut');
+checkEqual(dashboard('fmtTokens')(61493255), '61.5 M', 'millions, une décimale');
+checkEqual(dashboard('fmtTokens')(9741100000), '9.7 G', 'milliards');
+checkEqual(dashboard('fmtTokens')(null), '', 'absent : chaîne vide');
+
+section('tariffTitle — infobulle des tarifs appliqués');
+const tt = dashboard('tariffTitle')({ 'claude-opus-4-8': { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 } });
+check(tt.includes('claude-opus-4-8') && tt.includes('entrée 5') && tt.includes('sortie 25'), 'liste le modèle et ses tarifs');
+checkEqual(dashboard('tariffTitle')({}), '', 'aucun modèle : pas d’infobulle');
+
+section('modelBreakdown — tableau par modèle');
+const mb = dashboard('modelBreakdown')({ breakdown: [
+  { model: 'claude-opus-4-8', tokens: 9741100000, cost: 7524.4 },
+  { model: 'codex-auto-review', tokens: 61493255 } ] });  // pas de cost : non tarifé
+check(mb.includes('claude-opus-4-8') && mb.includes('9.7 G'), 'ligne tarifée avec ses tokens');
+check(/class="model-row unpriced"[\s\S]*codex-auto-review[\s\S]*—/.test(mb), 'ligne non tarifée : classe unpriced et coût «—»');
+checkEqual(dashboard('modelBreakdown')({ breakdown: [] }), '', 'aucun modèle : pas de tableau');
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

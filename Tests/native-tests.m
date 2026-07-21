@@ -13,6 +13,7 @@
 #import "StatusSystemMonitor.h"
 #import "StatusWindowManager.h"
 #import "StatusCost.h"
+#import "StatusFx.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
 
 static int gFailures = 0;
@@ -810,13 +811,58 @@ static void TestParseCodex(void) {
     Check(!TMParseCodexTokenCount(@{}, &t, &model), @"info sans total_token_usage : ignoré");
 }
 
+// Format des tranches : heure → modèle → {cost?, tokens}. Un modèle sans clé "cost" est non tarifé.
+static NSDictionary *SampleBuckets(void) {
+    return @{
+        @"1000000": @{ @"claude-opus-4-8": @{ @"cost": @1.5, @"tokens": @1000 } },
+        @"1003600": @{ @"claude-opus-4-8": @{ @"cost": @2.0, @"tokens": @2000 } },
+        @"1007200": @{ @"claude-fable-5":  @{ @"cost": @0.5, @"tokens": @300 },
+                       @"modele-inconnu":  @{ @"tokens": @999 } } };  // non tarifé : pas de "cost"
+}
+
 static void TestCostSince(void) {
-    Section(@"TMCostSince — somme des tranches depuis une fenêtre");
-    NSDictionary *buckets = @{ @"1000000": @1.5, @"1003600": @2.0, @"1007200": @0.5 };
+    Section(@"TMCostSince — somme des tranches depuis une fenêtre (nid heure→modèle)");
+    NSDictionary *buckets = SampleBuckets();
     Check(fabs(TMCostSince(buckets, 1003600) - 2.5) < 1e-9, @"depuis la 2e tranche : 2.0 + 0.5");
-    Check(fabs(TMCostSince(buckets, 0) - 4.0) < 1e-9, @"depuis le début : tout");
+    Check(fabs(TMCostSince(buckets, 0) - 4.0) < 1e-9, @"depuis le début : tout (les non tarifés ne comptent pas)");
     Check(TMCostSince(buckets, 9999999) == 0, @"après la dernière tranche : rien");
     Check(TMCostSince(@{}, 0) == 0, @"vide : zéro");
+}
+
+static void TestModelBreakdown(void) {
+    Section(@"TMModelBreakdownSince — ventilation par modèle, triée");
+    NSDictionary *buckets = SampleBuckets();
+    NSArray<NSDictionary *> *all = TMModelBreakdownSince(buckets, 0);
+    Check(all.count == 3, @"trois modèles distincts sur la fenêtre complète");
+    // Tri par coût décroissant ; le non tarifé (sans coût) en dernier.
+    CheckEqual(all[0][@"model"], @"claude-opus-4-8", @"opus en tête (coût le plus élevé)");
+    Check(fabs([all[0][@"cost"] doubleValue] - 3.5) < 1e-9, @"coût opus cumulé sur les deux heures");
+    Check([all[0][@"tokens"] doubleValue] == 3000, @"tokens opus cumulés");
+    CheckEqual(all[1][@"model"], @"claude-fable-5", @"fable ensuite");
+    CheckEqual(all[2][@"model"], @"modele-inconnu", @"le non tarifé en dernier");
+    Check(all[2][@"cost"] == nil, @"non tarifé : pas de clé cost");
+    Check([all[2][@"tokens"] doubleValue] == 999, @"non tarifé : ses tokens sont conservés");
+
+    NSArray<NSDictionary *> *lastHour = TMModelBreakdownSince(buckets, 1007200);
+    Check(lastHour.count == 2, @"fenêtre réduite à la dernière heure : fable + inconnu");
+    CheckEqual(lastHour[0][@"model"], @"claude-fable-5", @"opus exclu par la fenêtre");
+    Check(TMModelBreakdownSince(@{}, 0).count == 0, @"vide : liste vide");
+}
+
+static void TestFxRefresh(void) {
+    Section(@"TMFxShouldRefresh / TMParseFxResponse — change auto");
+    Check(TMFxShouldRefresh(0, 1000000, 72000), @"jamais récupéré : rafraîchir");
+    Check(!TMFxShouldRefresh(990000, 1000000, 72000), @"récupéré il y a 10 000 s (< ttl) : garder");
+    Check(TMFxShouldRefresh(900000, 1000000, 72000), @"récupéré il y a 100 000 s (> ttl) : rafraîchir");
+
+    double rate = 0; NSString *asOf = nil;
+    NSDictionary *ok = @{ @"amount": @1, @"base": @"USD", @"date": @"2026-07-20", @"rates": @{ @"EUR": @0.918 } };
+    Check(TMParseFxResponse(ok, &rate, &asOf) && fabs(rate - 0.918) < 1e-9, @"réponse valide : taux extrait");
+    CheckEqual(asOf, @"2026-07-20", @"date du relevé extraite");
+    Check(!TMParseFxResponse(@{ @"rates": @{ @"GBP": @0.79 } }, &rate, &asOf), @"EUR absent : rejeté");
+    Check(!TMParseFxResponse(@{ @"rates": @{ @"EUR": @0 } }, &rate, &asOf), @"taux nul : rejeté");
+    Check(!TMParseFxResponse(@{ @"rates": @{ @"EUR": @-1 } }, &rate, &asOf), @"taux négatif : rejeté");
+    Check(!TMParseFxResponse((NSDictionary *)@"pas un dict", &rate, &asOf), @"non-dictionnaire : rejeté");
 }
 
 int main(void) {
@@ -851,6 +897,8 @@ int main(void) {
         TestDuoLayouts();
         TestDuoIdentifiers();
         TestCostSince();
+        TestModelBreakdown();
+        TestFxRefresh();
         TestCostCacheSemantics();
         TestPriceTable();
         TestParseClaudeLine();

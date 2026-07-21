@@ -82,15 +82,61 @@ BOOL TMPricesForModel(NSString *model, TMPrices *outPrices) {
 }
 
 
-#pragma mark - Somme par fenêtre (pure)
+#pragma mark - Somme et ventilation par fenêtre (pures)
 
-double TMCostSince(NSDictionary<NSString *, NSNumber *> *buckets, NSTimeInterval startEpoch) {
+// Chaque tranche est heure → modèle → @{ @"cost": prix?, @"tokens": total }. Somme les `cost`
+// (les modèles non tarifés, sans clé `cost`, ne contribuent pas) sur les heures ≥ startEpoch.
+double TMCostSince(NSDictionary *buckets, NSTimeInterval startEpoch) {
     if (![buckets isKindOfClass:NSDictionary.class]) return 0;
     double total = 0;
     for (NSString *hourKey in buckets) {
-        if (hourKey.doubleValue >= startEpoch) total += buckets[hourKey].doubleValue;
+        if (hourKey.doubleValue < startEpoch) continue;
+        NSDictionary *models = buckets[hourKey];
+        if (![models isKindOfClass:NSDictionary.class]) continue;
+        for (NSString *model in models) {
+            NSNumber *cost = models[model][@"cost"];
+            if ([cost isKindOfClass:NSNumber.class]) total += cost.doubleValue;
+        }
     }
     return total;
+}
+
+NSArray<NSDictionary *> *TMModelBreakdownSince(NSDictionary *buckets, NSTimeInterval startEpoch) {
+    if (![buckets isKindOfClass:NSDictionary.class]) return @[];
+    NSMutableDictionary<NSString *, NSMutableDictionary *> *agg = [NSMutableDictionary dictionary];
+    for (NSString *hourKey in buckets) {
+        if (hourKey.doubleValue < startEpoch) continue;
+        NSDictionary *models = buckets[hourKey];
+        if (![models isKindOfClass:NSDictionary.class]) continue;
+        for (NSString *model in models) {
+            NSDictionary *entry = models[model];
+            if (![entry isKindOfClass:NSDictionary.class]) continue;
+            NSMutableDictionary *row = agg[model];
+            if (!row) { row = [@{ @"tokens": @0.0, @"priced": @NO, @"cost": @0.0 } mutableCopy]; agg[model] = row; }
+            row[@"tokens"] = @([row[@"tokens"] doubleValue] + [entry[@"tokens"] doubleValue]);
+            NSNumber *cost = entry[@"cost"];
+            if ([cost isKindOfClass:NSNumber.class]) {
+                row[@"priced"] = @YES;
+                row[@"cost"] = @([row[@"cost"] doubleValue] + cost.doubleValue);
+            }
+        }
+    }
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (NSString *model in agg) {
+        NSMutableDictionary *row = agg[model];
+        NSMutableDictionary *item = [@{ @"model": model, @"tokens": row[@"tokens"] } mutableCopy];
+        if ([row[@"priced"] boolValue]) item[@"cost"] = row[@"cost"];
+        [out addObject:item];
+    }
+    // Tri par coût décroissant ; les non tarifés (sans clé `cost`, traités comme -1) en fin.
+    [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        double ca = a[@"cost"] ? [a[@"cost"] doubleValue] : -1;
+        double cb = b[@"cost"] ? [b[@"cost"] doubleValue] : -1;
+        if (ca > cb) return NSOrderedAscending;
+        if (ca < cb) return NSOrderedDescending;
+        return [a[@"model"] compare:b[@"model"]];  // stable et déterministe à coût égal
+    }];
+    return out;
 }
 
 #pragma mark - Balayage incrémental (I/O)
@@ -124,30 +170,37 @@ static NSString *TMHourKey(NSTimeInterval epoch) {
     return [NSString stringWithFormat:@"%lld", (long long)(epoch - fmod(epoch, 3600))];
 }
 
-// Accumule le coût d'un lot de tokens dans les tranches et le compteur d'inconnus d'un fichier.
-static void TMAccumulate(NSMutableDictionary *buckets, double *unpriced, TMTokens t, NSString *model,
+// Accumule un lot de tokens dans la tranche heure → modèle → {cost?, tokens}. Un modèle sans tarif
+// connu garde ses tokens et son nom, mais aucune clé `cost` (distingue « pas de prix » de « nul »).
+static void TMAccumulate(NSMutableDictionary *buckets, TMTokens t, NSString *model,
                          TMCostProvider provider, NSTimeInterval epoch) {
+    NSString *hour = TMHourKey(epoch);
+    NSString *modelKey = (model.length ? model : @"(inconnu)");
+    double tokens = t.input + t.output + t.cacheRead + t.cacheWrite;
+
+    NSMutableDictionary *models = buckets[hour];
+    if (!models) { models = [NSMutableDictionary dictionary]; buckets[hour] = models; }
+    NSMutableDictionary *entry = models[modelKey];
+    if (!entry) { entry = [@{ @"tokens": @0.0 } mutableCopy]; models[modelKey] = entry; }
+    entry[@"tokens"] = @([entry[@"tokens"] doubleValue] + tokens);
+
     TMPrices prices;
     if (model && TMPricesForModel(model, &prices)) {
         double cost = TMCostForTokens(t, prices, provider);
-        NSString *hour = TMHourKey(epoch);
-        buckets[hour] = @([buckets[hour] doubleValue] + cost);
-    } else {
-        *unpriced += t.input + t.output + t.cacheRead + t.cacheWrite;  // comptés à part, jamais chiffrés
+        entry[@"cost"] = @([entry[@"cost"] doubleValue] + cost);  // absent → 0 → présent : devient tarifé
     }
 }
 
 // Un fichier Claude : une ligne = un message additif. Chaque usage est chiffré à son heure.
 static NSDictionary *TMScanClaudeFile(NSString *path) {
     NSMutableDictionary *buckets = [NSMutableDictionary dictionary];
-    __block double unpriced = 0;
     TMEnumerateMatchingLines(path, "\"usage\"", ^(NSDictionary *line) {
         TMTokens t; NSString *model = nil;
         if (!TMParseClaudeUsageLine(line, &t, &model)) return;
         NSString *ts = [line[@"timestamp"] isKindOfClass:NSString.class] ? line[@"timestamp"] : nil;
-        TMAccumulate(buckets, &unpriced, t, model, TMCostProviderClaude, TMParseISO(ts));
+        TMAccumulate(buckets, t, model, TMCostProviderClaude, TMParseISO(ts));
     });
-    return @{ @"buckets": buckets, @"unpriced": @(unpriced) };
+    return @{ @"buckets": buckets };
 }
 
 // Un fichier Codex : total_token_usage est CUMULÉ par session. On retient le dernier, avec le
@@ -156,8 +209,7 @@ static NSDictionary *TMScanClaudeFile(NSString *path) {
 static NSDictionary *TMScanCodexFile(NSString *path) {
     NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
     NSMutableDictionary *buckets = [NSMutableDictionary dictionary];
-    double unpriced = 0;
-    if (!data.length) return @{ @"buckets": buckets, @"unpriced": @0 };
+    if (!data.length) return @{ @"buckets": buckets };
     const char *bytes = data.bytes; NSUInteger len = data.length, start = 0;
     NSString *model = nil; NSDictionary *lastTotal = nil; NSString *lastTs = nil;
     for (NSUInteger i = 0; i <= len; i++) {
@@ -183,9 +235,9 @@ static NSDictionary *TMScanCodexFile(NSString *path) {
     }
     TMTokens t; NSString *tokenModel = nil;
     if (lastTotal && TMParseCodexTokenCount(lastTotal, &t, &tokenModel)) {
-        TMAccumulate(buckets, &unpriced, t, tokenModel ?: model, TMCostProviderOpenAI, TMParseISO(lastTs));
+        TMAccumulate(buckets, t, tokenModel ?: model, TMCostProviderOpenAI, TMParseISO(lastTs));
     }
-    return @{ @"buckets": buckets, @"unpriced": @(unpriced) };
+    return @{ @"buckets": buckets };
 }
 
 // La fenêtre la plus longue affichée est de 7 jours : les sessions plus anciennes ne peuvent
@@ -227,11 +279,37 @@ static void TMEnumerateMatchingLines(NSString *path, const char *marker, void (^
     }
 }
 
+// Fusionne un nid heure→modèle→{cost?,tokens} source dans une destination mutable (deep merge).
+static void TMMergeBuckets(NSMutableDictionary *dst, NSDictionary *src) {
+    if (![src isKindOfClass:NSDictionary.class]) return;
+    for (NSString *hour in src) {
+        NSDictionary *models = src[hour];
+        if (![models isKindOfClass:NSDictionary.class]) continue;
+        NSMutableDictionary *dstModels = dst[hour];
+        if (!dstModels) { dstModels = [NSMutableDictionary dictionary]; dst[hour] = dstModels; }
+        for (NSString *model in models) {
+            NSDictionary *entry = models[model];
+            if (![entry isKindOfClass:NSDictionary.class]) continue;
+            NSMutableDictionary *dstEntry = dstModels[model];
+            if (!dstEntry) { dstEntry = [@{ @"tokens": @0.0 } mutableCopy]; dstModels[model] = dstEntry; }
+            dstEntry[@"tokens"] = @([dstEntry[@"tokens"] doubleValue] + [entry[@"tokens"] doubleValue]);
+            NSNumber *cost = entry[@"cost"];
+            if ([cost isKindOfClass:NSNumber.class])
+                dstEntry[@"cost"] = @([dstEntry[@"cost"] doubleValue] + cost.doubleValue);
+        }
+    }
+}
+
+// Version du format de token-usage.json. v2 : tranches heure→modèle→{cost?,tokens}. Un cache d'une
+// autre version est ignoré (rescan complet), pas migré.
+static NSInteger const TMCostCacheVersion = 2;
+
 NSDictionary *TMScanTerminalCosts(void) {
     NSDictionary *cache = [NSJSONSerialization JSONObjectWithData:
         [NSData dataWithContentsOfFile:TMCostCachePath()] ?: [NSData data] options:0 error:nil];
-    NSDictionary *cachedFiles = [cache[@"files"] isKindOfClass:NSDictionary.class] ? cache[@"files"] : @{};
-    NSMutableDictionary *files = [NSMutableDictionary dictionary];  // path -> {fp, provider, buckets, unpriced}
+    BOOL versionOK = [cache[@"version"] isKindOfClass:NSNumber.class] && [cache[@"version"] integerValue] == TMCostCacheVersion;
+    NSDictionary *cachedFiles = (versionOK && [cache[@"files"] isKindOfClass:NSDictionary.class]) ? cache[@"files"] : @{};
+    NSMutableDictionary *files = [NSMutableDictionary dictionary];  // path -> {fp, provider, buckets}
 
     NSString *home = NSHomeDirectory();
     NSArray *sources = @[
@@ -246,23 +324,20 @@ NSDictionary *TMScanTerminalCosts(void) {
             NSDictionary *prev = cachedFiles[path];
             if ([prev[@"fp"] isEqualToString:fp]) { files[path] = prev; continue; }  // inchangé : réutilisé
             NSDictionary *parsed = [provider isEqualToString:@"claude"] ? TMScanClaudeFile(path) : TMScanCodexFile(path);
-            files[path] = @{ @"fp": fp, @"provider": provider, @"buckets": parsed[@"buckets"], @"unpriced": parsed[@"unpriced"] };
+            files[path] = @{ @"fp": fp, @"provider": provider, @"buckets": parsed[@"buckets"] };
         }
     }
 
     // Agrège par fournisseur. Les fichiers disparus du disque sortent naturellement (absents de `files`).
     NSMutableDictionary *claudeBuckets = [NSMutableDictionary dictionary], *codexBuckets = [NSMutableDictionary dictionary];
-    double claudeUnpriced = 0, codexUnpriced = 0;
     for (NSDictionary *entry in files.allValues) {
         BOOL isClaude = [entry[@"provider"] isEqualToString:@"claude"];
-        NSMutableDictionary *dst = isClaude ? claudeBuckets : codexBuckets;
-        for (NSString *hour in entry[@"buckets"]) dst[hour] = @([dst[hour] doubleValue] + [entry[@"buckets"][hour] doubleValue]);
-        if (isClaude) claudeUnpriced += [entry[@"unpriced"] doubleValue]; else codexUnpriced += [entry[@"unpriced"] doubleValue];
+        TMMergeBuckets(isClaude ? claudeBuckets : codexBuckets, entry[@"buckets"]);
     }
 
-    NSData *out = [NSJSONSerialization dataWithJSONObject:@{ @"files": files } options:0 error:nil];
+    NSData *out = [NSJSONSerialization dataWithJSONObject:@{ @"version": @(TMCostCacheVersion), @"files": files } options:0 error:nil];
     [out writeToFile:TMCostCachePath() atomically:YES];
 
-    return @{ @"claude": @{ @"buckets": claudeBuckets, @"unpriced": @(claudeUnpriced) },
-              @"codex":  @{ @"buckets": codexBuckets,  @"unpriced": @(codexUnpriced) } };
+    return @{ @"claude": @{ @"buckets": claudeBuckets },
+              @"codex":  @{ @"buckets": codexBuckets } };
 }
