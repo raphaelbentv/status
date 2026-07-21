@@ -264,7 +264,9 @@ function forecastLine(key){
 }
 // Coût équivalent API (feature 16). « usage terminal » partout : le web n'est pas journalisé.
 // Deux devises côte à côte. L'euro vient d'un taux daté (costs.eurPerUsd), pas d'un appel réseau.
-const fmt1=(v,sym)=>v>=1000?`${(v/1000).toFixed(1)} k${sym}`:v>=10?`${Math.round(v)} ${sym}`:`${v.toFixed(2)} ${sym}`;
+// Montants en chiffres entiers avec séparateur de milliers (« 79 739 $ »), jamais abrégés en « k ».
+// Sous 10, deux décimales pour ne pas afficher « 9 $ » quand c'est 9,00.
+const fmt1=(v,sym)=>v>=10?`${Math.round(v).toLocaleString('fr-FR')} ${sym}`:`${v.toFixed(2)} ${sym}`;
 const fmtUSD=v=>v==null?'':fmt1(v,'$');
 const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; return r?`${fmt1(v,'$')} · ${fmt1(v*r,'€')}`:fmt1(v,'$');};
 function windowCostValue(id,w){
