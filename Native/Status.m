@@ -969,10 +969,23 @@ static const double TMBrightnessKeyStepPercent = 6.0;
     int keyCode = (int)((data1 & 0xFFFF0000) >> 16);
     int keyState = (int)((data1 & 0x0000FF00) >> 8);
     if (keyState != 0x0A) return;  // relâchement ou autre état : ignoré
-    if (keyCode == NX_KEYTYPE_BRIGHTNESS_UP) [self.displayManager stepAllByPercent:TMBrightnessKeyStepPercent increase:YES];
-    else if (keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN) [self.displayManager stepAllByPercent:TMBrightnessKeyStepPercent increase:NO];
+    BOOL increase;
+    if (keyCode == NX_KEYTYPE_BRIGHTNESS_UP) increase = YES;
+    else if (keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN) increase = NO;
     else return;
-    [self pushData];
+
+    // Externes : macOS ne les touche pas, on applique le pas nous-mêmes (immédiat, pour qu'une
+    // touche maintenue descende en douceur).
+    [self.displayManager stepExternalDisplaysByPercent:TMBrightnessKeyStepPercent increase:increase];
+
+    // Interne : c'est macOS qui le pilote (l'événement n'est pas consommé), et il applique le
+    // changement juste APRÈS cet événement. On relit donc après un court délai — sinon on lirait
+    // encore l'ancienne valeur — pour que le curseur reflète la réalité sans double-piloter.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf.displayManager syncBuiltinDisplaysFromHardware];
+        [weakSelf pushData];
+    });
 }
 
 // Jamais de moniteur local qui consomme l'événement (contrairement à ⌘⇧S) : le renvoyer inchangé

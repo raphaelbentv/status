@@ -67,6 +67,10 @@ BOOL TMDDCParseVCPReply(NSData *reply, uint8_t expectedVCPCode, uint16_t *outCur
 // (pas de relecture DDC systématique — coûteuse sur le bus I2C).
 @property (readonly, nullable) NSNumber *brightnessPercent;
 - (BOOL)setBrightnessPercent:(double)percent;
+// Relit la luminosité réelle depuis le matériel et met `brightnessPercent` à jour. Sert à
+// refléter un changement venu d'ailleurs (touches F1/F2 pour l'écran interne, que macOS pilote
+// lui-même) sans réécrire — donc sans double-piloter.
+- (void)syncFromHardware;
 @end
 
 // Détecte les écrans actifs et construit un TMDisplay par écran.
@@ -79,9 +83,13 @@ BOOL TMDDCParseVCPReply(NSData *reply, uint8_t expectedVCPCode, uint16_t *outCur
 // [{ id, name, kind, available, brightness }] — sérialisable en JSON tel quel.
 - (NSArray<NSDictionary *> *)snapshot;
 - (nullable TMDisplay *)displayWithIdentifier:(NSString *)identifier;
-// Ajuste tous les écrans pilotables ensemble — pour la touche clavier physique, qui règle
-// l'ambiance du poste plutôt qu'un écran en particulier (contrairement aux curseurs, indépendants).
-- (void)stepAllByPercent:(double)stepPercent increase:(BOOL)increase;
+// Touche clavier physique : elle règle l'ambiance du poste (tous les écrans ensemble), pas un
+// écran en particulier comme les curseurs. Deux mécanismes distincts selon qui pilote réellement :
+//   — les écrans externes sont ajustés ici (macOS ne les touche pas en DDC/CI) ;
+//   — l'écran interne est piloté par macOS (l'événement n'est pas consommé) : on ne le réécrit
+//     pas, on relit sa valeur réelle via syncBuiltinDisplaysFromHardware pour refléter le curseur.
+- (void)stepExternalDisplaysByPercent:(double)stepPercent increase:(BOOL)increase;
+- (void)syncBuiltinDisplaysFromHardware;
 @end
 
 NS_ASSUME_NONNULL_END

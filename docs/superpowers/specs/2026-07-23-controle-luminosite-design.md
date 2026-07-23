@@ -72,9 +72,20 @@ renvoie toujours `1.0` quelle que soit la luminosité réelle, `Set` n'a aucun e
   relecture DDC à chaque écriture, coûteuse sur le bus I2C).
 - Action `toggleBrightnessKeys` → persiste `brightnessKeysEnabled`, (ré)installe le moniteur.
 - **Touches F1/F2** : `NSEventMaskSystemDefined`, `subtype == 8`, `NX_KEYTYPE_BRIGHTNESS_UP/DOWN`,
-  pas de 6 %. Le moniteur local **ne consomme jamais** l'événement (contrairement à ⌘⇧S) : on le
-  renvoie inchangé pour laisser macOS continuer à piloter l'écran interne et afficher son propre
-  indicateur — Status n'ajoute que le pilotage DDC/CI des externes à côté.
+  pas de 6 %. Le moniteur **ne consomme jamais** l'événement (contrairement à ⌘⇧S) : on le renvoie
+  inchangé pour laisser macOS continuer à piloter l'écran interne et afficher son propre indicateur.
+  - **Deux traitements distincts selon qui pilote réellement** (corrigé après la première version,
+    qui double-pilotait l'interne) :
+    - **Externes** : macOS ne les touche pas → Status applique le pas lui-même
+      (`stepExternalDisplaysByPercent`), immédiatement, pour qu'une touche maintenue descende en
+      douceur.
+    - **Interne** : macOS l'a déjà changé → Status ne réécrit **pas** (sinon les deux pas se
+      battent : 1/16 ≈ 6,25 % côté macOS contre 6 % côté Status). Il **relit** la valeur réelle
+      (`syncBuiltinDisplaysFromHardware`) et met le curseur à jour. La relecture est différée de
+      60 ms via `dispatch_after` : macOS applique le changement *après* l'événement, une lecture
+      immédiate renverrait encore l'ancienne valeur.
+  - Effet net inchangé pour l'utilisateur : F1/F2 baisse tous les écrans ensemble et les curseurs
+    de Status suivent la valeur réelle.
 - **Rescan** sur `NSApplicationDidChangeScreenParametersNotification` (branchement/débranchement)
   et au réveil — pas en continu, la luminosité ne dérive pas seule entre deux branchements.
 

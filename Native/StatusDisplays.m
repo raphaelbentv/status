@@ -169,7 +169,7 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
         _name = [name copy];
         _identifier = [identifier copy];
         _avService = avService;
-        [self refreshFromHardware];
+        [self syncFromHardware];
     }
     return self;
 }
@@ -178,7 +178,7 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     if (_avService) CFRelease(_avService);
 }
 
-- (void)refreshFromHardware {
+- (void)syncFromHardware {
     TMLoadPrivateDisplaySymbols();
     if (_kind == TMDisplayKindBuiltin) {
         if (!TMDisplayServicesGet) { _available = NO; _brightnessPercent = nil; return; }
@@ -291,11 +291,17 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     return nil;
 }
 
-- (void)stepAllByPercent:(double)stepPercent increase:(BOOL)increase {
+- (void)stepExternalDisplaysByPercent:(double)stepPercent increase:(BOOL)increase {
     for (TMDisplay *display in self.displays) {
-        if (!display.available || !display.brightnessPercent) continue;
+        if (display.kind != TMDisplayKindExternal || !display.available || !display.brightnessPercent) continue;
         double next = TMSteppedBrightness(display.brightnessPercent.doubleValue, increase, stepPercent);
         [display setBrightnessPercent:next];
+    }
+}
+
+- (void)syncBuiltinDisplaysFromHardware {
+    for (TMDisplay *display in self.displays) {
+        if (display.kind == TMDisplayKindBuiltin) [display syncFromHardware];
     }
 }
 
