@@ -12,6 +12,7 @@
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
 #import "StatusWindowManager.h"
+#import "StatusDisplays.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
@@ -540,6 +541,97 @@ static void TestSystemMonitorLive(void) {
     printf("  familles présentes : %s\n", [[ids componentsJoinedByString:@", "] UTF8String]);
 }
 
+#pragma mark - Écrans (luminosité)
+
+static void TestDisplayBrightnessClamp(void) {
+    Section(@"TMClampBrightnessPercent / TMSteppedBrightness — bornes");
+    CheckEqual(@(TMClampBrightnessPercent(150)), @100.0, @"au-dessus de 100 -> 100");
+    CheckEqual(@(TMClampBrightnessPercent(-10)), @0.0, @"sous 0 -> 0");
+    CheckEqual(@(TMClampBrightnessPercent(NAN)), @0.0, @"NaN -> 0, jamais propagé au JSON");
+    CheckEqual(@(TMClampBrightnessPercent(42)), @42.0, @"valeur normale inchangée");
+    CheckEqual(@(TMSteppedBrightness(50, YES, 6)), @56.0, @"un cran vers le haut");
+    CheckEqual(@(TMSteppedBrightness(50, NO, 6)), @44.0, @"un cran vers le bas");
+    CheckEqual(@(TMSteppedBrightness(98, YES, 6)), @100.0, @"un cran vers le haut borné à 100");
+    CheckEqual(@(TMSteppedBrightness(2, NO, 6)), @0.0, @"un cran vers le bas borné à 0");
+}
+
+static void TestDisplayVCPConversion(void) {
+    Section(@"TMPercentFromVCPValue / TMVCPValueFromPercent — échelle propre au moniteur");
+    CheckEqual(@(TMPercentFromVCPValue(50, 100)), @50, @"échelle 0-100 : valeur directe");
+    CheckEqual(@(TMPercentFromVCPValue(32, 64)), @50, @"échelle 0-64 : moitié -> 50 %");
+    CheckEqual(@(TMPercentFromVCPValue(10, 0)), @0, @"maximum nul (VCP mal formé) -> 0, pas de division par zéro");
+    CheckEqual(@(TMVCPValueFromPercent(50, 64)), @32, @"50 % reconverti vers l'échelle 0-64");
+    CheckEqual(@(TMVCPValueFromPercent(100, 64)), @64, @"100 % -> le maximum exact");
+    CheckEqual(@(TMVCPValueFromPercent(0, 64)), @0, @"0 % -> 0");
+    CheckEqual(@(TMVCPValueFromPercent(150, 64)), @64, @"pourcentage hors bornes -> plafonné au maximum");
+}
+
+// Le format de trame DDC/CI (VESA MCCS) est un standard public, mais la convention exacte de
+// l'octet de checksum d'une réponse varie selon les sources consultées, et aucun moniteur externe
+// n'est branché sur la machine de développement pour la vérifier en conditions réelles (voir
+// design). Ce test valide donc la cohérence interne construction/lecture — pas la conformité à un
+// vrai moniteur, qui reste à vérifier sur matériel réel.
+static void TestDisplayDDCProtocol(void) {
+    Section(@"TMDDCGetVCPRequest / TMDDCSetVCPRequest / TMDDCParseVCPReply — cohérence du protocole");
+    NSData *getRequest = TMDDCGetVCPRequest(TMDDCBrightnessVCPCode);
+    CheckEqual(@(getRequest.length), @5, @"requête Get VCP : 5 octets (source, longueur, opcode, code VCP, checksum)");
+    const uint8_t *getBytes = getRequest.bytes;
+    CheckEqual(@(getBytes[0]), @(0x51), @"octet source = adresse virtuelle hôte 0x51");
+    CheckEqual(@(getBytes[2]), @(0x01), @"opcode Get VCP Feature = 0x01");
+    CheckEqual(@(getBytes[3]), @(TMDDCBrightnessVCPCode), @"code VCP transmis = luminosité (0x10)");
+
+    NSData *setRequest = TMDDCSetVCPRequest(TMDDCBrightnessVCPCode, 42);
+    CheckEqual(@(setRequest.length), @7, @"requête Set VCP : 7 octets (valeur sur 2 octets en plus)");
+    const uint8_t *setBytes = setRequest.bytes;
+    CheckEqual(@(setBytes[2]), @(0x03), @"opcode Set VCP Feature = 0x03");
+    CheckEqual(@(((setBytes[4] << 8) | setBytes[5])), @42, @"valeur reconstruite depuis MSB/LSB");
+
+    // Trame de réponse synthétique, construite avec la même fonction de checksum que le code de
+    // production : valide la cohérence du décodage, pas un octet de référence d'un vrai moniteur.
+    uint8_t reply[11] = { 0x6E, 0x88, 0x02, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x00, 100, 0x00, 62, 0x00 };
+    NSMutableData *replyData = [NSMutableData dataWithBytes:reply length:sizeof(reply) - 1];
+    // Checksum calculé à la main (graine 0x50, cf. TMDDCChecksum) pour rester indépendant de
+    // l'implémentation testée.
+    uint8_t checksum = 0x50;
+    for (NSUInteger i = 0; i < replyData.length; i++) checksum ^= ((const uint8_t *)replyData.bytes)[i];
+    [replyData appendBytes:&checksum length:1];
+    uint16_t current = 0, maximum = 0;
+    Check(TMDDCParseVCPReply(replyData, TMDDCBrightnessVCPCode, &current, &maximum), @"trame valide acceptée");
+    CheckEqual(@(current), @62, @"valeur courante extraite");
+    CheckEqual(@(maximum), @100, @"maximum extrait");
+
+    NSMutableData *corrupted = [replyData mutableCopy];
+    ((uint8_t *)corrupted.mutableBytes)[10] ^= 0xFF;
+    Check(!TMDDCParseVCPReply(corrupted, TMDDCBrightnessVCPCode, &current, &maximum), @"checksum invalide -> rejetée");
+
+    NSMutableData *wrongVCP = [replyData mutableCopy];
+    ((uint8_t *)wrongVCP.mutableBytes)[4] = 0x12;  // code VCP différent, checksum désormais invalide aussi
+    Check(!TMDDCParseVCPReply(wrongVCP, TMDDCBrightnessVCPCode, &current, &maximum), @"code VCP inattendu -> rejetée");
+
+    Check(!TMDDCParseVCPReply([NSData data], TMDDCBrightnessVCPCode, &current, &maximum), @"trame vide -> rejetée, pas de crash");
+}
+
+// Fumée sur le vrai matériel — même esprit que TestSystemMonitorLive : l'écran interne doit
+// répondre sur toute machine de développement. Aucune assertion sur un écran externe, puisque son
+// éventuelle présence dépend de la machine qui exécute les tests.
+static void TestDisplayManagerLive(void) {
+    Section(@"TMDisplayManager — détection réelle (fumée)");
+    TMDisplayManager *manager = [TMDisplayManager new];
+    [manager rescan];
+    Check(manager.displays.count >= 1, @"au moins un écran détecté (l'interne, sur un portable)");
+    TMDisplay *builtin = [manager displayWithIdentifier:@"builtin"];
+    if (builtin) {
+        Check(builtin.kind == TMDisplayKindBuiltin, @"l'écran interne est classé comme tel");
+        printf("  écran interne : disponible=%s brightness=%s\n",
+               builtin.available ? "oui" : "non",
+               builtin.brightnessPercent ? builtin.brightnessPercent.description.UTF8String : "—");
+    } else {
+        printf("  aucun écran interne détecté (machine de bureau ?)\n");
+    }
+    NSArray *snapshot = [manager snapshot];
+    Check([NSJSONSerialization isValidJSONObject:snapshot], @"snapshot des écrans sérialisable");
+}
+
 #pragma mark - Gestionnaire de fenêtres
 
 static BOOL TMRectClose(CGRect a, CGRect b) {
@@ -934,6 +1026,10 @@ int main(void) {
         TestTopProcesses();
         TestThresholdFire();
         TestSystemMonitorLive();
+        TestDisplayBrightnessClamp();
+        TestDisplayVCPConversion();
+        TestDisplayDDCProtocol();
+        TestDisplayManagerLive();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

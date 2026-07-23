@@ -13,7 +13,9 @@
 #import "StatusWindowManager.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
+#import "StatusDisplays.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
+#import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -391,6 +393,8 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSInteger directFailures; // compteur du chien de garde (feature 3)
 @property id globalShortcutMonitor, localShortcutMonitor;
 @property TMWindowManager *windowManager;
+@property TMDisplayManager *displayManager;
+@property id brightnessGlobalMonitor, brightnessLocalMonitor;
 @property NSPanel *pickerPanel;
 @property WKWebView *pickerWebView;
 @property NSArray<TMWindowCandidate *> *pickerCandidates;
@@ -448,6 +452,11 @@ static const CGFloat TMTitleBarHeight = 28;
     self.openAIAccount = TMDisconnectedOpenAIAccount(@"");
     self.claudeAccount = TMEmptyClaudeAccount();
     self.notifiedThresholds = [NSMutableDictionary dictionary];
+    // Avant tout appel possible à pushData (refreshCostsInBackground en pousse un dès le
+    // lancement) : `payload` lit self.displayManager sans filet, un nil ferait planter le
+    // literal @{...} plutôt que d'omettre la clé.
+    self.displayManager = [TMDisplayManager new];
+    [self.displayManager rescan];
     self.codexServer = [TMCodexAppServer new];
     __weak typeof(self) weakSelf = self;
     self.codexServer.notificationHandler = ^(NSString *method, NSDictionary *params) {
@@ -464,6 +473,8 @@ static const CGFloat TMTitleBarHeight = 28;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
     [self installGlobalShortcut];
     [self installWindowShortcuts];
+    [self installBrightnessKeyMonitor];
+    [self observeDisplayChanges];
     [self requestNotificationAuthorization];
     [self observeWakeNotifications];
     [self.window makeKeyAndOrderFront:nil];
@@ -483,6 +494,7 @@ static const CGFloat TMTitleBarHeight = 28;
     [self.keyboardLock forceUnlock];
     [self removeGlobalShortcut];
     [self removeWindowShortcuts];  // même logique : le tap mourrait aussi, mais soyons explicites
+    [self removeBrightnessKeyMonitor];
     [self.metricsTimer invalidate];
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
@@ -505,6 +517,19 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (void)systemDidWake:(NSNotification *)notification {
     [self refresh:nil];  // automatic: if the endpoint was failing before sleep, keep honouring the backoff
+    [self rescanDisplays];  // un moniteur externe peut avoir été rebranché pendant la veille
+}
+
+// Rebranchement/débranchement d'un écran, ou réveil : les identifiants DDC/CoreDisplay précédents
+// ne sont plus valables tels quels, il faut réénumérer plutôt que rafraîchir en place.
+- (void)observeDisplayChanges {
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(rescanDisplays)
+                                                name:NSApplicationDidChangeScreenParametersNotification object:nil];
+}
+
+- (void)rescanDisplays {
+    [self.displayManager rescan];
+    [self pushData];
 }
 
 - (void)buildWindow {
@@ -923,6 +948,56 @@ static const CGFloat TMTitleBarHeight = 28;
     if (self.localShortcutMonitor) { [NSEvent removeMonitor:self.localShortcutMonitor]; self.localShortcutMonitor = nil; }
 }
 
+#pragma mark - Luminosité des écrans
+
+// Un cran de touche F1/F2, appliqué à tous les écrans pilotables ensemble — la touche physique
+// règle l'ambiance générale du poste, contrairement aux curseurs de l'onglet Écrans/du popover
+// qui restent indépendants (voir design). Valeur alignée sur le pas habituel de macOS.
+static const double TMBrightnessKeyStepPercent = 6.0;
+
+- (BOOL)brightnessKeysEnabled {
+    return [NSUserDefaults.standardUserDefaults boolForKey:@"brightnessKeysEnabled"];
+}
+
+// NX_SUBTYPE_AUX_CONTROL_BUTTONS = 8. data1 empaquette (codeTouche << 16 | étatTouche << 8 | …) ;
+// 0x0A signale un appui (down), y compris en répétition. Même mécanisme que celui utilisé par la
+// plupart des utilitaires qui interceptent les touches média — non documenté par Apple, mais
+// stable depuis des années.
+- (void)handleSystemDefinedEvent:(NSEvent *)event {
+    if (event.subtype != 8) return;
+    NSInteger data1 = event.data1;
+    int keyCode = (int)((data1 & 0xFFFF0000) >> 16);
+    int keyState = (int)((data1 & 0x0000FF00) >> 8);
+    if (keyState != 0x0A) return;  // relâchement ou autre état : ignoré
+    if (keyCode == NX_KEYTYPE_BRIGHTNESS_UP) [self.displayManager stepAllByPercent:TMBrightnessKeyStepPercent increase:YES];
+    else if (keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN) [self.displayManager stepAllByPercent:TMBrightnessKeyStepPercent increase:NO];
+    else return;
+    [self pushData];
+}
+
+// Jamais de moniteur local qui consomme l'événement (contrairement à ⌘⇧S) : le renvoyer inchangé
+// laisse macOS continuer à piloter l'écran interne et afficher son propre indicateur — Status
+// n'ajoute que le pilotage DDC/CI des externes à côté, sans rien casser du comportement existant.
+- (void)installBrightnessKeyMonitor {
+    [self removeBrightnessKeyMonitor];
+    if (![self brightnessKeysEnabled]) return;
+    __weak typeof(self) weakSelf = self;
+    self.brightnessGlobalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
+                                                                          handler:^(NSEvent *event) {
+        [weakSelf handleSystemDefinedEvent:event];
+    }];
+    self.brightnessLocalMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
+                                                                        handler:^NSEvent *(NSEvent *event) {
+        [weakSelf handleSystemDefinedEvent:event];
+        return event;
+    }];
+}
+
+- (void)removeBrightnessKeyMonitor {
+    if (self.brightnessGlobalMonitor) { [NSEvent removeMonitor:self.brightnessGlobalMonitor]; self.brightnessGlobalMonitor = nil; }
+    if (self.brightnessLocalMonitor) { [NSEvent removeMonitor:self.brightnessLocalMonitor]; self.brightnessLocalMonitor = nil; }
+}
+
 #pragma mark - Gestionnaire de fenêtres
 
 // Table des raccourcis : modificateurs exacts + touche, vers une action. Les modificateurs sont
@@ -1210,6 +1285,18 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconStyle"];
         [self updateStatusMenu];
     }
+    if ([action isEqualToString:@"setBrightness"]) {
+        NSString *displayId = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        TMDisplay *display = displayId ? [self.displayManager displayWithIdentifier:displayId] : nil;
+        if (display) [display setBrightnessPercent:[body[@"value"] doubleValue]];
+        [self pushData];
+    }
+    if ([action isEqualToString:@"toggleBrightnessKeys"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
+        [self installBrightnessKeyMonitor];
+        [self pushData];
+    }
     if ([action isEqualToString:@"toggleWindowManager"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"windowManagerEnabled"] forKey:@"windowManagerEnabled"];
@@ -1282,6 +1369,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"claude": self.claudeAccount ?: TMEmptyClaudeAccount()
         },
         @"history": history,
+        @"displays": [self.displayManager snapshot] ?: @[],
         @"costs": [self costPayload],
         @"forecasts": [self forecastsFromHistory:history],
         @"prefs": @{
@@ -1293,6 +1381,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"windowManager": @([self windowManagerEnabled]),
+            @"brightnessKeys": @([self brightnessKeysEnabled]),
             @"windowGapBetween": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapBetween"]),
             @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
             @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),

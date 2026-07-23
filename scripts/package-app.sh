@@ -14,7 +14,7 @@ clang -fobjc-arc -O2 -I "$ROOT/Native" \
   "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
-  "$ROOT/Native/StatusFx.m" -o "$BUILD"
+  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/scripts" "$OUTPUT/Contents/Resources/icons"

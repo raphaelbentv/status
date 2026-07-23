@@ -79,12 +79,21 @@
   .footer-row > button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .footer-row > button.go{color:var(--blue);font-weight:700}
   .empty-value{color:var(--provider);opacity:.55}
+  /* Luminosité — rangée compacte sous les outils. Un écran non pilotable est omis ici (voir
+     dashboard pour l'état « sans réponse » détaillé) : le popover est trop dense pour l'expliquer. */
+  .brightness{display:flex;flex-direction:column;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
+  .b-row{display:flex;align-items:center;gap:8px;background:var(--panel-bg-strong);padding:7px 10px}
+  .b-label{font-size:9.5px;color:var(--muted);width:44px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .b-slider{flex:1;-webkit-appearance:none;appearance:none;height:10px;background:rgba(255,255,255,.04);border:1px solid var(--hair);cursor:pointer}
+  .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:15px;background:var(--blue);border:1px solid var(--hair-strong);cursor:pointer}
+  .b-value{font-size:9.5px;color:var(--text);width:28px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
-<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
 const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
@@ -148,10 +157,19 @@ function tools(t){
   return btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
     +btn('toggleKeyboardLock','⌨',lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
 }
+// Un curseur par écran pilotable, les non-pilotables omis (popover trop dense pour l'état « sans
+// réponse » détaillé — voir le tableau de bord). Nom tronqué par CSS, pas ici : le survol du
+// popover ne montre pas de tooltip fiable en WKWebView.
+function brightnessRow(displays){
+  const pilotable=(displays||[]).filter(d=>d.available);
+  if(!pilotable.length)return '';
+  return pilotable.map(d=>`<div class="b-row"><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
+}
 let lastData=null;
 function renderMenu(data){
   document.documentElement.dataset.theme=data.prefs?.theme||'blueprint';
   document.querySelector('#providers').innerHTML=provider('openai','OpenAI',data.accounts?.openai)+provider('claude','Claude',data.accounts?.claude);
+  document.querySelector('#brightness').innerHTML=brightnessRow(data.displays);
   document.querySelector('#tools').innerHTML=tools(data.tools);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
   const opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;

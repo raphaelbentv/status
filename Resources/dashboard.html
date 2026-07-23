@@ -16,7 +16,7 @@
   .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:var(--radius);padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
   .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:11px;line-height:1}
-  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="monitor"]::before{content:"03"}.nav button[data-view="settings"]::before{content:"04"}
+  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="monitor"]::before{content:"03"}.nav button[data-view="displays"]::before{content:"04"}.nav button[data-view="settings"]::before{content:"05"}
   .nav button.active{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--blue);font-weight:700}
   .nav button.active::before{opacity:1;color:var(--blue)}
   .sidebar-spacer{flex:1}.sidebar-bottom{border-top:1px solid var(--hair);padding-top:10px}
@@ -168,6 +168,21 @@
   .proc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .proc-mem{color:var(--muted);text-align:right}
   .proc-cpu{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  /* Écrans — luminosité. Cartes au même gabarit que le Moniteur, mais un curseur est une action,
+     pas une mesure : pas de graphique, pas de couleur de série. */
+  .display-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:20px}
+  .display-card{border:1px solid var(--hair);background:var(--soft);padding:16px 18px}
+  .display-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+  .display-name{font-size:12.5px;font-weight:700;color:var(--text)}
+  .display-badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border:1px solid var(--hair-strong);border-radius:var(--radius);padding:2px 7px}
+  .display-badge.builtin{color:var(--blue);border-color:var(--blue)}
+  .brightness-row{display:flex;align-items:center;gap:12px}
+  /* Curseur natif restylé pour rester dans la trame de l'app plutôt que le rendu système par défaut. */
+  .brightness-slider{flex:1;-webkit-appearance:none;appearance:none;height:14px;background:rgba(255,255,255,.03);border:1px solid var(--hair);cursor:pointer}
+  .brightness-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:20px;background:var(--blue);border:1px solid var(--hair-strong);cursor:pointer;box-shadow:var(--edge-glow,none)}
+  .brightness-slider:disabled{opacity:.4;cursor:default}
+  .brightness-value{width:44px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);flex:none}
+  .display-unavailable{color:var(--muted);font-size:10.5px;margin-top:2px}
 </style>
 </head>
 <body>
@@ -178,6 +193,7 @@
       <button class="active" data-view="overview">Status</button>
       <button data-view="connections">Connexions</button>
       <button data-view="monitor">Moniteur</button>
+      <button data-view="displays">Écrans</button>
       <button data-view="settings">Réglages</button>
     </nav>
     <div class="sidebar-spacer"></div>
@@ -189,6 +205,7 @@
     <section class="view active" id="overview"></section>
     <section class="view" id="connections"></section>
     <section class="view" id="monitor"></section>
+    <section class="view" id="displays"></section>
     <section class="view" id="settings"></section>
   </main>
 </div>
@@ -355,6 +372,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Respecter la barre des menus et le Dock</strong><small>Désactivé, les fenêtres occupent l’écran physique entier et passent dessous.</small></div><button class="button ${p.windowReservedAreas?'on':''}" onclick="send('toggleWindowReservedAreas')">${p.windowReservedAreas?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Raccourcis</strong><small>Non modifiables pour l’instant.</small></div><div class="shortcut-table">${WINDOW_SHORTCUTS.map(([k,l])=>`<div class="shortcut-row"><kbd>${k}</kbd><span>${l}</span></div>`).join('')}</div></div>
   `:''}
+  <div class="setting"><div class="setting-copy"><strong>Piloter la luminosité au clavier</strong><small>F1/F2 ajustent aussi les écrans externes en DDC/CI, en plus de l’écran interne géré nativement par macOS. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.brightnessKeys&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les touches ne piloteront que l’écran interne.</strong>':''}</small></div><button class="button ${p.brightnessKeys?'on':''}" onclick="send('toggleBrightnessKeys')">${p.brightnessKeys?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Raccourci clavier global</strong><small>⌘⇧S ouvre et ferme le panneau depuis n’importe quelle application. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.globalShortcut&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : le raccourci ne répondra pas.</strong>':''}</small></div><button class="button ${p.globalShortcut?'on':''}" onclick="send('toggleGlobalShortcut')">${p.globalShortcut?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></div>
@@ -365,8 +383,24 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
 </div>`}
 function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
 function claudePanel(account){if(!account)return '';const busy=account.actionRunning||account.authChecking;let subtitle='',actions='',content='';const windows=(account.windows||[]).map(w=>quotaCard(w,'claude',appData?.history)).join('');if(account.trackingConfigured){subtitle=`Suivi actif${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`;actions=`${!account.cliAvailable?`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`:!account.authenticated?`<button class="account-action primary" onclick="send('loginClaude')">Connecter</button>`:''}<button class="account-action" ${busy?'disabled':''} onclick="send('uninstallClaudeTracking')">Désactiver</button>`;content=windows||`<div class="quota-empty">Le suivi est prêt. Lancez Claude Code et envoyez un message pour recevoir les compteurs.<br><button class="account-action" onclick="send('openClaudeTerminal')">Ouvrir Claude Code</button></div>`}else if(!account.cliAvailable){subtitle='CLI non détectée';actions=`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`;content=`<div class="quota-empty">Installez Claude Code depuis la documentation officielle.</div>`}else if(!account.authenticated){subtitle='Claude Code détecté · non connecté';actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('loginClaude')">Connecter</button>`;content=`<div class="quota-empty">La connexion s’effectue dans Terminal. Status ne capture aucun secret.</div>`}else{subtitle=`Connecté${account.subscriptionType?` · ${esc(account.subscriptionType)}`:''}`;actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('installClaudeTracking')">Activer le suivi</button>`;content=`<div class="quota-empty">Activez le collecteur status line pour recevoir les fenêtres 5 h et 7 jours.</div>`}actions+=`<button class="account-action" onclick="send('configureClaudeFableCookie')" title="Quotas en direct + jauge Fable (avancé, non officiel)">${account.fableConfigured?'direct ✓':'direct'}</button>`;return `<div class="quota-block" style="--provider:var(--purple)"><div class="account-row"><div class="account-copy"><strong>Claude Code</strong><small>${subtitle}</small></div><div class="account-actions">${actions}</div></div><div class="quota-grid">${content}</div>${account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la status line ne s’exécute que pendant une session « claude » en Terminal. Activez « direct » pour une lecture live toutes les 5 min.</div>`:''}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
+// Écrans (feature luminosité). Un curseur par écran pilotable, indépendant des autres — pas de
+// mode « lié » (voir design). L'écriture n'a lieu qu'au relâchement (« change »), pas à chaque
+// frame du glisser (« input » mettrait à jour l'affichage local seulement, sans spammer le natif).
+function displayCard(display){
+  const badge=`<span class="display-badge ${display.kind==='builtin'?'builtin':''}">${display.kind==='builtin'?'interne':'externe'}</span>`;
+  if(!display.available){
+    return `<div class="display-card"><div class="display-head"><span class="display-name">${esc(display.name)}</span>${badge}</div><div class="display-unavailable">DDC/CI indisponible — ce moniteur ne répond pas au pilotage de luminosité.</div></div>`;
+  }
+  const value=display.brightness??0;
+  return `<div class="display-card"><div class="display-head"><span class="display-name">${esc(display.name)}</span>${badge}</div><div class="brightness-row"><input type="range" class="brightness-slider" min="0" max="100" value="${value}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${display.id}',value:Number(this.value)})"><span class="brightness-value">${value} %</span></div></div>`;
+}
+function displaysView(data){
+  const displays=data.displays||[];
+  const cards=displays.length?displays.map(displayCard).join(''):'<div class="quota-empty">Aucun écran détecté.</div>';
+  return `<div class="toolbar"><h1>Écrans</h1></div><div class="section-head"><div><h2>Luminosité</h2><p>Un curseur par écran détecté. Un moniteur externe qui ne répond pas au DDC/CI reste listé, sans curseur actionnable.</p></div></div><div class="display-grid">${cards}</div>`;
+}
 function connectionsView(data){return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Identifiants gérés par les outils officiels</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Status lit uniquement les compteurs autorisés et ne copie jamais vos jetons OAuth.</p></div></div><div class="connections"><article class="connection-panel"><h3>OpenAI</h3><p>Quotas ChatGPT via le serveur local Codex.</p>${quotaPanel(data.accounts?.openai)}</article><article class="connection-panel"><h3>Claude</h3><p>Quotas Claude via la status line officielle de Claude Code.</p>${claudePanel(data.accounts?.claude)}</article></div>`}
-function render(){if(!appData)return;document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
+function render(){if(!appData)return;document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#displays').innerHTML=displaysView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
 // ─── Moniteur système ───────────────────────────────────────────────────────
 // Flux séparé des quotas : le natif pousse un snapshot par seconde quand la fenêtre est visible.
 // Cette vue a son propre chemin de rendu — re-render() global à 1 Hz reconstruirait trois vues
