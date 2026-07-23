@@ -116,6 +116,16 @@
   .metric-legend i{display:inline-block;width:9px;height:2px;vertical-align:middle;margin-right:5px}
   .core-bars{display:flex;gap:2px;margin-top:9px;height:24px;align-items:flex-end}
   .core-bars i{flex:1;background:var(--chart-a);min-height:1px}
+  /* Schéma des cœurs, groupés par type. Les barres sont à largeur fixe ici : sinon les 4 cœurs
+     Efficience s'étireraient autant que les 10 Performance et le rapport visuel mentirait. */
+  .core-schematic{display:flex;gap:18px;margin-top:9px;flex-wrap:wrap}
+  .core-group-label{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:block;margin-bottom:3px}
+  .core-schematic .core-bars{margin-top:0}
+  .core-schematic .core-bars i{flex:none;width:7px}
+  .proc-head{display:grid;grid-template-columns:1fr 90px 70px;gap:10px;padding-bottom:5px;font-size:9px;
+    text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .proc-head span:not(:first-child){text-align:right}
+  .proc-head .sorted{color:var(--blue);font-weight:700}
   .metric-badge{font-size:10px;padding:2px 7px;border:1px solid var(--hair);color:var(--muted)}
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
@@ -438,19 +448,77 @@ const fmtUptime=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.f
 // ─ Vues détaillées (clic sur une carte) ─
 // L'état survit au re-render à 1 Hz, comme hoverState.
 const expanded=new Set();
-function detailCPU(cpu){const cores=Object.keys(cpu.series||{}).filter(k=>k.startsWith('core')).sort((a,b)=>+a.slice(4)-+b.slice(4));
+// « coreTypes » partage le préfixe « core » mais n'est pas un cœur : c'est la chaîne E/P décrivant
+// leur type. L'exclure partout, sinon +'Types'.slice(4) donne NaN et casse le tri.
+const coreKeys=source=>Object.keys(source||{}).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
+function detailCPU(cpu){const cores=coreKeys(cpu.series);
   return `<div class="detail-grid">${cores.map(c=>`<div class="detail-cell"><div class="detail-label">cœur ${c.slice(4)} · ${cpu.now[c]==null?'—':Math.round(cpu.now[c])+' %'}</div>${metricChart('cpu',[{key:c,color:'var(--chart-a)',label:c}],{percent:true})}</div>`).join('')}</div>`}
+// Schéma des cœurs : deux blocs étiquetés quand la machine distingue Performance et Efficience
+// (coreTypes fourni par le natif), une rangée uniforme sinon.
+function coreSchematic(cpu){
+  const bar=i=>{const v=cpu.now['core'+i];
+    return `<i style="height:${Math.max(4,v??0)}%" title="cœur ${i} · ${v==null?'—':Math.round(v)+' %'}"></i>`};
+  const types=cpu.now.coreTypes;
+  if(!types)return `<div class="core-bars" title="un trait par cœur">${coreKeys(cpu.now).map(k=>bar(+k.slice(4))).join('')}</div>`;
+  const perf=[],eff=[];
+  for(let i=0;i<types.length;i++)(types[i]==='E'?eff:perf).push(i);
+  const group=(label,idx)=>idx.length?`<div><span class="core-group-label">${label} · ${idx.length}</span><div class="core-bars">${idx.map(bar).join('')}</div></div>`:'';
+  return `<div class="core-schematic">${group('Performance',perf)}${group('Efficience',eff)}</div>`;
+}
+// GPU : le détail expose ce que le matériel donne en plus de la charge globale — les deux étages
+// (rendu, tuilage) et la mémoire réellement en service. Le GPU ne se ventile pas par cœur.
+function detailGPU(gpu){
+  const mem=gpu.now.memInUse!=null?`<div class="detail-rows"><div class="detail-row"><span class="detail-label">mémoire GPU en usage</span><span>${fmtSize(gpu.now.memInUse)}</span></div></div>`:'';
+  return metricChart('gpu',[{key:'renderer',color:'var(--chart-a)',label:'Renderer'},{key:'tiler',color:'var(--chart-b)',label:'Tiler'}],{percent:true})
+    +legend([['var(--chart-a)','Renderer'],['var(--chart-b)','Tiler']])+mem;
+}
+const fmtMinutes=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${String(mm).padStart(2,'0')}`:`${mm} min`};
+const fmtDecimal=v=>String(v).replace('.',',');
+function detailBattery(battery){
+  const n=battery.now;
+  const row=(label,value)=>`<div class="detail-row"><span class="detail-label">${label}</span><span>${value}</span></div>`;
+  const rows=[];
+  if(n.healthPercent!=null)rows.push(row('santé (capacité max / conception)',Math.round(n.healthPercent)+' %'));
+  if(n.cycleCount!=null)rows.push(row('cycles de charge',n.cycleCount));
+  rows.push(row('condition',n.conditionOK?'normale':'à faire réviser'));
+  if(n.minutesRemaining!=null)rows.push(row(n.charging?'avant charge pleine':'autonomie restante',fmtMinutes(n.minutesRemaining)));
+  if(n.powerWatts!=null)rows.push(row(n.powerWatts<0?'décharge':'charge',fmtDecimal(Math.abs(n.powerWatts))+' W'));
+  if(n.adapterWatts!=null)rows.push(row('chargeur',n.adapterWatts+' W'));
+  if(n.temperatureC!=null)rows.push(row('température',Math.round(n.temperatureC)+' °C'));
+  if(n.voltageV!=null)rows.push(row('tension',fmtDecimal(n.voltageV)+' V'));
+  return `<div class="detail-rows">${rows.join('')}</div>`;
+}
 function detailNetwork(net){const ifaces=[...new Set(Object.keys(net.now).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
   return `<div class="detail-rows">${ifaces.map(name=>`<div class="detail-row"><span class="detail-label">${esc(name)}</span><span>↓ ${fmtBytes(net.now['rx:'+name])} · ↑ ${fmtBytes(net.now['tx:'+name])}</span></div>`).join('')||'<div class="metric-empty">Aucune interface active.</div>'}</div>`}
 function detailDisk(disk){const volumes=Object.keys(disk.now).filter(k=>k.startsWith('vol:')).sort();
   return `<div class="detail-rows">${volumes.map(key=>{const pct=Math.round(disk.now[key]);return `<div class="detail-row"><span class="detail-label">${esc(key.slice(4))}</span><span>${pct} %</span></div><div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${pct}%"></i></div>`}).join('')}</div>`}
-const DETAILS={cpu:detailCPU,network:detailNetwork,disk:detailDisk};
+const DETAILS={cpu:detailCPU,gpu:detailGPU,network:detailNetwork,disk:detailDisk,battery:detailBattery};
 
+// Le natif envoie l'union des plus gros consommateurs CPU et mémoire ; le tri se fait ici, pour
+// que basculer de dimension ne coûte pas un aller-retour. Le GPU par processus n'existe pas sur
+// macOS par une voie fiable — d'où deux colonnes et non trois.
+let procSort='cpu';
+function setProcSort(mode){procSort=mode;renderMonitor()}
 function processesCard(){
-  const processes=metricsData?.processes||[];
+  const processes=(metricsData?.processes||[]).slice();
   if(!processes.length)return '';
-  const rows=processes.map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem">${fmtSize(p.rssBytes)}</span><span class="proc-cpu">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span></div>`).join('');
-  return `<div class="metric-card metric-card-wide"><div class="metric-head"><h3>Processus les plus actifs</h3><span class="unit">CPU sur le dernier intervalle · un fil = 100 %</span></div><div class="proc-rows">${rows}</div></div>`;
+  processes.sort((a,b)=>procSort==='ram'?b.rssBytes-a.rssBytes:b.cpuPercent-a.cpuPercent);
+  const rows=processes.slice(0,8).map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem">${fmtSize(p.rssBytes)}</span><span class="proc-cpu">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span></div>`).join('');
+  const toggle=`<div class="view-toggle">${[['cpu','CPU'],['ram','mémoire']].map(([v,l])=>`<button class="${procSort===v?'on':''}" onclick="setProcSort('${v}')">${l}</button>`).join('')}</div>`;
+  return `<div class="metric-card metric-card-wide"><div class="metric-head"><h3>Applications les plus gourmandes</h3>${toggle}</div>
+    <div class="proc-head"><span>processus</span><span class="${procSort==='ram'?'sorted':''}">mémoire</span><span class="${procSort==='cpu'?'sorted':''}">CPU</span></div>
+    <div class="proc-rows">${rows}</div></div>`;
+}
+// Batterie : absente sur un Mac de bureau (le collecteur rend nil, la famille disparaît) — la
+// carte ne s'affiche alors pas du tout, comme toute famille sans source.
+function batteryCard(){
+  const battery=famGet('battery');if(!battery)return '';
+  const n=battery.now;
+  const state=n.charging?'en charge':n.externalConnected?(n.fullyCharged?'branché · plein':'branché'):'sur batterie';
+  const power=n.powerWatts!=null&&n.powerWatts!==0?` · ${fmtDecimal(Math.abs(n.powerWatts))} W`:'';
+  return metricCard('battery','Batterie',
+    `<span><span class="unit">${state}${power}</span> <span class="metric-value">${n.percent==null?'—':Math.round(n.percent)+'<span class="unit">%</span>'}</span></span>`,
+    metricChart('battery',[{key:'percent',color:'var(--chart-a)',label:'charge'}],{percent:true}));
 }
 function systemCard(){
   const system=famGet('system');if(!system)return '';
@@ -470,24 +538,24 @@ function monitorView(){
   const cpu=famGet('cpu'),gpu=famGet('gpu'),ram=famGet('ram'),net=famGet('network'),disk=famGet('disk'),sensors=famGet('sensors');
   const pct=v=>v==null?'—':`${Math.round(v)}<span class="unit">%</span>`;
   const cards=[];
-  if(cpu){const cores=Object.keys(cpu.now).filter(k=>k.startsWith('core')).sort((a,b)=>+a.slice(4)-+b.slice(4));
-    cards.push(metricCard('cpu','CPU',`<span class="metric-value">${pct(cpu.now.total)}</span>`,
-      metricChart('cpu',[{key:'total',color:'var(--chart-a)',label:'CPU'}],{percent:true})
-      +`<div class="core-bars" title="un trait par cœur">${cores.map(c=>`<i style="height:${Math.max(4,cpu.now[c])}%"></i>`).join('')}</div>`));}
+  if(cpu)cards.push(metricCard('cpu','CPU',`<span class="metric-value">${pct(cpu.now.total)}</span>`,
+    metricChart('cpu',[{key:'total',color:'var(--chart-a)',label:'CPU'}],{percent:true})+coreSchematic(cpu)));
   if(gpu)cards.push(metricCard('gpu','GPU',`<span class="metric-value">${pct(gpu.now.usage)}</span>`,
     metricChart('gpu',[{key:'usage',color:'var(--chart-a)',label:'GPU'}],{percent:true})));
   if(ram){const [pressureLabel,pressureClass]=PRESSURE[ram.now.pressureLevel]||[];
     cards.push(metricCard('ram','Mémoire',`<span>${pressureLabel?`<span class="metric-badge ${pressureClass}">pression ${pressureLabel}</span> `:''}<span class="metric-value">${pct(ram.now.usedPercent)}</span></span>`,
       metricChart('ram',[{key:'usedPercent',color:'var(--chart-a)',label:'Occupée'}],{percent:true})));}
+  const batteryHTML=batteryCard();if(batteryHTML)cards.push(batteryHTML);
   if(net)cards.push(metricCard('network','Réseau',`<span class="metric-value" style="font-size:14px">↓ ${fmtBytes(net.now.rxBytesPerSec)} · ↑ ${fmtBytes(net.now.txBytesPerSec)}</span>`,
     metricChart('network',[{key:'rxBytesPerSec',color:'var(--chart-a)',label:'↓ réception'},{key:'txBytesPerSec',color:'var(--chart-b)',label:'↑ émission'}])
     +legend([['var(--chart-a)','↓ réception'],['var(--chart-b)','↑ émission']])));
   if(disk)cards.push(metricCard('disk','Disque',`<span><span class="metric-value" style="font-size:14px">R ${fmtBytes(disk.now.readBytesPerSec)} · W ${fmtBytes(disk.now.writeBytesPerSec)}</span> <span class="unit">· plein à ${disk.now.usedPercent==null?'—':Math.round(disk.now.usedPercent)+' %'}</span></span>`,
     metricChart('disk',[{key:'readBytesPerSec',color:'var(--chart-a)',label:'lecture'},{key:'writeBytesPerSec',color:'var(--chart-b)',label:'écriture'}])
     +legend([['var(--chart-a)','lecture'],['var(--chart-b)','écriture']])));
-  if(sensors){const battery=sensors.now.batteryPercent!=null?`<span class="unit">batterie ${Math.round(sensors.now.batteryPercent)} %${sensors.now.batteryCharging?' ⚡':''}</span> `:'';
-    cards.push(metricCard('sensors','Capteurs',`<span>${battery}<span class="metric-value">${sensors.now.tempC==null?'—':Math.round(sensors.now.tempC)+'<span class="unit">°C</span>'}</span></span>`,
-      sensors.now.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):''));}
+  // La batterie a sa propre carte (voir batteryCard) : Capteurs ne porte plus que la température.
+  if(sensors&&sensors.now.tempC!=null)
+    cards.push(metricCard('sensors','Capteurs',`<span class="metric-value">${Math.round(sensors.now.tempC)}<span class="unit">°C</span></span>`,
+      metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true})));
   const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
   const toggle=`<div class="view-toggle"><button class="${monitorMode==='charts'?'on':''}" onclick="setMonitorMode('charts')">graphiques</button><button class="${monitorMode==='table'?'on':''}" onclick="setMonitorMode('table')">tableau</button></div>`;
   const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min</span>${toggle}</div>`;
@@ -503,7 +571,9 @@ const stats=values=>{
   return {now:values[values.length-1],min:Math.min(...values),max:Math.max(...values),avg:sum/values.length};
 };
 // Le format ne se déduit pas de l'unité : une charge de 2,4 arrondie à l'entier ne dit plus rien.
-const METRIC_LABELS={'cpu.total':['CPU','%','int'],'gpu.usage':['GPU','%','int'],'ram.usedPercent':['Mémoire','%','int'],
+const METRIC_LABELS={'cpu.total':['CPU','%','int'],'gpu.usage':['GPU','%','int'],
+  'gpu.renderer':['GPU rendu','%','int'],'gpu.tiler':['GPU tuilage','%','int'],
+  'ram.usedPercent':['Mémoire','%','int'],'battery.percent':['Batterie','%','int'],
   'network.rxBytesPerSec':['Réseau ↓','','bytes'],'network.txBytesPerSec':['Réseau ↑','','bytes'],
   'disk.readBytesPerSec':['Disque lecture','','bytes'],'disk.writeBytesPerSec':['Disque écriture','','bytes'],
   'sensors.tempC':['Température','°C','int'],'system.load1':['Charge 1 min','','decimal']};

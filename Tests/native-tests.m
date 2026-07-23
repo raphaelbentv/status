@@ -16,6 +16,7 @@
 #import "StatusCost.h"
 #import "StatusFx.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
+#import <sys/sysctl.h>
 
 static int gFailures = 0;
 static int gChecks = 0;
@@ -480,27 +481,41 @@ static NSDictionary *TMProc(NSString *name, uint64_t cpuNs, uint64_t rss) {
 }
 
 static void TestTopProcesses(void) {
-    Section(@"TMTopProcesses — deltas de temps CPU par processus");
+    Section(@"TMTopProcesses — union top-CPU ∪ top-RAM");
     NSDictionary *previous = @{ @"10": TMProc(@"chrome", 1000000000, 500), @"20": TMProc(@"node", 500000000, 300),
                                 @"30": TMProc(@"idle_app", 100000000, 100) };
     NSDictionary *current  = @{ @"10": TMProc(@"chrome", 2000000000, 520), @"20": TMProc(@"node", 1750000000, 310),
                                 @"30": TMProc(@"idle_app", 100000000, 100) };
     NSArray *top = TMTopProcesses(previous, current, 2.0, 5);
     Check(top.count == 3, @"trois processus mesurés");
-    CheckEqual(top.firstObject[@"name"], @"node", @"trié par consommation : node (62,5 %) devant chrome (50 %)");
+    CheckEqual(top.firstObject[@"name"], @"node", @"tranche CPU en tête : node (62,5 %) devant chrome (50 %)");
     CheckEqual(top.firstObject[@"cpuPercent"], @62.5, @"1,25 s de CPU sur 2 s = 62,5 %");
-    CheckEqual([top.lastObject objectForKey:@"cpuPercent"], @0.0, @"processus immobile : 0 %, présent");
     CheckEqual(top.firstObject[@"rssBytes"], @310, @"la RSS vient du relevé courant");
     CheckEqual(top.firstObject[@"pid"], @"20", @"le pid accompagne chaque entrée");
 
-    Check(TMTopProcesses(previous, current, 2.0, 2).count == 2, @"count tronque après tri");
+    // Le tri par mémoire garde un gros consommateur RAM que le tri CPU seul écarterait.
+    NSDictionary *prevMix = @{ @"10": TMProc(@"busy", 1000000000, 100), @"20": TMProc(@"greedy_ram", 100000000, 100) };
+    NSDictionary *curMix  = @{ @"10": TMProc(@"busy", 3000000000, 100),      // +2 s CPU, peu de RAM
+                              @"20": TMProc(@"greedy_ram", 100000000, 9000),  // 0 % CPU, énorme RAM
+                              @"30": TMProc(@"middle", 1100000000, 50) };     // apparu, mais count=1 l'écarte
+    NSArray *mix = TMTopProcesses(prevMix, curMix, 2.0, 1);
+    NSArray *mixNames = [mix valueForKey:@"name"];
+    Check(mix.count == 2, @"count=1 par dimension : union = top-1 CPU + top-1 RAM = 2 process");
+    Check([mixNames containsObject:@"busy"], @"le plus gourmand CPU est là");
+    Check([mixNames containsObject:@"greedy_ram"], @"le plus gros RAM est là, malgré 0 % CPU");
+    Check(![mixNames containsObject:@"middle"], @"ni top CPU ni top RAM : écarté");
+
     Check(TMTopProcesses(previous, current, 0, 5).count == 0, @"intervalle nul : rien, pas de division");
 
+    // Nouveau changement de sémantique : un process sans delta CPU exploitable est CONSERVÉ avec
+    // cpuPercent = 0 (éligible au tri mémoire), au lieu d'être écarté.
     NSDictionary *reborn = @{ @"10": TMProc(@"chrome", 2000000000, 520), @"40": TMProc(@"nouveau", 900000000, 50) };
     NSArray *rebornTop = TMTopProcesses(previous, reborn, 2.0, 5);
-    CheckEqual([rebornTop valueForKey:@"name"], @[@"chrome"], @"pid apparu depuis le dernier relevé : pas de delta, absent");
+    Check([[rebornTop valueForKey:@"name"] containsObject:@"nouveau"], @"pid apparu depuis : conservé (cpu 0), éligible RAM");
+    for (NSDictionary *p in rebornTop) if ([p[@"name"] isEqual:@"nouveau"]) CheckEqual(p[@"cpuPercent"], @0.0, @"nouveau : cpuPercent = 0, pas de delta inventé");
     NSDictionary *reused = @{ @"10": TMProc(@"autre_app", 100, 60) };
-    Check(TMTopProcesses(previous, reused, 2.0, 5).count == 0, @"temps CPU qui recule (pid réutilisé) : écarté");
+    NSArray *reusedTop = TMTopProcesses(previous, reused, 2.0, 5);
+    Check(reusedTop.count == 1 && [reusedTop.firstObject[@"cpuPercent"] isEqual:@0.0], @"CPU qui recule (pid réutilisé) : cpuPercent forcé à 0, pas de pic négatif");
 
     NSDictionary *burst = @{ @"10": TMProc(@"video_export", 7000000000, 800) };
     NSArray *burstTop = TMTopProcesses(previous, burst, 2.0, 5);
@@ -539,6 +554,55 @@ static void TestSystemMonitorLive(void) {
     Check([ids containsObject:@"disk"], @"le disque répond");
     Check([NSJSONSerialization isValidJSONObject:snapshot], @"snapshot réel sérialisable");
     printf("  familles présentes : %s\n", [[ids componentsJoinedByString:@", "] UTF8String]);
+
+    NSDictionary *(^familyNow)(NSString *) = ^NSDictionary *(NSString *fid) {
+        for (NSDictionary *f in families) if ([f[@"id"] isEqual:fid]) return f[@"now"];
+        return nil;
+    };
+
+    // coreTypes : sur Apple Silicon, chaîne E/P de longueur = nombre de cœurs. Omis sur une
+    // machine sans distinction P/E — on ne teste alors que sa cohérence si présent.
+    NSDictionary *cpuNow = familyNow(@"cpu");
+    NSString *coreTypes = cpuNow[@"coreTypes"];
+    if (coreTypes) {
+        int logicalCPU = 0; size_t sz = sizeof(logicalCPU);
+        sysctlbyname("hw.logicalcpu", &logicalCPU, &sz, NULL, 0);
+        // coreTypes couvre tous les cœurs physiques ; le nombre de clés « coreN » d'un tick donné
+        // peut être inférieur (un cœur E sans aucun tick sur l'intervalle n'a pas de delta).
+        NSUInteger coreKeys = 0;
+        for (NSString *k in cpuNow) if ([k hasPrefix:@"core"] && ![k isEqual:@"coreTypes"]) coreKeys++;
+        Check((int)coreTypes.length == logicalCPU, @"coreTypes : un caractère par cœur physique");
+        Check(coreTypes.length >= coreKeys, @"coreTypes couvre au moins les cœurs mesurés ce tick");
+        Check([[coreTypes stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"EP"]] length] == 0,
+              @"coreTypes : uniquement des E et des P");
+        printf("  cœurs : %s\n", coreTypes.UTF8String);
+    }
+
+    // GPU : au minimum `usage` ; renderer/tiler/memInUse selon la machine.
+    NSDictionary *gpuNow = familyNow(@"gpu");
+    if (gpuNow) {
+        Check(gpuNow[@"usage"] != nil, @"GPU : Device Utilization présent");
+        printf("  gpu : usage=%s renderer=%s tiler=%s\n",
+               [gpuNow[@"usage"] description].UTF8String,
+               [gpuNow[@"renderer"] ?: @"—" description].UTF8String,
+               [gpuNow[@"tiler"] ?: @"—" description].UTF8String);
+    }
+
+    // Batterie : présente sur un portable, absente sur un Mac de bureau (famille nil).
+    NSDictionary *batt = familyNow(@"battery");
+    if (batt) {
+        Check(batt[@"percent"] != nil, @"batterie : pourcentage présent");
+        NSNumber *pct = batt[@"percent"];
+        Check(pct.doubleValue >= 0 && pct.doubleValue <= 100, @"batterie : pourcentage dans [0,100]");
+        printf("  batterie : %s%% cycles=%s santé=%s%% cond=%s %sW\n",
+               pct.description.UTF8String,
+               [batt[@"cycleCount"] ?: @"—" description].UTF8String,
+               [batt[@"healthPercent"] ?: @"—" description].UTF8String,
+               [batt[@"conditionOK"] boolValue] ? "OK" : "!",
+               [batt[@"powerWatts"] ?: @"—" description].UTF8String);
+    } else {
+        printf("  batterie : absente (Mac de bureau ?)\n");
+    }
 }
 
 #pragma mark - Écrans (luminosité)

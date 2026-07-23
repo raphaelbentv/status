@@ -82,21 +82,44 @@ BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
 NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *current,
                                         NSTimeInterval elapsed, NSUInteger count) {
     if (elapsed <= 0) return @[];
+    // On mesure d'abord le delta CPU de chaque processus vivant aux deux relevés ; la mémoire est
+    // instantanée (pas de delta). Un processus apparu depuis (pas de « before ») n'a pas de delta
+    // CPU exploitable, mais sa mémoire l'est : on le garde avec cpuPercent = 0, pour qu'un gros
+    // consommateur RAM fraîchement lancé apparaisse quand même au tri par mémoire.
     NSMutableArray *measured = [NSMutableArray array];
     [current enumerateKeysAndObjectsUsingBlock:^(NSString *pid, NSDictionary *proc, BOOL *stop) {
+        double percent = 0;
         NSDictionary *before = previous[pid];
-        if (!before) return;  // apparu depuis le dernier relevé : pas de delta possible
-        uint64_t cpuBefore = [before[@"cpuTimeNs"] unsignedLongLongValue];
-        uint64_t cpuNow = [proc[@"cpuTimeNs"] unsignedLongLongValue];
-        if (cpuNow < cpuBefore) return;  // pid réutilisé par un autre processus
-        double percent = (double)(cpuNow - cpuBefore) / 1e9 / elapsed * 100.0;
+        if (before) {
+            uint64_t cpuBefore = [before[@"cpuTimeNs"] unsignedLongLongValue];
+            uint64_t cpuNow = [proc[@"cpuTimeNs"] unsignedLongLongValue];
+            if (cpuNow >= cpuBefore)  // sinon pid réutilisé : on laisse cpuPercent à 0
+                percent = (double)(cpuNow - cpuBefore) / 1e9 / elapsed * 100.0;
+        }
         [measured addObject:@{ @"pid": pid, @"name": proc[@"name"] ?: @"?",
                                @"cpuPercent": @(percent), @"rssBytes": proc[@"rssBytes"] ?: @0 }];
     }];
-    [measured sortUsingComparator:^(NSDictionary *a, NSDictionary *b) {
-        return [b[@"cpuPercent"] compare:a[@"cpuPercent"]];
-    }];
-    return measured.count > count ? [measured subarrayWithRange:NSMakeRange(0, count)] : measured;
+
+    // Union des `count` plus gros par CPU et des `count` plus gros par RAM, dédupliquée par pid.
+    // L'interface trie ensuite selon la dimension choisie ; garder les deux tops garantit qu'un
+    // processus dominant l'une des deux ressources est toujours présent, quel que soit le tri.
+    NSComparator byCPU = ^(NSDictionary *a, NSDictionary *b) { return [b[@"cpuPercent"] compare:a[@"cpuPercent"]]; };
+    NSComparator byRAM = ^(NSDictionary *a, NSDictionary *b) { return [b[@"rssBytes"] compare:a[@"rssBytes"]]; };
+    NSArray * (^topSlice)(NSComparator) = ^(NSComparator cmp) {
+        NSArray *sorted = [measured sortedArrayUsingComparator:cmp];
+        return sorted.count > count ? [sorted subarrayWithRange:NSMakeRange(0, count)] : sorted;
+    };
+
+    // Union des deux tranches (CPU d'abord, puis RAM), dédupliquée par pid. Taille entre `count`
+    // (les deux tops coïncident) et 2×count (aucun recouvrement).
+    NSMutableArray *union_ = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    for (NSDictionary *proc in [topSlice(byCPU) arrayByAddingObjectsFromArray:topSlice(byRAM)]) {
+        if ([seen containsObject:proc[@"pid"]]) continue;
+        [seen addObject:proc[@"pid"]];
+        [union_ addObject:proc];
+    }
+    return union_;
 }
 
 BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, double rearmBelow) {
@@ -140,10 +163,13 @@ BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, doubl
         if (!values) continue;     // pas de zéros inventés pendant une panne
         NSMutableDictionary *familyRings = _rings[family];
         if (!familyRings) _rings[family] = familyRings = [NSMutableDictionary dictionary];
-        [values enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSNumber *value, BOOL *stop) {
+        [values enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
+            // Certaines valeurs sont des métadonnées non chronologiques (ex. cpu.coreTypes, une
+            // chaîne « EEEEPP… ») : elles voyagent dans `now` mais n'alimentent aucun anneau.
+            if (![value isKindOfClass:NSNumber.class]) return;
             TMMetricRing *ring = familyRings[key];
             if (!ring) familyRings[key] = ring = [[TMMetricRing alloc] initWithCapacity:TMMetricRingCapacity];
-            [ring push:value.doubleValue];
+            [ring push:((NSNumber *)value).doubleValue];
         }];
     }
 }
@@ -168,6 +194,27 @@ BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, doubl
 
 // CPU par cœur et global, via host_processor_info. L'état précédent des ticks vit dans le bloc.
 typedef struct { uint64_t active, total; } TMCPUTicks;
+
+// Répartition Efficience/Performance des cœurs, en chaîne « EEEEPP… » de longueur coreCount, ou
+// nil si la machine n'expose pas les deux types (Intel). Sur Apple Silicon, hw.perflevel0 =
+// Performance, hw.perflevel1 = Efficiency ; les cœurs E occupent les premiers index de
+// host_processor_info (vérifié empiriquement), les P ensuite. Calculée une fois puis mémoïsée.
+static NSString *TMCPUCoreTypes(natural_t coreCount) {
+    static NSString *cached = nil;
+    static natural_t cachedCount = 0;
+    if (cached && cachedCount == coreCount) return cached;
+    int pCores = 0, eCores = 0;
+    size_t size = sizeof(int);
+    if (sysctlbyname("hw.perflevel0.logicalcpu", &pCores, &size, NULL, 0) != 0) pCores = 0;
+    size = sizeof(int);
+    if (sysctlbyname("hw.perflevel1.logicalcpu", &eCores, &size, NULL, 0) != 0) eCores = 0;
+    if (pCores <= 0 || eCores <= 0 || (natural_t)(pCores + eCores) != coreCount) return nil;
+    NSMutableString *types = [NSMutableString stringWithCapacity:coreCount];
+    for (natural_t i = 0; i < coreCount; i++) [types appendString:(i < (natural_t)eCores) ? @"E" : @"P"];
+    cached = [types copy];
+    cachedCount = coreCount;
+    return cached;
+}
 
 static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previousTicks) {
     natural_t coreCount = 0;
@@ -205,6 +252,14 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previou
     // au tick suivant.
     if (!measured) return nil;
     values[@"total"] = @(round(percentSum / measured));
+
+    // Type de chaque cœur (Efficience vs Performance), chaîne « EEEE PPPP… » sans espace. Calculé
+    // une fois : la topologie ne change pas. Ordre vérifié empiriquement sur Apple Silicon — les
+    // cœurs Efficience occupent les premiers index de host_processor_info, les Performance
+    // ensuite. Omis si la machine n'a pas les deux types (Intel : pas de perflevel) — l'interface
+    // retombe alors sur des barres uniformes.
+    NSString *coreTypes = TMCPUCoreTypes(coreCount);
+    if (coreTypes) values[@"coreTypes"] = coreTypes;
     return values;
 }
 
@@ -233,13 +288,18 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectRAM(void) {
     return values;
 }
 
-// GPU : « Device Utilization % » du registre IOAccelerator. Non documenté mais stable depuis des
-// années — et si la clé disparaît, la famille disparaît avec, par construction.
+// GPU : registre IOAccelerator, dictionnaire « PerformanceStatistics ». Non documenté mais stable
+// depuis des années — et si une clé disparaît, elle disparaît du snapshot, le reste survit.
+//   usage    = Device Utilization %   (charge globale, déjà exposée)
+//   renderer = Renderer Utilization % (étage de rendu)
+//   tiler    = Tiler Utilization %    (étage de tuilage TBDR)
+//   memInUse = In use system memory   (octets alloués réellement en service)
+// Le GPU par cœur n'existe pas : aucune API n'expose les cœurs GPU un par un.
 static NSDictionary<NSString *, NSNumber *> *TMCollectGPU(void) {
     io_iterator_t iterator = IO_OBJECT_NULL;
     if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"),
                                      &iterator) != KERN_SUCCESS) return nil;
-    NSNumber *usage = nil;
+    NSMutableDictionary *values = nil;
     io_object_t service;
     while ((service = IOIteratorNext(iterator))) {
         CFTypeRef statistics = IORegistryEntryCreateCFProperty(service, CFSTR("PerformanceStatistics"),
@@ -247,14 +307,22 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectGPU(void) {
         if (statistics && CFGetTypeID(statistics) == CFDictionaryGetTypeID()) {
             NSDictionary *performance = (__bridge NSDictionary *)statistics;
             NSNumber *device = performance[@"Device Utilization %"] ?: performance[@"GPU Activity(%)"];
-            if ([device isKindOfClass:NSNumber.class]) usage = device;
+            if ([device isKindOfClass:NSNumber.class]) {
+                values = [NSMutableDictionary dictionaryWithObject:@(round(device.doubleValue)) forKey:@"usage"];
+                NSNumber *renderer = performance[@"Renderer Utilization %"];
+                NSNumber *tiler = performance[@"Tiler Utilization %"];
+                NSNumber *mem = performance[@"In use system memory"];
+                if ([renderer isKindOfClass:NSNumber.class]) values[@"renderer"] = @(round(renderer.doubleValue));
+                if ([tiler isKindOfClass:NSNumber.class]) values[@"tiler"] = @(round(tiler.doubleValue));
+                if ([mem isKindOfClass:NSNumber.class]) values[@"memInUse"] = mem;
+            }
         }
         if (statistics) CFRelease(statistics);
         IOObjectRelease(service);
-        if (usage) break;  // un seul GPU sur les machines visées
+        if (values) break;  // un seul GPU sur les machines visées
     }
     IOObjectRelease(iterator);
-    return usage ? @{ @"usage": @(round(usage.doubleValue)) } : nil;
+    return values;
 }
 
 // Réseau : total (clés rxBytesPerSec/txBytesPerSec) + par interface active (rx:en0, tx:en0…),
@@ -401,26 +469,7 @@ static const int32_t TMHIDEventFieldTemperature = 15 << 16;
 static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
     NSMutableDictionary *values = [NSMutableDictionary dictionary];
 
-    // Batterie — public, fiable. Absente sur un Mac de bureau : la clé manque, rien de plus.
-    CFTypeRef powerInfo = IOPSCopyPowerSourcesInfo();
-    if (powerInfo) {
-        CFArrayRef sources = IOPSCopyPowerSourcesList(powerInfo);
-        if (sources) {
-            for (CFIndex i = 0; i < CFArrayGetCount(sources); i++) {
-                NSDictionary *description = (__bridge NSDictionary *)
-                    IOPSGetPowerSourceDescription(powerInfo, CFArrayGetValueAtIndex(sources, i));
-                NSNumber *current = description[@kIOPSCurrentCapacityKey];
-                NSNumber *max = description[@kIOPSMaxCapacityKey];
-                if (current && max.doubleValue > 0) {
-                    values[@"batteryPercent"] = @(round(100.0 * current.doubleValue / max.doubleValue));
-                    values[@"batteryCharging"] = @([description[@kIOPSIsChargingKey] boolValue]);
-                    break;
-                }
-            }
-            CFRelease(sources);
-        }
-        CFRelease(powerInfo);
-    }
+    // La batterie a sa propre famille (TMCollectBattery) : ici, uniquement la température.
 
     // Température — moyenne des capteurs HID plausibles. PrimaryUsagePage 0xff00 (AppleVendor),
     // PrimaryUsage 5 : les capteurs thermiques.
@@ -446,6 +495,89 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
         }
         CFRelease(client);
     }
+
+    return values.count ? values : nil;
+}
+
+#pragma mark - Batterie
+
+// Batterie complète. Deux sources publiques/semi-publiques :
+//   — IOPSCopyPowerSourcesInfo : état haut niveau (%, branché, temps restant) ;
+//   — AppleSmartBattery (registre IOKit) : cycles, capacités mAh, tension, courant, condition,
+//     détails du chargeur, température. Clés stables depuis des années, même compromis que le
+//     reste du module ; absente sur un Mac de bureau → famille nil, la carte ne s'affiche pas.
+// `powerWatts` est signé : négatif en décharge, positif en charge (tension × courant).
+static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
+    io_service_t smart = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                     IOServiceMatching("AppleSmartBattery"));
+    if (!smart) return nil;
+    CFMutableDictionaryRef rawProps = NULL;
+    if (IORegistryEntryCreateCFProperties(smart, &rawProps, kCFAllocatorDefault, 0) != KERN_SUCCESS) {
+        IOObjectRelease(smart);
+        return nil;
+    }
+    NSDictionary *props = CFBridgingRelease(rawProps);
+    IOObjectRelease(smart);
+
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    NSNumber *(^num)(id) = ^NSNumber *(id v) { return [v isKindOfClass:NSNumber.class] ? v : nil; };
+
+    // Charge : CurrentCapacity/MaxCapacity sont en pourcentage sur macOS moderne.
+    NSNumber *current = num(props[@"CurrentCapacity"]);
+    NSNumber *maxPct = num(props[@"MaxCapacity"]);
+    if (current) {
+        double pct = (maxPct.doubleValue > 0 && maxPct.doubleValue != 100)
+                   ? 100.0 * current.doubleValue / maxPct.doubleValue : current.doubleValue;
+        values[@"percent"] = @(round(MIN(MAX(pct, 0), 100)));
+    }
+    values[@"charging"] = @([num(props[@"IsCharging"]) boolValue]);
+    values[@"externalConnected"] = @([num(props[@"ExternalConnected"]) boolValue]);
+    values[@"fullyCharged"] = @([num(props[@"FullyCharged"]) boolValue]);
+    if (num(props[@"CycleCount"])) values[@"cycleCount"] = num(props[@"CycleCount"]);
+
+    // Tension (mV) et courant (mA, signé) → puissance en watts. InstantAmperage préféré, plus vif.
+    NSNumber *voltage = num(props[@"Voltage"]);
+    NSNumber *amperage = num(props[@"InstantAmperage"]) ?: num(props[@"Amperage"]);
+    if (voltage && amperage) {
+        // Amperage est un entier signé 64 bits ; au-delà de 2^32 il code un négatif (décharge).
+        long long amp = amperage.longLongValue;
+        double watts = (voltage.doubleValue / 1000.0) * (amp / 1000.0);
+        values[@"powerWatts"] = @(round(watts * 10) / 10.0);
+    }
+    if (voltage) values[@"voltageV"] = @(round(voltage.doubleValue / 100.0) / 10.0);
+
+    // Santé : capacité de charge pleine actuelle / capacité de conception, en mAh réels. Piège
+    // vérifié sur la machine : la clé « MaxCapacity » vaut 100 (un pourcentage, pas des mAh) ; les
+    // vraies capacités sont dans BatteryData (DesignCapacity ≈ 6249, NominalChargeCapacity ≈ 5723).
+    // Garde-fou : n'accepter que des valeurs « grandes » (> 1000), sinon on tomberait sur le 100
+    // trompeur. Omis si indisponible — pas de chiffre inventé.
+    NSDictionary *batteryData = [props[@"BatteryData"] isKindOfClass:NSDictionary.class] ? props[@"BatteryData"] : nil;
+    NSNumber *designCap = num(props[@"DesignCapacity"]) ?: num(batteryData[@"DesignCapacity"]);
+    NSNumber *fullCap = num(props[@"AppleRawMaxCapacity"]) ?: num(props[@"NominalChargeCapacity"]) ?: num(batteryData[@"NominalChargeCapacity"]);
+    if (designCap.doubleValue > 1000 && fullCap.doubleValue > 1000) {
+        values[@"healthPercent"] = @(round(MIN(100.0, 100.0 * fullCap.doubleValue / designCap.doubleValue)));
+    }
+
+    // Condition : « Normal » vs besoin de révision. PermanentFailureStatus non nul = défaut.
+    NSNumber *failure = num(props[@"PermanentFailureStatus"]);
+    values[@"conditionOK"] = @(failure ? failure.intValue == 0 : YES);
+
+    // Température batterie : centi-Kelvin ou centi-°C selon la source. La clé « Temperature » de
+    // l'AppleSmartBattery est en centi-°C (ex. 3012 = 30,12 °C).
+    NSNumber *temp = num(props[@"Temperature"]) ?: num(batteryData[@"Temperature"]);
+    if (temp.doubleValue > 0) values[@"temperatureC"] = @(round(temp.doubleValue / 100.0));
+
+    // Chargeur : puissance nominale de l'adaptateur branché.
+    NSDictionary *adapter = [props[@"AdapterDetails"] isKindOfClass:NSDictionary.class] ? props[@"AdapterDetails"] : nil;
+    NSNumber *adapterWatts = num(adapter[@"Watts"]);
+    if (adapterWatts.doubleValue > 0) values[@"adapterWatts"] = adapterWatts;
+
+    // Temps restant (minutes) : vers le vide en décharge, vers le plein en charge. 65535 = inconnu
+    // (juste après un changement d'état) — écarté plutôt qu'affiché comme une durée absurde.
+    NSNumber *toEmpty = num(props[@"AvgTimeToEmpty"]);
+    NSNumber *toFull = num(props[@"AvgTimeToFull"]);
+    NSNumber *chosen = [values[@"charging"] boolValue] ? toFull : toEmpty;
+    if (chosen && chosen.intValue > 0 && chosen.intValue != 65535) values[@"minutesRemaining"] = chosen;
 
     return values.count ? values : nil;
 }
@@ -493,7 +625,8 @@ TMSystemMonitor *TMSystemMonitorCreate(void) {
         @"ram":     ^{ return TMCollectRAM(); },
         @"network": ^{ return TMCollectNetwork(networkState); },
         @"disk":    ^{ return TMCollectDisk(&diskRead, &diskWrite, &diskAt); },
+        @"battery": ^{ return TMCollectBattery(); },
         @"sensors": ^{ return TMCollectSensors(); },
         @"system":  ^{ return TMCollectSystem(); },
-    } familyOrder:@[@"cpu", @"gpu", @"ram", @"network", @"disk", @"sensors", @"system"]];
+    } familyOrder:@[@"cpu", @"gpu", @"ram", @"network", @"disk", @"battery", @"sensors", @"system"]];
 }

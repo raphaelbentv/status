@@ -1636,7 +1636,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
     if (processSample && self.previousProcessSample) {
         self.topProcesses = TMTopProcesses(self.previousProcessSample, processSample,
-                                           now - self.previousProcessAt, 5);
+                                           now - self.previousProcessAt, 8);
     }
     self.previousProcessSample = processSample;
     self.previousProcessAt = now;

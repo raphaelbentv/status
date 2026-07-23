@@ -38,11 +38,15 @@ BOOL TMRatePerSecond(uint64_t previous, uint64_t current, NSTimeInterval elapsed
 BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
                               uint64_t activeCurrent, uint64_t totalCurrent, double *outPercent);
 
-// Top des processus entre deux relevés. Chaque relevé : pid (clé texte) → { name, cpuTimeNs,
-// rssBytes }. Retourne les `count` plus gourmands en CPU sur l'intervalle, triés décroissant :
-// [{ pid, name, cpuPercent, rssBytes }]. Un pid absent du relevé précédent n'a pas de delta et
-// n'apparaît pas ; un temps CPU qui recule (pid réutilisé) écarte le processus. Le pourcentage
-// n'est pas plafonné à 100 : un processus multithread dépasse légitimement un cœur.
+// Processus les plus gourmands entre deux relevés, sur DEUX dimensions. Chaque relevé : pid (clé
+// texte) → { name, cpuTimeNs, rssBytes }. Retourne l'union — dédupliquée par pid — des `count`
+// plus gros par CPU et des `count` plus gros par RAM : [{ pid, name, cpuPercent, rssBytes }].
+// L'interface trie ensuite selon la dimension voulue ; garder les deux tops évite qu'un gros
+// consommateur mémoire à faible CPU (ou l'inverse) disparaisse. Taille du résultat : entre `count`
+// (tops identiques) et 2×count (disjoints). Un pid absent du relevé précédent garde cpuPercent = 0
+// (delta CPU impossible) mais reste éligible au tri mémoire ; un temps CPU qui recule (pid
+// réutilisé) laisse aussi cpuPercent à 0. Le pourcentage CPU n'est pas plafonné à 100 : un
+// processus multithread dépasse légitimement un cœur.
 NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *current,
                                         NSTimeInterval elapsed, NSUInteger count);
 
