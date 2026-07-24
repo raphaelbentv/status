@@ -5,26 +5,41 @@
 <link rel="stylesheet" href="themes.css">
 <style>
   *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:12px/1.4 var(--font)}
-  .panel{padding:12px 14px;min-width:250px}
+  .panel{padding:12px 14px;width:296px}
   .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--hair-strong);padding-bottom:8px;margin-bottom:10px}
   .head h1{margin:0;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--blue);font-weight:700}
-  .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1}
+  .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1;text-align:right}
   .big .u{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
+  .big .sub{display:block;font-size:10px;color:var(--muted);font-weight:400;margin-top:2px;letter-spacing:0}
   .badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--hair-strong);border-radius:var(--radius);padding:2px 7px;color:var(--muted)}
   .badge.warn{color:var(--amber);border-color:var(--amber)}.badge.crit{color:var(--danger);border-color:var(--danger)}
-  svg.chart{display:block;width:100%;height:44px;margin:8px 0}
+  svg.chart{display:block;width:100%;height:44px;margin:6px 0}
   .chart .area{opacity:.14}.chart .line{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
   .rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
   .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11.5px}
-  .row .k{color:var(--muted)}.row .v{font-variant-numeric:tabular-nums}
+  .row .k{color:var(--muted)}.row .v{font-variant-numeric:tabular-nums;text-align:right}
   .cores{display:flex;gap:14px;margin:8px 0 2px}
   .cores .grp .lbl{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
   .bars{display:flex;gap:2px;height:26px;align-items:flex-end}.bars i{width:7px;background:var(--chart-a);min-height:1px}
-  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(62px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);margin:6px 0}
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);margin:6px 0}
   .stat{background:var(--soft);padding:7px 9px}.stat b{display:block;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}.stat span{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-  .stat.warn b{color:var(--amber)}
+  .stat.warn b{color:var(--amber)}.stat.crit b{color:var(--danger)}
   .empty{color:var(--muted);padding:14px 0;text-align:center}
-  .track{height:12px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin:3px 0 8px;overflow:hidden}.track i{display:block;height:100%;background:var(--chart-a)}
+  .track{height:12px;background:rgba(127,127,127,.12);border:1px solid var(--hair);margin:3px 0 8px;overflow:hidden}.track i{display:block;height:100%;background:var(--chart-a)}
+  .section{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:12px 0 6px;padding-top:9px;border-top:1px solid var(--hair)}
+  .split{display:flex;height:14px;border:1px solid var(--hair);overflow:hidden;margin:6px 0;background:rgba(127,127,127,.10)}
+  .split i{height:100%;min-width:0}
+  .legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px}
+  .legend .lg{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted)}
+  .legend .lg b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:600}
+  .dot{width:8px;height:8px;border-radius:2px;flex:none}
+  .plist{display:flex;flex-direction:column;gap:5px}
+  .p{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline}
+  .p .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);font-size:11.5px}
+  .p .vv{font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px}
+  .p .pbar{grid-column:1/-1;height:3px;background:var(--hair);overflow:hidden;margin-top:1px}
+  .p .pbar i{display:block;height:100%;background:var(--chart-a)}
+  .vol{margin-top:8px}.vol .vh{display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px}.vol .vh .vf{color:var(--muted);font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -32,94 +47,174 @@
 <script>
 let widgetId=null,metrics=null;
 const famGet=id=>metrics?.families?.find(f=>f.id===id);
+const sysNow=()=>famGet('system')?.now||{};
+const procs=()=>metrics?.processes||[];
 const num=v=>typeof v==='number'?v:null;
+const fr=v=>String(v).replace('.',',');
+const pctN=v=>v==null?'—':Math.round(v);
 const pct=v=>v==null?'—':Math.round(v)+' %';
-const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const u=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<3){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+u[i]};
-const fmtSize=v=>{if(v==null||isNaN(v))return '—';const u=['o','Ko','Mo','Go'];let i=0;while(v>=1024&&i<3){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+u[i]};
+const fmtRate=v=>{if(v==null||isNaN(v))return '—';const u=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<3){v/=1024;i++}return fr((i&&v<10?v.toFixed(1):Math.round(v))+'')+' '+u[i]};
+const fmtSize=v=>{if(v==null||isNaN(v))return '—';const u=['o','Ko','Mo','Go','To'];let i=0;while(v>=1024&&i<4){v/=1024;i++}return fr((i&&v<10?v.toFixed(1):Math.round(v))+'')+' '+u[i]};
+const fmtGo=v=>{if(v==null||isNaN(v))return '—';return fr((v/1073741824).toFixed(1))+' Go'};
 const fmtMin=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${String(mm).padStart(2,'0')}`:`${mm} min`};
-const dec=v=>String(v).replace('.',',');
+const fmtDur=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d)return `${d} j ${h} h`;if(h)return `${h} h ${String(m).padStart(2,'0')}`;return `${m} min`};
+
 // Mini-courbe SVG, une ou deux séries, échelle % fixe (percent) ou auto (débits).
-function chart(series,{percent=true,colors=['var(--chart-a)']}={}){
-  const drawn=series.filter(s=>s.values&&s.values.length>1);
+function chart(list,{percent=true}={}){
+  const drawn=list.filter(s=>s.values&&s.values.length>1);
   if(!drawn.length)return '';
-  const w=250,h=44,len=Math.max(...drawn.map(s=>s.values.length));
+  const w=296,h=44,len=Math.max(...drawn.map(s=>s.values.length));
   const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values));
   const paths=drawn.map((s,i)=>{const off=len-s.values.length;
     const d=s.values.map((v,j)=>`${j?'L':'M'}${((off+j)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
-    const c=s.color||colors[i]||'var(--chart-a)';
+    const c=s.color||'var(--chart-a)';
     return `<path class="area" fill="${c}" d="${d} L${w},${h} L${(off/(len-1)*w).toFixed(1)},${h} Z"/><path class="line" stroke="${c}" d="${d}"/>`}).join('');
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${paths}</svg>`;
 }
-const head=(title,rightHTML)=>`<div class="head"><h1>${title}</h1>${rightHTML||''}</div>`;
-const series=(fam,key)=>({values:(fam?.series?.[key])||[]});
+const head=(title,rightHTML)=>`<div class="head"><h1>${title}</h1><div>${rightHTML||''}</div></div>`;
+const bigVal=(v,unit,sub)=>`<span class="big">${v}${unit?`<span class="u">${unit}</span>`:''}${sub?`<span class="sub">${sub}</span>`:''}</span>`;
+const series=(fam,key,color)=>({values:(fam?.series?.[key])||[],color});
+const section=t=>`<div class="section">${t}</div>`;
+const row=(k,v)=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// Barre empilée + légende. segs=[{label,value,color,fmt}]. total borne l'échelle ; le reste (libre)
+// est laissé vide dans la barre. showFree ajoute une entrée « libre » à la légende.
+function splitBar(segs,total,{free=null,freeLabel='libre'}={}){
+  if(!total)return '';
+  const bar=segs.map(s=>`<i style="width:${(100*s.value/total).toFixed(2)}%;background:${s.color}"></i>`).join('');
+  const legend=segs.map(s=>`<span class="lg"><span class="dot" style="background:${s.color}"></span>${s.label} <b>${s.fmt(s.value)}</b></span>`).join('')
+    +(free!=null?`<span class="lg"><span class="dot" style="background:rgba(127,127,127,.22)"></span>${freeLabel} <b>${fmtGo(free)}</b></span>`:'');
+  return `<div class="split">${bar}</div><div class="legend">${legend}</div>`;
+}
+// Liste de processus : top `n` triés par `key`, valeur formatée par `fmt`, barre normalisée au max.
+function procList(key,fmt,n=5){
+  const list=procs().filter(p=>p[key]!=null).sort((a,b)=>b[key]-a[key]).slice(0,n);
+  if(!list.length)return `<div class="empty">Mesure en cours…</div>`;
+  const max=Math.max(1,...list.map(p=>p[key]));
+  return `<div class="plist">${list.map(p=>`<div class="p"><span class="nm">${esc(p.name||'—')}</span><span class="vv">${fmt(p[key])}</span><div class="pbar"><i style="width:${(100*p[key]/max).toFixed(1)}%"></i></div></div>`).join('')}</div>`;
+}
 
 function renderCPU(){
-  const f=famGet('cpu');if(!f)return empty('CPU');
-  const cores=Object.keys(f.now).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
-  const types=f.now.coreTypes;
-  const bar=i=>`<i style="height:${Math.max(4,f.now['core'+i]??0)}%"></i>`;
+  const f=famGet('cpu');if(!f)return empty('CPU');const n=f.now,s=sysNow();
+  const cores=Object.keys(n).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
+  const types=n.coreTypes;
+  const bar=i=>`<i style="height:${Math.max(4,n['core'+i]??0)}%"></i>`;
   let coresHTML='';
   if(types){const P=[],E=[];for(let i=0;i<types.length;i++)(types[i]==='E'?E:P).push(i);
     const grp=(l,idx)=>idx.length?`<div class="grp"><div class="lbl">${l} · ${idx.length}</div><div class="bars">${idx.map(bar).join('')}</div></div>`:'';
     coresHTML=`<div class="cores">${grp('Performance',P)}${grp('Efficience',E)}</div>`;
   }else coresHTML=`<div class="bars" style="margin:8px 0">${cores.map(c=>bar(+c.slice(4))).join('')}</div>`;
-  return head('CPU',`<span class="big">${pct(f.now.total).replace(' %','')}<span class="u">%</span></span>`)
-    +chart([series(f,'total')])+coresHTML;
+  let splitHTML='';
+  if(n.userPercent!=null){
+    splitHTML=splitBar([
+      {label:'Utilisateur',value:n.userPercent,color:'var(--chart-a)',fmt:v=>Math.round(v)+' %'},
+      {label:'Système',value:n.systemPercent||0,color:'var(--amber)',fmt:v=>Math.round(v)+' %'},
+    ],100,{free:null});
+  }
+  const loads=(s.load1!=null)?row('charge moy.',`${fr(s.load1)} · ${fr(s.load5)} · ${fr(s.load15)}`):'';
+  const procN=(s.processCount!=null)?row('processus',s.processCount):'';
+  const up=(s.uptimeSec!=null)?row('actif depuis',fmtDur(s.uptimeSec)):'';
+  return head('CPU',bigVal(pctN(n.total),'%'))
+    +chart([series(f,'total','var(--chart-a)')])
+    +coresHTML
+    +(splitHTML||'')
+    +`<div class="rows" style="margin-top:8px">${loads}${procN}${up}</div>`
+    +section('Processus · CPU')+procList('cpuPercent',v=>fr(v.toFixed(0))+' %');
 }
 function renderMemory(){
-  const f=famGet('ram');if(!f)return empty('Mémoire');
-  const P={1:['normale',''],2:['élevée','warn'],4:['critique','crit']}[f.now.pressureLevel]||['',''];
-  return head('Mémoire',`<span class="big">${pct(f.now.usedPercent).replace(' %','')}<span class="u">%</span></span>`)
+  const f=famGet('ram');if(!f)return empty('Mémoire');const n=f.now;
+  const P={1:['normale',''],2:['élevée','warn'],4:['critique','crit']}[n.pressureLevel]||['',''];
+  let breakdown='';
+  if(n.totalBytes){
+    const segs=[
+      {label:'App',value:n.appBytes||0,color:'var(--blue)',fmt:fmtGo},
+      {label:'Résidente',value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
+      {label:'Compressée',value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
+      {label:'Cache',value:n.cachedBytes||0,color:'rgba(127,140,160,.55)',fmt:fmtGo},
+    ];
+    breakdown=splitBar(segs,n.totalBytes,{free:n.freeBytes,freeLabel:'Libre'});
+  }
+  const stats=[];
+  const cell=(v,l,cls)=>`<div class="stat${cls?' '+cls:''}"><b>${v}</b><span>${l}</span></div>`;
+  if(n.usedBytes!=null)stats.push(cell(fmtGo(n.usedBytes),'utilisée'));
+  if(n.freeBytes!=null)stats.push(cell(fmtGo(n.freeBytes),'libre'));
+  if(n.cachedBytes!=null)stats.push(cell(fmtGo(n.cachedBytes),'cache'));
+  if(n.swapUsedBytes!=null)stats.push(cell(fmtSize(n.swapUsedBytes),'swap',n.swapUsedBytes>2147483648?'warn':''));
+  return head('Mémoire',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtGo(n.totalBytes)+' au total':''))
     +(P[0]?`<div class="row"><span class="k">pression mémoire</span><span class="badge ${P[1]}">${P[0]}</span></div>`:'')
-    +chart([series(f,'usedPercent')]);
+    +chart([series(f,'usedPercent','var(--chart-a)')])
+    +breakdown
+    +(stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
+    +section('Processus · mémoire')+procList('rssBytes',fmtSize);
 }
 function renderGPU(){
-  const f=famGet('gpu');if(!f)return empty('GPU');
-  return head('GPU',`<span class="big">${pct(f.now.usage).replace(' %','')}<span class="u">%</span></span>`)
-    +chart([series(f,'usage')])
+  const f=famGet('gpu');if(!f)return empty('GPU');const n=f.now;
+  // Pas de liste de processus ici : aucune API n'expose la charge GPU par processus sur Apple
+  // Silicon. On s'en tient à ce qui est mesurable — charge globale, étages, mémoire.
+  return head('GPU',bigVal(pctN(n.usage),'%'))
+    +chart([series(f,'usage','var(--chart-a)')])
     +`<div class="rows">
-      ${f.now.renderer!=null?`<div class="row"><span class="k">rendu</span><span class="v">${pct(f.now.renderer)}</span></div>`:''}
-      ${f.now.tiler!=null?`<div class="row"><span class="k">tuilage</span><span class="v">${pct(f.now.tiler)}</span></div>`:''}
-      ${f.now.memInUse!=null?`<div class="row"><span class="k">mémoire GPU</span><span class="v">${fmtSize(f.now.memInUse)}</span></div>`:''}
+      ${n.renderer!=null?row('rendu',pct(n.renderer)):''}
+      ${n.tiler!=null?row('tuilage',pct(n.tiler)):''}
+      ${n.memInUse!=null?row('mémoire GPU',fmtSize(n.memInUse)):''}
     </div>`;
 }
 function renderNetwork(){
-  const f=famGet('network');if(!f)return empty('Réseau');
-  const ifaces=[...new Set(Object.keys(f.now).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
-  return head('Réseau',`<span class="big" style="font-size:15px">↓ ${fmtBytes(f.now.rxBytesPerSec)}<br>↑ ${fmtBytes(f.now.txBytesPerSec)}</span>`)
-    +chart([{...series(f,'rxBytesPerSec'),color:'var(--chart-a)'},{...series(f,'txBytesPerSec'),color:'var(--chart-b)'}],{percent:false})
-    +`<div class="rows">${ifaces.map(n=>`<div class="row"><span class="k">${n}</span><span class="v">↓ ${fmtBytes(f.now['rx:'+n])} · ↑ ${fmtBytes(f.now['tx:'+n])}</span></div>`).join('')||'<div class="row"><span class="k">aucune interface active</span></div>'}</div>`;
+  const f=famGet('network');if(!f)return empty('Réseau');const n=f.now;
+  const ifaces=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
+  return head('Réseau',bigVal(`↓ ${fmtRate(n.rxBytesPerSec)}`,'',`↑ ${fmtRate(n.txBytesPerSec)}`))
+    +chart([series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')],{percent:false})
+    +`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')||'<div class="row"><span class="k">aucune interface active</span></div>'}</div>`
+    +(n.rxSessionBytes!=null?section('Session')
+      +`<div class="rows">${row('reçu',fmtSize(n.rxSessionBytes))}${row('envoyé',fmtSize(n.txSessionBytes))}</div>`:'');
 }
 function renderTemperature(){
-  const f=famGet('sensors');if(!f)return empty('Capteurs');
-  const T=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']][f.now.thermalState]||['',''];
-  const fans=Object.keys(f.now).filter(k=>k.startsWith('fan')).sort();
-  return head('Capteurs',`<span class="big">${f.now.tempC==null?'—':Math.round(f.now.tempC)}<span class="u">°C</span></span>`)
-    +(f.now.thermalState>0?`<div class="row"><span class="k">état thermique</span><span class="badge ${T[1]}">${T[0]}</span></div>`:`<div class="row"><span class="k">état thermique</span><span class="v">normal</span></div>`)
-    +(fans.length?`<div class="row"><span class="k">ventilateurs</span><span class="v">${fans.map(k=>Math.round(f.now[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')}</span></div>`:'');
+  const f=famGet('sensors');if(!f)return empty('Capteurs');const n=f.now;
+  const T=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']][n.thermalState]||['normal',''];
+  const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
+  return head('Capteurs',bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C'))
+    +chart([series(f,'tempC','var(--amber)')],{percent:false})
+    +`<div class="rows">
+      <div class="row"><span class="k">état thermique</span><span class="badge ${T[1]}">${T[0]}</span></div>
+      ${fans.length?fans.map((k,i)=>row(fans.length>1?`ventilateur ${i+1}`:'ventilateur',Math.round(n[k]).toLocaleString('fr-FR')+' tr/min')).join(''):row('ventilateurs','aucun (refroidissement passif)')}
+    </div>`;
 }
 function renderBattery(){
-  const f=famGet('battery');if(!f)return empty('Batterie');
-  const n=f.now;
+  const f=famGet('battery');if(!f)return empty('Batterie');const n=f.now;
   const state=n.charging?'en charge':n.externalConnected?(n.fullyCharged?'branché · plein':'branché'):'sur batterie';
   const cell=(v,l,warn)=>`<div class="stat${warn?' warn':''}"><b>${v}</b><span>${l}</span></div>`;
   const stats=[];
   if(n.healthPercent!=null)stats.push(cell(Math.round(n.healthPercent)+' %','santé',n.healthPercent<80));
   if(n.cycleCount!=null)stats.push(cell(n.cycleCount,'cycles'));
-  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${dec(Math.abs(n.powerWatts))} W`,n.powerWatts<0?'décharge':'charge'));
+  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${fr(Math.abs(n.powerWatts))} W`,n.powerWatts<0?'décharge':'charge'));
   if(n.minutesRemaining!=null)stats.push(cell(fmtMin(n.minutesRemaining),n.charging?'avant plein':'autonomie'));
-  return head('Batterie',`<span class="big">${n.percent==null?'—':Math.round(n.percent)}<span class="u">%</span></span>`)
-    +`<div class="row"><span class="k">état</span><span class="v">${state}</span></div>`
+  const rows=[];
+  if(n.temperatureC!=null)rows.push(row('température',Math.round(n.temperatureC)+' °C'));
+  if(n.voltageV!=null)rows.push(row('tension',fr(n.voltageV.toFixed(2))+' V'));
+  if(n.fullCapacity!=null&&n.designCapacity!=null)rows.push(row('capacité',`${n.fullCapacity.toLocaleString('fr-FR')} / ${n.designCapacity.toLocaleString('fr-FR')} mAh`));
+  if(n.adapterWatts!=null&&n.adapterWatts>0)rows.push(row('chargeur',n.adapterWatts+' W'));
+  if(n.conditionOK!=null)rows.push(row('état','<span class="badge'+(n.conditionOK?'':' warn')+'">'+(n.conditionOK?'normal':'à vérifier')+'</span>'));
+  return head('Batterie',bigVal(n.percent==null?'—':Math.round(n.percent),'%',state))
     +`<div class="track"><i style="width:${n.percent??0}%"></i></div>`
+    +chart([series(f,'percent','var(--green)')])
     +(stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
-    +`<div class="rows">${n.temperatureC!=null?`<div class="row"><span class="k">température</span><span class="v">${Math.round(n.temperatureC)} °C</span></div>`:''}${n.adapterWatts!=null?`<div class="row"><span class="k">chargeur</span><span class="v">${n.adapterWatts} W</span></div>`:''}</div>`;
+    +(rows.length?`<div class="rows" style="margin-top:8px">${rows.join('')}</div>`:'');
 }
 function renderDisk(){
-  const f=famGet('disk');if(!f)return empty('Disque');
-  const vols=Object.keys(f.now).filter(k=>k.startsWith('vol:')).sort();
-  return head('Disque',`<span class="big">${pct(f.now.usedPercent).replace(' %','')}<span class="u">%</span></span>`)
-    +`<div class="row"><span class="k">débits</span><span class="v">R ${fmtBytes(f.now.readBytesPerSec)} · W ${fmtBytes(f.now.writeBytesPerSec)}</span></div>`
-    +`<div class="rows" style="margin-top:8px">${vols.map(k=>{const p=Math.round(f.now[k]);return `<div class="row"><span class="k">${k.slice(4)}</span><span class="v">${p} %</span></div><div class="track"><i style="width:${p}%"></i></div>`}).join('')}</div>`;
+  const f=famGet('disk');if(!f)return empty('Disque');const n=f.now;
+  const vols=Object.keys(n).filter(k=>k.startsWith('vol:')).sort();
+  const volHTML=vols.map(k=>{const mnt=k.slice(4);const p=Math.round(n[k]);
+    const tot=n['volTotal:'+mnt],free=n['volFree:'+mnt];
+    const label=mnt==='/'?'Macintosh HD':mnt.replace('/Volumes/','');
+    const foot=tot!=null?`${fmtSize(free)} libres · ${fmtSize(tot)}`:`${p} %`;
+    return `<div class="vol"><div class="vh"><span>${esc(label)}</span><span class="vf">${foot}</span></div><div class="track"><i style="width:${p}%;background:${p>=90?'var(--danger)':'var(--chart-a)'}"></i></div></div>`;
+  }).join('');
+  return head('Disque',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtSize(n.totalBytes)+' au total':''))
+    +chart([series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')],{percent:false})
+    +`<div class="rows">${row('lecture',fmtRate(n.readBytesPerSec))}${row('écriture',fmtRate(n.writeBytesPerSec))}</div>`
+    +section('Volumes')+volHTML;
 }
 function empty(title){return head(title,'')+`<div class="empty">Mesure en cours…</div>`}
 const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};

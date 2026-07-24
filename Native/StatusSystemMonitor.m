@@ -208,7 +208,7 @@ BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, doubl
 #pragma mark - Collecteurs (lisent la machine — pas de tests unitaires, contrat couvert par snapshot)
 
 // CPU par cœur et global, via host_processor_info. L'état précédent des ticks vit dans le bloc.
-typedef struct { uint64_t active, total; } TMCPUTicks;
+typedef struct { uint64_t active, total, user, system; } TMCPUTicks;
 
 // Répartition Efficience/Performance des cœurs, en chaîne « EEEEPP… » de longueur coreCount, ou
 // nil si la machine n'expose pas les deux types (Intel). Sur Apple Silicon, hw.perflevel0 =
@@ -247,10 +247,13 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previou
     NSMutableDictionary *values = [NSMutableDictionary dictionary];
     double percentSum = 0;
     NSUInteger measured = 0;
+    // Découpe user/système agrégée sur toute la machine (deltas cumulés de tous les cœurs).
+    uint64_t userDelta = 0, systemDelta = 0, totalDelta = 0;
     for (natural_t core = 0; core < coreCount; core++) {
-        uint64_t active = (uint64_t)loads[core].cpu_ticks[CPU_STATE_USER]
-                        + (uint64_t)loads[core].cpu_ticks[CPU_STATE_SYSTEM]
-                        + (uint64_t)loads[core].cpu_ticks[CPU_STATE_NICE];
+        uint64_t user = (uint64_t)loads[core].cpu_ticks[CPU_STATE_USER]
+                      + (uint64_t)loads[core].cpu_ticks[CPU_STATE_NICE];
+        uint64_t system = (uint64_t)loads[core].cpu_ticks[CPU_STATE_SYSTEM];
+        uint64_t active = user + system;
         uint64_t total = active + (uint64_t)loads[core].cpu_ticks[CPU_STATE_IDLE];
         double percent;
         if (!first && TMCPUPercentBetweenTicks(previous[core].active, previous[core].total,
@@ -258,8 +261,13 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previou
             values[[NSString stringWithFormat:@"core%u", core]] = @(round(percent));
             percentSum += percent;
             measured++;
+            if (total > previous[core].total) {
+                userDelta += user - previous[core].user;
+                systemDelta += system - previous[core].system;
+                totalDelta += total - previous[core].total;
+            }
         }
-        previous[core] = (TMCPUTicks){ active, total };
+        previous[core] = (TMCPUTicks){ active, total, user, system };
     }
     vm_deallocate(mach_task_self(), (vm_address_t)info, infoCount * sizeof(natural_t));
 
@@ -267,6 +275,10 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previou
     // au tick suivant.
     if (!measured) return nil;
     values[@"total"] = @(round(percentSum / measured));
+    if (totalDelta > 0) {
+        values[@"userPercent"] = @(round(100.0 * (double)userDelta / (double)totalDelta));
+        values[@"systemPercent"] = @(round(100.0 * (double)systemDelta / (double)totalDelta));
+    }
 
     // Type de chaque cœur (Efficience vs Performance), chaîne « EEEE PPPP… » sans espace. Calculé
     // une fois : la topologie ne change pas. Ordre vérifié empiriquement sur Apple Silicon — les
@@ -279,6 +291,8 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectCPU(NSMutableData *previou
 }
 
 // RAM : occupation (active + wired + compressée) et niveau de pression mémoire du noyau.
+// Répartition façon Moniteur d'activité : mémoire applicative, résidente (wired), compressée,
+// fichiers en cache. « Utilisée » = app + résidente + compressée (le cache est réquisitionnable).
 static NSDictionary<NSString *, NSNumber *> *TMCollectRAM(void) {
     vm_statistics64_data_t stats;
     mach_msg_type_number_t statsCount = HOST_VM_INFO64_COUNT;
@@ -293,6 +307,35 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectRAM(void) {
                         + (uint64_t)stats.compressor_page_count) * pageSize;
     NSMutableDictionary *values = [NSMutableDictionary dictionaryWithObject:
         @(round(100.0 * MIN((double)usedBytes / (double)totalBytes, 1.0))) forKey:@"usedPercent"];
+
+    // Répartition (mêmes définitions que le Moniteur d'activité) :
+    //   applicative = pages internes non purgeables    (heap/pile des apps)
+    //   résidente   = wired                            (verrouillée par le noyau)
+    //   compressée  = compressor_page_count            (RAM récupérée par compression)
+    //   cache       = fichiers mappés + purgeable      (réquisitionnable, ne compte pas comme « utilisée »)
+    uint64_t wiredBytes = (uint64_t)stats.wire_count * pageSize;
+    uint64_t compressedBytes = (uint64_t)stats.compressor_page_count * pageSize;
+    uint64_t purgeableBytes = (uint64_t)stats.purgeable_count * pageSize;
+    uint64_t externalBytes = (uint64_t)stats.external_page_count * pageSize;
+    uint64_t internalBytes = (uint64_t)stats.internal_page_count * pageSize;
+    uint64_t appBytes = internalBytes > purgeableBytes ? internalBytes - purgeableBytes : 0;
+    uint64_t cachedBytes = externalBytes + purgeableBytes;
+    uint64_t freeBytes = (uint64_t)stats.free_count * pageSize;
+    values[@"totalBytes"] = @(totalBytes);
+    values[@"usedBytes"] = @(appBytes + wiredBytes + compressedBytes);
+    values[@"appBytes"] = @(appBytes);
+    values[@"wiredBytes"] = @(wiredBytes);
+    values[@"compressedBytes"] = @(compressedBytes);
+    values[@"cachedBytes"] = @(cachedBytes);
+    values[@"freeBytes"] = @(freeBytes);
+
+    // Échange sur disque (swap) — pression mémoire réelle. Public via sysctl.
+    struct xsw_usage swap;
+    size_t swapSize = sizeof(swap);
+    if (sysctlbyname("vm.swapusage", &swap, &swapSize, NULL, 0) == 0) {
+        values[@"swapUsedBytes"] = @(swap.xsu_used);
+        values[@"swapTotalBytes"] = @(swap.xsu_total);
+    }
 
     // 1 = normale, 2 = avertissement, 4 = critique. Lisible sans privilège ; absent, tant pis.
     int pressureLevel = 0;
@@ -386,6 +429,17 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectNetwork(NSMutableDictionar
     if (first || !anyValid) return nil;
     values[@"rxBytesPerSec"] = @(round(rxTotal));
     values[@"txBytesPerSec"] = @(round(txTotal));
+    // Total cumulé depuis le lancement : intégrale du débit (rate × temps écoulé). Robuste au
+    // va-et-vient des interfaces et aux rebouclages de compteurs, contrairement à un simple delta
+    // de compteurs absolus. Utile pour « données de la session » façon iStat.
+    if (elapsed > 0 && elapsed < 60) {  // borne : un long sommeil ne fabrique pas un faux pic
+        double rxAcc = [state[@"__rxAcc"] doubleValue] + rxTotal * elapsed;
+        double txAcc = [state[@"__txAcc"] doubleValue] + txTotal * elapsed;
+        state[@"__rxAcc"] = @(rxAcc);
+        state[@"__txAcc"] = @(txAcc);
+        values[@"rxSessionBytes"] = @(round(rxAcc));
+        values[@"txSessionBytes"] = @(round(txAcc));
+    }
     return values;
 }
 
@@ -399,6 +453,8 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectDisk(uint64_t *previousRea
     if (!totalBytes) return nil;
     NSMutableDictionary *values = [NSMutableDictionary dictionaryWithObject:
         @(round(100.0 * (double)(totalBytes - freeBytes) / (double)totalBytes)) forKey:@"usedPercent"];
+    values[@"totalBytes"] = @(totalBytes);
+    values[@"freeBytes"] = @(freeBytes);
 
     io_iterator_t iterator = IO_OBJECT_NULL;
     if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(kIOBlockStorageDriverClass),
@@ -438,8 +494,11 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectDisk(uint64_t *previousRea
         uint64_t total = (uint64_t)mounts[i].f_blocks * mounts[i].f_bsize;
         if (!total) continue;
         uint64_t free = (uint64_t)mounts[i].f_bfree * mounts[i].f_bsize;
-        values[[@"vol:" stringByAppendingString:@(mounts[i].f_mntonname)]] =
+        NSString *mount = @(mounts[i].f_mntonname);
+        values[[@"vol:" stringByAppendingString:mount]] =
             @(round(100.0 * (double)(total - free) / (double)total));
+        values[[@"volTotal:" stringByAppendingString:mount]] = @(total);
+        values[[@"volFree:" stringByAppendingString:mount]] = @(free);
         emitted++;
     }
     return values;  // l'espace disque reste utile même si les débits manquent ce tick-ci

@@ -125,5 +125,68 @@ check(mb.includes('claude-opus-4-8') && /9.741 M/.test(mb), 'ligne tarifée avec
 check(/class="model-row unpriced"[\s\S]*codex-auto-review[\s\S]*—/.test(mb), 'ligne non tarifée : classe unpriced et coût «—»');
 checkEqual(dashboard('modelBreakdown')({ breakdown: [] }), '', 'aucun modèle : pas de tableau');
 
+// ── Panneaux d'info des widgets (widget.html) ────────────────────────────────
+// Les renderers sont purs : on injecte un snapshot réaliste dans la variable `metrics` du
+// contexte, puis on évalue chaque renderXxx(). On vérifie l'absence de NaN/undefined (le piège
+// numéro un quand une clé matérielle manque) et le formatage français des valeurs clés.
+section('widget.html — panneaux détaillés façon iStat');
+const widget = sandboxFor('widget.html');
+const wsnap = { families: [
+  { id: 'cpu', now: { total: 12, userPercent: 7, systemPercent: 5, coreTypes: 'EEPP', core0: 3, core1: 4, core2: 20, core3: 25 }, series: { total: [10, 12] } },
+  { id: 'ram', now: { usedPercent: 61, pressureLevel: 1, totalBytes: 38654705664, usedBytes: 25231056896,
+      appBytes: 14384218112, wiredBytes: 4831838208, compressedBytes: 6012954624, cachedBytes: 11274289152,
+      freeBytes: 1288490188, swapUsedBytes: 1610612736, swapTotalBytes: 2147483648 }, series: {} },
+  { id: 'gpu', now: { usage: 0, renderer: 0, tiler: 0, memInUse: 1288490188 }, series: {} },
+  { id: 'network', now: { rxBytesPerSec: 5767168, txBytesPerSec: 21504, 'rx:en0': 5767168, 'tx:en0': 21504,
+      rxSessionBytes: 4404019, txSessionBytes: 16384 }, series: {} },
+  { id: 'sensors', now: { tempC: 41, thermalState: 0, fan0: 3184, fan1: 3188 }, series: {} },
+  { id: 'battery', now: { percent: 100, charging: false, externalConnected: true, fullyCharged: true,
+      healthPercent: 91, cycleCount: 218, voltageV: 13.1, fullCapacity: 5673, designCapacity: 6249,
+      adapterWatts: 94, conditionOK: true }, series: {} },
+  { id: 'disk', now: { usedPercent: 90, totalBytes: 994662584320, freeBytes: 98784247808,
+      readBytesPerSec: 129024, writeBytesPerSec: 1677721, 'vol:/': 90,
+      'volTotal:/': 994662584320, 'volFree:/': 98784247808 }, series: {} },
+  { id: 'system', now: { load1: 2.66, load5: 3.16, load15: 3.68, processCount: 1088, uptimeSec: 339200 }, series: {} },
+], processes: [
+  { pid: '1', name: 'Gros CPU', cpuPercent: 15, rssBytes: 104857600, energyWatts: 0.1 },
+  { pid: '2', name: 'Grosse RAM', cpuPercent: 1, rssBytes: 1073741824, energyWatts: 0.01 },
+], prefs: { theme: 'blueprint' } };
+widget('metrics = ' + JSON.stringify(wsnap));
+const noJunk = h => !/NaN|undefined/.test(h) && !/>null</.test(h);
+
+const wCPU = widget('renderCPU()');
+check(noJunk(wCPU), 'CPU : aucun NaN/undefined/null');
+check(/Utilisateur/.test(wCPU) && /Système/.test(wCPU), 'CPU : découpe utilisateur/système présente');
+check(/2,66 · 3,16 · 3,68/.test(wCPU), 'CPU : charge moyenne en décimales françaises');
+check(wCPU.indexOf('Gros CPU') > -1 && wCPU.indexOf('Gros CPU') < wCPU.indexOf('Grosse RAM'),
+  'CPU : liste des processus triée par CPU (le plus gros d’abord)');
+
+const wMem = widget('renderMemory()');
+check(noJunk(wMem), 'Mémoire : aucun NaN/undefined/null');
+check(/App/.test(wMem) && /Compressée/.test(wMem) && /Cache/.test(wMem), 'Mémoire : répartition app/compressée/cache');
+check(/13,4 Go/.test(wMem), 'Mémoire : octets en Go français (App 13,4 Go)');
+check(wMem.indexOf('Grosse RAM') > -1 && wMem.indexOf('Grosse RAM') < wMem.indexOf('Gros CPU'),
+  'Mémoire : liste des processus triée par RAM');
+
+const wNet = widget('renderNetwork()');
+check(noJunk(wNet), 'Réseau : aucun NaN/undefined/null');
+check(/Session/.test(wNet) && /4,2 Mo/.test(wNet), 'Réseau : totaux de session cumulés');
+
+const wSens = widget('renderTemperature()');
+check(noJunk(wSens), 'Capteurs : aucun NaN/undefined/null');
+check(/3.184 tr\/min/.test(wSens) && /3.188 tr\/min/.test(wSens), 'Capteurs : les deux ventilateurs');
+
+const wBat = widget('renderBattery()');
+check(noJunk(wBat), 'Batterie : aucun NaN/undefined/null');
+check(/91 %/.test(wBat) && /218/.test(wBat) && /13,10 V/.test(wBat), 'Batterie : santé, cycles, tension française');
+
+const wDisk = widget('renderDisk()');
+check(noJunk(wDisk), 'Disque : aucun NaN/undefined/null');
+check(/Macintosh HD/.test(wDisk) && /libres/.test(wDisk), 'Disque : volume nommé avec espace libre');
+
+const wGPU = widget('renderGPU()');
+check(noJunk(wGPU), 'GPU : aucun NaN/undefined/null');
+check(!/Processus/.test(wGPU), 'GPU : pas de liste de processus (charge GPU par process non mesurable)');
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

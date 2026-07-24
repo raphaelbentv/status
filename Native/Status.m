@@ -676,6 +676,7 @@ static const CGFloat TMTitleBarHeight = 28;
 - (NSDictionary *)widgetMetricsPayload {
     NSMutableDictionary *payload = [[self.systemMonitor snapshot] mutableCopy];
     payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint" };
+    payload[@"processes"] = self.topProcesses ?: @[];  // top consommateurs, pour les panneaux CPU/Mémoire
     return payload;
 }
 
@@ -1834,9 +1835,12 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
 
     BOOL dashboardVisible = self.webReady && self.window.isVisible;
     BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
+    BOOL widgetVisible = self.widgetPopover.isShown && self.widgetWebReady;  // panneau d'info d'un widget
     BOOL menuBarWantsSystem = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] hasPrefix:@"system:"];
     if (menuBarWantsSystem) [self updateStatusMenu];
-    if (!dashboardVisible && !popoverVisible) { self.previousProcessSample = nil; return; }
+    // Le relevé des processus alimente aussi les panneaux CPU/Mémoire des widgets : on l'active dès
+    // qu'une surface qui en a besoin est visible.
+    if (!dashboardVisible && !popoverVisible && !widgetVisible) { self.previousProcessSample = nil; return; }
 
     // Le relevé des processus (~500 appels noyau) n'a lieu que surface visible ; le premier tick
     // après ouverture n'a donc pas de delta, comme le réseau au lancement.
