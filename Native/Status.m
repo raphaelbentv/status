@@ -730,8 +730,9 @@ static const CGFloat TMTitleBarHeight = 28;
 // une tendance lisible dans 26 px.
 - (NSArray<NSNumber *> *)menuBarSeriesForMetric:(NSString *)metric {
     if ([metric hasPrefix:@"system:"]) {
-        NSString *fam = [metric isEqualToString:@"system:temp"] ? @"sensors" : @"cpu";
-        NSString *key = [metric isEqualToString:@"system:temp"] ? @"tempC" : @"total";
+        NSString *fam = @"cpu", *key = @"total";
+        if ([metric isEqualToString:@"system:temp"]) { fam = @"sensors"; key = @"tempC"; }
+        else if ([metric isEqualToString:@"system:battery"]) { fam = @"battery"; key = @"percent"; }
         for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) {
             if ([family[@"id"] isEqualToString:fam]) {
                 NSArray *series = family[@"series"][key];
@@ -800,9 +801,10 @@ static const CGFloat TMTitleBarHeight = 28;
         // Métriques système : mêmes valeurs que l'onglet Moniteur, rafraîchies par metricsTick.
         NSMutableDictionary *nowById = [NSMutableDictionary dictionary];
         for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) nowById[family[@"id"]] = family[@"now"];
-        NSNumber *value = [metric isEqualToString:@"system:temp"] ? nowById[@"sensors"][@"tempC"] : nowById[@"cpu"][@"total"];
+        NSNumber *value = nowById[@"cpu"][@"total"]; label = @"cpu";
+        if ([metric isEqualToString:@"system:temp"]) { value = nowById[@"sensors"][@"tempC"]; label = @"temp"; }
+        else if ([metric isEqualToString:@"system:battery"]) { value = nowById[@"battery"][@"percent"]; label = @"batt"; }
         hasValue = value != nil; shown = value.doubleValue;
-        label = [metric isEqualToString:@"system:temp"] ? @"temp" : @"cpu";
     } else {
         // « lowest » = la marge la plus faible, donc le pourcentage consommé le plus élevé.
         // La couleur suit la fenêtre gagnante : elle change avec elle, ce qui est précisément

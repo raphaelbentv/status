@@ -479,6 +479,9 @@ static void TestForecastExhaustion(void) {
 static NSDictionary *TMProc(NSString *name, uint64_t cpuNs, uint64_t rss) {
     return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss) };
 }
+static NSDictionary *TMProcE(NSString *name, uint64_t cpuNs, uint64_t rss, uint64_t energyNJ) {
+    return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss), @"energyNJ": @(energyNJ) };
+}
 
 static void TestTopProcesses(void) {
     Section(@"TMTopProcesses — union top-CPU ∪ top-RAM");
@@ -520,6 +523,30 @@ static void TestTopProcesses(void) {
     NSDictionary *burst = @{ @"10": TMProc(@"video_export", 7000000000, 800) };
     NSArray *burstTop = TMTopProcesses(previous, burst, 2.0, 5);
     CheckEqual(burstTop.firstObject[@"cpuPercent"], @300.0, @"multithread : 300 % légitime, non plafonné");
+}
+
+static void TestTopProcessesEnergy(void) {
+    Section(@"TMTopProcesses — dimension énergie (ri_energy_nj)");
+    // Sans donnée d'énergie, la dimension n'entre pas dans l'union (tri sur des zéros = arbitraire).
+    NSDictionary *prevNoE = @{ @"10": TMProc(@"a", 1000000000, 100), @"20": TMProc(@"b", 100000000, 900) };
+    NSDictionary *curNoE  = @{ @"10": TMProc(@"a", 3000000000, 100), @"20": TMProc(@"b", 100000000, 900) };
+    Check(TMTopProcesses(prevNoE, curNoE, 1.0, 1).count == 2, @"sans énergie : union = CPU ∪ RAM seulement (2)");
+
+    // Avec énergie : un process qui n'est ni top CPU ni top RAM mais brûle de l'énergie entre.
+    NSDictionary *prev = @{ @"10": TMProcE(@"cpu_hog", 1000000000, 100, 1000000000),
+                            @"20": TMProcE(@"ram_hog", 100000000, 9000, 1000000000),
+                            @"30": TMProcE(@"power_hog", 100000000, 100, 1000000000) };
+    NSDictionary *cur  = @{ @"10": TMProcE(@"cpu_hog", 3000000000, 100, 1100000000),      // CPU++
+                            @"20": TMProcE(@"ram_hog", 100000000, 9000, 1100000000),       // RAM top
+                            @"30": TMProcE(@"power_hog", 150000000, 100, 6000000000) };     // +5 J en 1 s = 5 W
+    NSArray *top = TMTopProcesses(prev, cur, 1.0, 1);
+    NSArray *names = [top valueForKey:@"name"];
+    Check(top.count == 3, @"count=1 sur 3 dimensions : union = cpu_hog ∪ ram_hog ∪ power_hog");
+    Check([names containsObject:@"power_hog"], @"le plus gros consommateur d'énergie est inclus");
+    for (NSDictionary *p in top) if ([p[@"name"] isEqual:@"power_hog"])
+        CheckEqual(p[@"energyWatts"], @5.0, @"5 J sur 1 s = 5 W de puissance moyenne");
+    for (NSDictionary *p in top) if ([p[@"name"] isEqual:@"cpu_hog"])
+        CheckEqual(p[@"energyWatts"], @0.1, @"0,1 J sur 1 s = 0,1 W");
 }
 
 static void TestThresholdFire(void) {
@@ -602,6 +629,19 @@ static void TestSystemMonitorLive(void) {
                [batt[@"powerWatts"] ?: @"—" description].UTF8String);
     } else {
         printf("  batterie : absente (Mac de bureau ?)\n");
+    }
+
+    // Capteurs : thermalState toujours présent (0-3) ; ventilateurs selon la machine.
+    NSDictionary *sensorsNow = familyNow(@"sensors");
+    if (sensorsNow) {
+        NSNumber *thermal = sensorsNow[@"thermalState"];
+        Check(thermal != nil && thermal.intValue >= 0 && thermal.intValue <= 3, @"état thermique dans [0,3]");
+        NSMutableArray *fans = [NSMutableArray array];
+        for (NSString *k in sensorsNow) if ([k hasPrefix:@"fan"]) [fans addObject:sensorsNow[k]];
+        printf("  thermique : état=%s temp=%s ventilateurs=%s\n",
+               thermal.description.UTF8String,
+               [sensorsNow[@"tempC"] ?: @"—" description].UTF8String,
+               fans.count ? [[fans componentsJoinedByString:@"/"] UTF8String] : "aucun");
     }
 }
 
@@ -1088,6 +1128,7 @@ int main(void) {
         TestWatchdog();
         TestForecastExhaustion();
         TestTopProcesses();
+        TestTopProcessesEnergy();
         TestThresholdFire();
         TestSystemMonitorLive();
         TestDisplayBrightnessClamp();

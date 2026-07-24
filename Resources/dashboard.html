@@ -122,7 +122,7 @@
   .core-group-label{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:block;margin-bottom:3px}
   .core-schematic .core-bars{margin-top:0}
   .core-schematic .core-bars i{flex:none;width:7px}
-  .proc-head{display:grid;grid-template-columns:1fr 90px 70px;gap:10px;padding-bottom:5px;font-size:9px;
+  .proc-head{display:grid;grid-template-columns:1fr 78px 56px 64px;gap:10px;padding-bottom:5px;font-size:9px;
     text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
   .proc-head span:not(:first-child){text-align:right}
   .proc-head .sorted{color:var(--blue);font-weight:700}
@@ -179,11 +179,12 @@
   .detail-rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
   .detail-row{display:flex;justify-content:space-between;align-items:baseline;font-size:11px}
   .proc-rows{display:flex;flex-direction:column;margin-top:6px}
-  .proc-row{display:grid;grid-template-columns:1fr 90px 70px;gap:10px;padding:5px 0;border-top:1px solid var(--hair);font-size:11.5px}
+  .proc-row{display:grid;grid-template-columns:1fr 78px 56px 64px;gap:10px;padding:5px 0;border-top:1px solid var(--hair);font-size:11.5px}
   .proc-row:first-child{border-top:0}
   .proc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .proc-mem{color:var(--muted);text-align:right}
+  .proc-mem,.proc-energy{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
   .proc-cpu{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  .proc-val.sorted{color:var(--blue);font-weight:700}
   /* Écrans — luminosité. Cartes au même gabarit que le Moniteur, mais un curseur est une action,
      pas une mesure : pas de graphique, pas de couleur de série. */
   .display-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:20px}
@@ -379,7 +380,7 @@ function overview(data){const accounts={openai:data.accounts?.openai,claude:data
 function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`,theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <div class="setting"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
-  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Style de l\'icône</strong><small>Anneau (niveau instantané) ou courbe (tendance récente de la fenêtre épinglée).</small></div><div class="segmented">${['ring','spark'].map(v=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${v==='ring'?'Anneau':'Courbe'}</button>`).join('')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></div>
   ${p.windowManager?`
@@ -499,19 +500,22 @@ function detailDisk(disk){const volumes=Object.keys(disk.now).filter(k=>k.starts
   return `<div class="detail-rows">${volumes.map(key=>{const pct=Math.round(disk.now[key]);return `<div class="detail-row"><span class="detail-label">${esc(key.slice(4))}</span><span>${pct} %</span></div><div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${pct}%"></i></div>`}).join('')}</div>`}
 const DETAILS={cpu:detailCPU,gpu:detailGPU,network:detailNetwork,disk:detailDisk,battery:detailBattery};
 
-// Le natif envoie l'union des plus gros consommateurs CPU et mémoire ; le tri se fait ici, pour
-// que basculer de dimension ne coûte pas un aller-retour. Le GPU par processus n'existe pas sur
-// macOS par une voie fiable — d'où deux colonnes et non trois.
+// Le natif envoie l'union des plus gros consommateurs CPU, mémoire et énergie ; le tri se fait
+// ici, pour que basculer de dimension ne coûte pas un aller-retour. Le GPU par processus n'existe
+// pas sur macOS par une voie fiable — d'où CPU / mémoire / énergie et pas de GPU.
+// Puissance moyenne d'un process : petits chiffres, plus lisibles en mW sous 1 W.
+const fmtWatts=w=>w==null||w<0.0005?'—':w>=1?fmtDecimal(w.toFixed(1))+' W':Math.round(w*1000)+' mW';
 let procSort='cpu';
 function setProcSort(mode){procSort=mode;renderMonitor()}
 function processesCard(){
   const processes=(metricsData?.processes||[]).slice();
   if(!processes.length)return '';
-  processes.sort((a,b)=>procSort==='ram'?b.rssBytes-a.rssBytes:b.cpuPercent-a.cpuPercent);
-  const rows=processes.slice(0,8).map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem">${fmtSize(p.rssBytes)}</span><span class="proc-cpu">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span></div>`).join('');
-  const toggle=`<div class="view-toggle">${[['cpu','CPU'],['ram','mémoire']].map(([v,l])=>`<button class="${procSort===v?'on':''}" onclick="setProcSort('${v}')">${l}</button>`).join('')}</div>`;
+  const key={cpu:'cpuPercent',ram:'rssBytes',energy:'energyWatts'}[procSort];
+  processes.sort((a,b)=>(b[key]||0)-(a[key]||0));
+  const rows=processes.slice(0,8).map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem proc-val ${procSort==='ram'?'sorted':''}">${fmtSize(p.rssBytes)}</span><span class="proc-cpu proc-val ${procSort==='cpu'?'sorted':''}">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span><span class="proc-energy proc-val ${procSort==='energy'?'sorted':''}">${fmtWatts(p.energyWatts)}</span></div>`).join('');
+  const toggle=`<div class="view-toggle">${[['cpu','CPU'],['ram','mémoire'],['energy','énergie']].map(([v,l])=>`<button class="${procSort===v?'on':''}" onclick="setProcSort('${v}')">${l}</button>`).join('')}</div>`;
   return `<div class="metric-card metric-card-wide"><div class="metric-head"><h3>Applications les plus gourmandes</h3>${toggle}</div>
-    <div class="proc-head"><span>processus</span><span class="${procSort==='ram'?'sorted':''}">mémoire</span><span class="${procSort==='cpu'?'sorted':''}">CPU</span></div>
+    <div class="proc-head"><span>processus</span><span class="${procSort==='ram'?'sorted':''}">mémoire</span><span class="${procSort==='cpu'?'sorted':''}">CPU</span><span class="${procSort==='energy'?'sorted':''}">énergie</span></div>
     <div class="proc-rows">${rows}</div></div>`;
 }
 // Batterie : absente sur un Mac de bureau (le collecteur rend nil, la famille disparaît) — la
@@ -532,6 +536,21 @@ function batteryCard(){
   return metricCard('battery','Batterie',
     `<span><span class="unit">${state}</span> <span class="metric-value">${n.percent==null?'—':Math.round(n.percent)+'<span class="unit">%</span>'}</span></span>`,
     statRow+metricChart('battery',[{key:'percent',color:'var(--chart-a)',label:'charge'}],{percent:true}));
+}
+// Capteurs : température, état thermique (badge seulement quand ce n'est plus « normal », comme la
+// pression mémoire), et vitesse des ventilateurs. thermalState est toujours présent ; temp et
+// ventilateurs dépendent de la machine.
+const THERMAL_STATE=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']];
+function sensorsCard(){
+  const sensors=famGet('sensors');if(!sensors)return '';
+  const n=sensors.now;
+  const [tlabel,tclass]=THERMAL_STATE[n.thermalState]||['',''];
+  const badge=n.thermalState>0?`<span class="metric-badge ${tclass}">thermique ${tlabel}</span> `:'';
+  const temp=n.tempC!=null?`<span class="metric-value">${Math.round(n.tempC)}<span class="unit">°C</span></span>`:'<span class="metric-value" style="font-size:14px">—</span>';
+  const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
+  const fanLine=fans.length?`<div class="detail-rows" style="margin-top:8px"><div class="detail-row"><span class="detail-label">ventilateurs</span><span>${fans.map(k=>Math.round(n[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')}</span></div></div>`:'';
+  const chart=n.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):'';
+  return metricCard('sensors','Capteurs',`<span>${badge}${temp}</span>`,chart+fanLine);
 }
 function systemCard(){
   const system=famGet('system');if(!system)return '';
@@ -565,10 +584,8 @@ function monitorView(){
   if(disk)cards.push(metricCard('disk','Disque',`<span><span class="metric-value" style="font-size:14px">R ${fmtBytes(disk.now.readBytesPerSec)} · W ${fmtBytes(disk.now.writeBytesPerSec)}</span> <span class="unit">· plein à ${disk.now.usedPercent==null?'—':Math.round(disk.now.usedPercent)+' %'}</span></span>`,
     metricChart('disk',[{key:'readBytesPerSec',color:'var(--chart-a)',label:'lecture'},{key:'writeBytesPerSec',color:'var(--chart-b)',label:'écriture'}])
     +legend([['var(--chart-a)','lecture'],['var(--chart-b)','écriture']])));
-  // La batterie a sa propre carte (voir batteryCard) : Capteurs ne porte plus que la température.
-  if(sensors&&sensors.now.tempC!=null)
-    cards.push(metricCard('sensors','Capteurs',`<span class="metric-value">${Math.round(sensors.now.tempC)}<span class="unit">°C</span></span>`,
-      metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true})));
+  // La batterie a sa propre carte : Capteurs porte la température, l'état thermique et les ventilateurs.
+  const sensorsHTML=sensorsCard();if(sensorsHTML)cards.push(sensorsHTML);
   const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
   const toggle=`<div class="view-toggle"><button class="${monitorMode==='charts'?'on':''}" onclick="setMonitorMode('charts')">graphiques</button><button class="${monitorMode==='table'?'on':''}" onclick="setMonitorMode('table')">tableau</button></div>`;
   const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min</span>${toggle}</div>`;
@@ -589,7 +606,8 @@ const METRIC_LABELS={'cpu.total':['CPU','%','int'],'gpu.usage':['GPU','%','int']
   'ram.usedPercent':['Mémoire','%','int'],'battery.percent':['Batterie','%','int'],
   'network.rxBytesPerSec':['Réseau ↓','','bytes'],'network.txBytesPerSec':['Réseau ↑','','bytes'],
   'disk.readBytesPerSec':['Disque lecture','','bytes'],'disk.writeBytesPerSec':['Disque écriture','','bytes'],
-  'sensors.tempC':['Température','°C','int'],'system.load1':['Charge 1 min','','decimal']};
+  'sensors.tempC':['Température','°C','int'],'sensors.fan0':['Ventilateur 1','tr/min','int'],
+  'sensors.fan1':['Ventilateur 2','tr/min','int'],'system.load1':['Charge 1 min','','decimal']};
 function monitorTable(){
   const rows=[];
   for(const [path,[label,unit,kind]] of Object.entries(METRIC_LABELS)){

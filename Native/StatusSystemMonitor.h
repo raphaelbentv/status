@@ -38,15 +38,16 @@ BOOL TMRatePerSecond(uint64_t previous, uint64_t current, NSTimeInterval elapsed
 BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
                               uint64_t activeCurrent, uint64_t totalCurrent, double *outPercent);
 
-// Processus les plus gourmands entre deux relevés, sur DEUX dimensions. Chaque relevé : pid (clé
-// texte) → { name, cpuTimeNs, rssBytes }. Retourne l'union — dédupliquée par pid — des `count`
-// plus gros par CPU et des `count` plus gros par RAM : [{ pid, name, cpuPercent, rssBytes }].
-// L'interface trie ensuite selon la dimension voulue ; garder les deux tops évite qu'un gros
-// consommateur mémoire à faible CPU (ou l'inverse) disparaisse. Taille du résultat : entre `count`
-// (tops identiques) et 2×count (disjoints). Un pid absent du relevé précédent garde cpuPercent = 0
-// (delta CPU impossible) mais reste éligible au tri mémoire ; un temps CPU qui recule (pid
-// réutilisé) laisse aussi cpuPercent à 0. Le pourcentage CPU n'est pas plafonné à 100 : un
-// processus multithread dépasse légitimement un cœur.
+// Processus les plus gourmands entre deux relevés, sur TROIS dimensions. Chaque relevé : pid (clé
+// texte) → { name, cpuTimeNs, rssBytes, energyNJ }. Retourne l'union — dédupliquée par pid — des
+// `count` plus gros par CPU, par RAM et par énergie : [{ pid, name, cpuPercent, rssBytes,
+// energyWatts }]. L'interface trie ensuite selon la dimension voulue ; garder les trois tops évite
+// qu'un gros consommateur d'une ressource disparaisse au tri d'une autre. energyWatts est la
+// puissance moyenne sur l'intervalle (delta de nanojoules / temps) ; la dimension énergie n'entre
+// dans l'union que si des deltas non nuls existent. Taille : de `count` (tops confondus) à 3×count
+// (disjoints). Un pid absent du relevé précédent garde cpuPercent/energyWatts = 0 mais reste
+// éligible au tri mémoire ; un compteur qui recule (pid réutilisé) laisse aussi 0. Le pourcentage
+// CPU n'est pas plafonné à 100 : un processus multithread dépasse légitimement un cœur.
 NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *current,
                                         NSTimeInterval elapsed, NSUInteger count);
 

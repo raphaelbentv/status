@@ -86,18 +86,28 @@ NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *cu
     // instantanée (pas de delta). Un processus apparu depuis (pas de « before ») n'a pas de delta
     // CPU exploitable, mais sa mémoire l'est : on le garde avec cpuPercent = 0, pour qu'un gros
     // consommateur RAM fraîchement lancé apparaisse quand même au tri par mémoire.
+    __block BOOL anyEnergy = NO;
     NSMutableArray *measured = [NSMutableArray array];
     [current enumerateKeysAndObjectsUsingBlock:^(NSString *pid, NSDictionary *proc, BOOL *stop) {
-        double percent = 0;
+        double percent = 0, energyWatts = 0;
         NSDictionary *before = previous[pid];
         if (before) {
             uint64_t cpuBefore = [before[@"cpuTimeNs"] unsignedLongLongValue];
             uint64_t cpuNow = [proc[@"cpuTimeNs"] unsignedLongLongValue];
             if (cpuNow >= cpuBefore)  // sinon pid réutilisé : on laisse cpuPercent à 0
                 percent = (double)(cpuNow - cpuBefore) / 1e9 / elapsed * 100.0;
+            // Énergie : delta de nanojoules sur l'intervalle → puissance moyenne en watts. Même
+            // garde que le CPU contre un compteur qui recule (pid réutilisé).
+            uint64_t energyBefore = [before[@"energyNJ"] unsignedLongLongValue];
+            uint64_t energyNow = [proc[@"energyNJ"] unsignedLongLongValue];
+            if (energyNow >= energyBefore) {
+                energyWatts = (double)(energyNow - energyBefore) / 1e9 / elapsed;
+                if (energyWatts > 0) anyEnergy = YES;
+            }
         }
         [measured addObject:@{ @"pid": pid, @"name": proc[@"name"] ?: @"?",
-                               @"cpuPercent": @(percent), @"rssBytes": proc[@"rssBytes"] ?: @0 }];
+                               @"cpuPercent": @(percent), @"rssBytes": proc[@"rssBytes"] ?: @0,
+                               @"energyWatts": @(energyWatts) }];
     }];
 
     // Union des `count` plus gros par CPU et des `count` plus gros par RAM, dédupliquée par pid.
@@ -105,20 +115,25 @@ NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *cu
     // processus dominant l'une des deux ressources est toujours présent, quel que soit le tri.
     NSComparator byCPU = ^(NSDictionary *a, NSDictionary *b) { return [b[@"cpuPercent"] compare:a[@"cpuPercent"]]; };
     NSComparator byRAM = ^(NSDictionary *a, NSDictionary *b) { return [b[@"rssBytes"] compare:a[@"rssBytes"]]; };
+    NSComparator byEnergy = ^(NSDictionary *a, NSDictionary *b) { return [b[@"energyWatts"] compare:a[@"energyWatts"]]; };
     NSArray * (^topSlice)(NSComparator) = ^(NSComparator cmp) {
         NSArray *sorted = [measured sortedArrayUsingComparator:cmp];
         return sorted.count > count ? [sorted subarrayWithRange:NSMakeRange(0, count)] : sorted;
     };
 
-    // Union des deux tranches (CPU d'abord, puis RAM), dédupliquée par pid. Taille entre `count`
-    // (les deux tops coïncident) et 2×count (aucun recouvrement).
+    // Union des tranches (CPU, RAM, puis énergie), dédupliquée par pid. La dimension énergie n'est
+    // ajoutée que si des deltas non nuls existent : sans données d'énergie, un tri sur des zéros
+    // serait arbitraire et gonflerait l'union pour rien. Taille : de `count` à 3×count.
+    NSMutableArray *slices = [NSMutableArray arrayWithObjects:topSlice(byCPU), topSlice(byRAM), nil];
+    if (anyEnergy) [slices addObject:topSlice(byEnergy)];
     NSMutableArray *union_ = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
-    for (NSDictionary *proc in [topSlice(byCPU) arrayByAddingObjectsFromArray:topSlice(byRAM)]) {
-        if ([seen containsObject:proc[@"pid"]]) continue;
-        [seen addObject:proc[@"pid"]];
-        [union_ addObject:proc];
-    }
+    for (NSArray *slice in slices)
+        for (NSDictionary *proc in slice) {
+            if ([seen containsObject:proc[@"pid"]]) continue;
+            [seen addObject:proc[@"pid"]];
+            [union_ addObject:proc];
+        }
     return union_;
 }
 
@@ -466,10 +481,71 @@ extern double IOHIDEventGetFloatValue(TMHIDEventRef event, int32_t field);
 static const int64_t TMHIDEventTypeTemperature = 15;
 static const int32_t TMHIDEventFieldTemperature = 15 << 16;
 
+// Lecteur SMC minimal (lecture seule) pour la vitesse des ventilateurs. L'AppleSMC n'a pas d'API
+// publique ; ce protocole (sélecteur 2, clés 4 caractères) est celui qu'utilise tout l'écosystème
+// open source depuis des années — même compromis que les capteurs HID. Connexion ouverte une fois.
+typedef struct {
+    uint32_t key;
+    struct { uint8_t major, minor, build, reserved; uint16_t release; } vers;
+    struct { uint16_t version, length; uint32_t cpuPLimit, gpuPLimit, memPLimit; } pLimitData;
+    struct { uint32_t dataSize; uint32_t dataType; uint8_t dataAttributes; } keyInfo;
+    uint8_t result, status, data8; uint32_t data32; uint8_t bytes[32];
+} TMSMCParam;
+
+static uint32_t TMSMCKey(const char *s) { return (s[0] << 24) | (s[1] << 16) | (s[2] << 8) | s[3]; }
+
+static io_connect_t TMSMCConnection(void) {
+    static io_connect_t conn = MACH_PORT_NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"));
+        if (service) {
+            if (IOServiceOpen(service, mach_task_self(), 0, &conn) != KERN_SUCCESS) conn = MACH_PORT_NULL;
+            IOObjectRelease(service);
+        }
+    });
+    return conn;
+}
+
+// Valeur d'une clé SMC interprétée comme nombre. NAN si absente/illisible. Gère les types flottants
+// (« flt ») d'Apple Silicon et le point fixe fpe2 des anciennes machines.
+static double TMSMCReadNumber(const char *key) {
+    io_connect_t conn = TMSMCConnection();
+    if (conn == MACH_PORT_NULL) return NAN;
+    TMSMCParam in = {0}, out = {0};
+    in.key = TMSMCKey(key); in.data8 = 9;  // lire les métadonnées de la clé
+    size_t outSize = sizeof(out);
+    if (IOConnectCallStructMethod(conn, 2, &in, sizeof(in), &out, &outSize) != KERN_SUCCESS) return NAN;
+    uint32_t size = out.keyInfo.dataSize, type = out.keyInfo.dataType;
+    TMSMCParam in2 = {0}, out2 = {0};
+    in2.key = TMSMCKey(key); in2.keyInfo.dataSize = size; in2.data8 = 5;  // lire les octets
+    outSize = sizeof(out2);
+    if (IOConnectCallStructMethod(conn, 2, &in2, sizeof(in2), &out2, &outSize) != KERN_SUCCESS) return NAN;
+    if (type == TMSMCKey("flt ") && size == 4) { float f; memcpy(&f, out2.bytes, 4); return f; }
+    if (type == TMSMCKey("fpe2") && size == 2) { return ((out2.bytes[0] << 8) | out2.bytes[1]) / 4.0; }
+    if (type == TMSMCKey("ui8 ") && size == 1) { return out2.bytes[0]; }
+    return NAN;
+}
+
 static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
     NSMutableDictionary *values = [NSMutableDictionary dictionary];
 
-    // La batterie a sa propre famille (TMCollectBattery) : ici, uniquement la température.
+    // La batterie a sa propre famille (TMCollectBattery) : ici, température, état thermique, ventilateurs.
+
+    // État thermique du système (0 normal … 3 critique) — signale un bridage en cours. Public.
+    values[@"thermalState"] = @((int)NSProcessInfo.processInfo.thermalState);
+
+    // Ventilateurs : FNum en donne le nombre, F<i>Ac la vitesse réelle. Absents (Mac fanless) →
+    // clés omises, rien de plus.
+    double fanCount = TMSMCReadNumber("FNum");
+    if (!isnan(fanCount) && fanCount >= 1) {
+        NSUInteger count = MIN((NSUInteger)fanCount, 8);
+        for (NSUInteger i = 0; i < count; i++) {
+            char key[5]; snprintf(key, sizeof(key), "F%luAc", (unsigned long)i);
+            double rpm = TMSMCReadNumber(key);
+            if (!isnan(rpm) && rpm >= 0) values[[NSString stringWithFormat:@"fan%lu", (unsigned long)i]] = @(round(rpm));
+        }
+    }
 
     // Température — moyenne des capteurs HID plausibles. PrimaryUsagePage 0xff00 (AppleVendor),
     // PrimaryUsage 5 : les capteurs thermiques.
@@ -600,13 +676,17 @@ NSDictionary *TMProcessSample(void) {
     NSMutableDictionary *sample = [NSMutableDictionary dictionaryWithCapacity:filled];
     for (int i = 0; i < filled; i++) {
         if (!pids[i]) continue;
-        struct rusage_info_v2 usage;
-        if (proc_pid_rusage(pids[i], RUSAGE_INFO_V2, (rusage_info_t *)&usage) != 0) continue;  // disparu ou interdit
+        // V6 (et non V2) pour ri_energy_nj : l'énergie attribuée au processus, cumulée depuis son
+        // lancement — la base de l'« impact énergétique » d'Activity Monitor. Même accès que V2 :
+        // un processus qu'on n'a pas le droit de lire (root) est sauté, comme avant.
+        struct rusage_info_v6 usage;
+        if (proc_pid_rusage(pids[i], RUSAGE_INFO_V6, (rusage_info_t *)&usage) != 0) continue;
         char name[2 * MAXCOMLEN];
         if (proc_name(pids[i], name, sizeof(name)) <= 0) continue;
         uint64_t cpuNs = (usage.ri_user_time + usage.ri_system_time) * timebase.numer / timebase.denom;
         sample[[@(pids[i]) stringValue]] = @{ @"name": @(name), @"cpuTimeNs": @(cpuNs),
-                                              @"rssBytes": @(usage.ri_phys_footprint) };
+                                              @"rssBytes": @(usage.ri_phys_footprint),
+                                              @"energyNJ": @(usage.ri_energy_nj) };
     }
     free(pids);
     return sample.count ? sample : nil;
