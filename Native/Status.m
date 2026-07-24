@@ -675,7 +675,8 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (NSDictionary *)widgetMetricsPayload {
     NSMutableDictionary *payload = [[self.systemMonitor snapshot] mutableCopy];
-    payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint" };
+    payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
+                           @"panels": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{} };
     payload[@"processes"] = self.topProcesses ?: @[];  // top consommateurs, pour les panneaux CPU/Mémoire
     return payload;
 }
@@ -1476,6 +1477,21 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             [self pushData];
         }
     }
+    // Contenu d'un panneau d'info : chaque section (top processus, répartition…) est activable
+    // indépendamment par widget. Absent = affiché (défaut). Stocké dans widgetPanelConfig.
+    if ([action isEqualToString:@"setWidgetPanelSection"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        NSString *section = [body[@"section"] isKindOfClass:NSString.class] ? body[@"section"] : nil;
+        if (wid && section) {
+            NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{}) mutableCopy];
+            NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
+            one[section] = @([body[@"on"] boolValue]);
+            config[wid] = one;
+            [NSUserDefaults.standardUserDefaults setObject:config forKey:@"widgetPanelConfig"];
+            [self pushWidgetMetrics];  // rafraîchit le panneau ouvert avec le nouveau contenu
+            [self pushData];
+        }
+    }
     if ([action isEqualToString:@"toggleBrightnessKeys"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
@@ -1569,6 +1585,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"brightnessKeys": @([self brightnessKeysEnabled]),
             @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
             @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},
+            @"widgetPanelConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
             @"windowGapBetween": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapBetween"]),
             @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
             @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),

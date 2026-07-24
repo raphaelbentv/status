@@ -188,5 +188,20 @@ const wGPU = widget('renderGPU()');
 check(noJunk(wGPU), 'GPU : aucun NaN/undefined/null');
 check(!/Processus/.test(wGPU), 'GPU : pas de liste de processus (charge GPU par process non mesurable)');
 
+// Sections activables : prefs.panels[widgetId][section]===false masque la section.
+const gated = JSON.parse(JSON.stringify(wsnap));
+gated.prefs.panels = { cpu: { processes: false, load: false }, memory: { breakdown: false } };
+widget('metrics = ' + JSON.stringify(gated));
+widget('widgetId = "cpu"');  // les renderers lisent la variable de module widgetId (posée par show())
+const gCPU = widget('renderCPU()');
+check(!/Processus · CPU/.test(gCPU), 'CPU : section processus masquée quand désactivée');
+check(!/charge moy\./.test(gCPU), 'CPU : section charge masquée quand désactivée');
+check(/Utilisateur/.test(gCPU), 'CPU : les sections non désactivées restent (user/système)');
+widget('widgetId = "memory"');
+const gMem = widget('renderMemory()');
+check(!/Résidente/.test(gMem), 'Mémoire : répartition masquée quand désactivée');
+check(/Processus · mémoire/.test(gMem), 'Mémoire : section processus conservée (non désactivée)');
+widget('metrics = ' + JSON.stringify(wsnap)); widget('widgetId = null');  // restaure
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

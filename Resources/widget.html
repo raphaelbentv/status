@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="themes.css">
 <style>
-  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:12px/1.4 var(--font)}
-  .panel{padding:12px 14px;width:296px}
+  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:11.5px/1.4 var(--font)}
+  .panel{padding:11px 13px;width:236px}
   .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--hair-strong);padding-bottom:8px;margin-bottom:10px}
   .head h1{margin:0;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--blue);font-weight:700}
   .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1;text-align:right}
@@ -49,6 +49,8 @@ let widgetId=null,metrics=null;
 const famGet=id=>metrics?.families?.find(f=>f.id===id);
 const sysNow=()=>famGet('system')?.now||{};
 const procs=()=>metrics?.processes||[];
+// Sections activables par panneau (prefs.panels[widgetId][section]). Absent = affiché (défaut on).
+const on=section=>(metrics?.prefs?.panels?.[widgetId]||{})[section]!==false;
 const num=v=>typeof v==='number'?v:null;
 const fr=v=>String(v).replace('.',',');
 const pctN=v=>v==null?'—':Math.round(v);
@@ -116,12 +118,13 @@ function renderCPU(){
   const loads=(s.load1!=null)?row('charge moy.',`${fr(s.load1)} · ${fr(s.load5)} · ${fr(s.load15)}`):'';
   const procN=(s.processCount!=null)?row('processus',s.processCount):'';
   const up=(s.uptimeSec!=null)?row('actif depuis',fmtDur(s.uptimeSec)):'';
+  const loadRows=(loads||procN||up)?`<div class="rows" style="margin-top:8px">${loads}${procN}${up}</div>`:'';
   return head('CPU',bigVal(pctN(n.total),'%'))
     +chart([series(f,'total','var(--chart-a)')])
-    +coresHTML
-    +(splitHTML||'')
-    +`<div class="rows" style="margin-top:8px">${loads}${procN}${up}</div>`
-    +section('Processus · CPU')+procList('cpuPercent',v=>fr(v.toFixed(0))+' %');
+    +(on('cores')?coresHTML:'')
+    +(on('split')?(splitHTML||''):'')
+    +(on('load')?loadRows:'')
+    +(on('processes')?section('Processus · CPU')+procList('cpuPercent',v=>fr(v.toFixed(0))+' %'):'');
 }
 function renderMemory(){
   const f=famGet('ram');if(!f)return empty('Mémoire');const n=f.now;
@@ -145,9 +148,9 @@ function renderMemory(){
   return head('Mémoire',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtGo(n.totalBytes)+' au total':''))
     +(P[0]?`<div class="row"><span class="k">pression mémoire</span><span class="badge ${P[1]}">${P[0]}</span></div>`:'')
     +chart([series(f,'usedPercent','var(--chart-a)')])
-    +breakdown
-    +(stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
-    +section('Processus · mémoire')+procList('rssBytes',fmtSize);
+    +(on('breakdown')?breakdown:'')
+    +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
+    +(on('processes')?section('Processus · mémoire')+procList('rssBytes',fmtSize):'');
 }
 function renderGPU(){
   const f=famGet('gpu');if(!f)return empty('GPU');const n=f.now;
@@ -155,19 +158,19 @@ function renderGPU(){
   // Silicon. On s'en tient à ce qui est mesurable — charge globale, étages, mémoire.
   return head('GPU',bigVal(pctN(n.usage),'%'))
     +chart([series(f,'usage','var(--chart-a)')])
-    +`<div class="rows">
+    +(on('stages')?`<div class="rows">
       ${n.renderer!=null?row('rendu',pct(n.renderer)):''}
       ${n.tiler!=null?row('tuilage',pct(n.tiler)):''}
       ${n.memInUse!=null?row('mémoire GPU',fmtSize(n.memInUse)):''}
-    </div>`;
+    </div>`:'');
 }
 function renderNetwork(){
   const f=famGet('network');if(!f)return empty('Réseau');const n=f.now;
   const ifaces=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
   return head('Réseau',bigVal(`↓ ${fmtRate(n.rxBytesPerSec)}`,'',`↑ ${fmtRate(n.txBytesPerSec)}`))
     +chart([series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')],{percent:false})
-    +`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')||'<div class="row"><span class="k">aucune interface active</span></div>'}</div>`
-    +(n.rxSessionBytes!=null?section('Session')
+    +(on('interfaces')?`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')||'<div class="row"><span class="k">aucune interface active</span></div>'}</div>`:'')
+    +(on('session')&&n.rxSessionBytes!=null?section('Session')
       +`<div class="rows">${row('reçu',fmtSize(n.rxSessionBytes))}${row('envoyé',fmtSize(n.txSessionBytes))}</div>`:'');
 }
 function renderTemperature(){
@@ -175,10 +178,10 @@ function renderTemperature(){
   const T=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']][n.thermalState]||['normal',''];
   const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
   return head('Capteurs',bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C'))
-    +chart([series(f,'tempC','var(--amber)')],{percent:false})
+    +(on('chart')?chart([series(f,'tempC','var(--amber)')],{percent:false}):'')
     +`<div class="rows">
       <div class="row"><span class="k">état thermique</span><span class="badge ${T[1]}">${T[0]}</span></div>
-      ${fans.length?fans.map((k,i)=>row(fans.length>1?`ventilateur ${i+1}`:'ventilateur',Math.round(n[k]).toLocaleString('fr-FR')+' tr/min')).join(''):row('ventilateurs','aucun (refroidissement passif)')}
+      ${on('fans')?(fans.length?fans.map((k,i)=>row(fans.length>1?`ventilateur ${i+1}`:'ventilateur',Math.round(n[k]).toLocaleString('fr-FR')+' tr/min')).join(''):row('ventilateurs','aucun (refroidissement passif)')):''}
     </div>`;
 }
 function renderBattery(){
@@ -198,9 +201,9 @@ function renderBattery(){
   if(n.conditionOK!=null)rows.push(row('état','<span class="badge'+(n.conditionOK?'':' warn')+'">'+(n.conditionOK?'normal':'à vérifier')+'</span>'));
   return head('Batterie',bigVal(n.percent==null?'—':Math.round(n.percent),'%',state))
     +`<div class="track"><i style="width:${n.percent??0}%"></i></div>`
-    +chart([series(f,'percent','var(--green)')])
-    +(stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
-    +(rows.length?`<div class="rows" style="margin-top:8px">${rows.join('')}</div>`:'');
+    +(on('chart')?chart([series(f,'percent','var(--green)')]):'')
+    +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
+    +(on('details')&&rows.length?`<div class="rows" style="margin-top:8px">${rows.join('')}</div>`:'');
 }
 function renderDisk(){
   const f=famGet('disk');if(!f)return empty('Disque');const n=f.now;
@@ -212,9 +215,9 @@ function renderDisk(){
     return `<div class="vol"><div class="vh"><span>${esc(label)}</span><span class="vf">${foot}</span></div><div class="track"><i style="width:${p}%;background:${p>=90?'var(--danger)':'var(--chart-a)'}"></i></div></div>`;
   }).join('');
   return head('Disque',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtSize(n.totalBytes)+' au total':''))
-    +chart([series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')],{percent:false})
-    +`<div class="rows">${row('lecture',fmtRate(n.readBytesPerSec))}${row('écriture',fmtRate(n.writeBytesPerSec))}</div>`
-    +section('Volumes')+volHTML;
+    +(on('chart')?chart([series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')],{percent:false})
+      +`<div class="rows">${row('lecture',fmtRate(n.readBytesPerSec))}${row('écriture',fmtRate(n.writeBytesPerSec))}</div>`:'')
+    +(on('volumes')?section('Volumes')+volHTML:'');
 }
 function empty(title){return head(title,'')+`<div class="empty">Mesure en cours…</div>`}
 const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};

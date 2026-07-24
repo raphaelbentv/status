@@ -101,6 +101,11 @@
   .wc-colors{display:flex;gap:4px;margin-left:auto;flex:none}
   .wc-swatch{width:15px;height:15px;border-radius:50%;border:1px solid var(--hair-strong);cursor:pointer;padding:0}
   .wc-swatch.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--blue)}
+  /* Sous-rangée : contenu du panneau d'info (sections activables). */
+  .wc-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-3px 0 3px 10px;padding-left:10px;border-left:2px solid var(--hair)}
+  .wc-sublabel{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none}
+  .wc-sub .seg{font-size:9.5px;padding:4px 8px}
+  .wc-sub .segmented{flex-wrap:wrap}
   .seg{border:0;background:transparent;color:var(--muted);padding:7px 11px;cursor:pointer;font:inherit;font-size:10px}
   .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
@@ -291,8 +296,19 @@ const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','text'],gpu:['bars','graph
 const WIDGET_COLORS=[['auto','—','var(--muted)'],['blue','Bleu','#4C90FF'],['green','Vert','#4CD173'],
   ['purple','Violet','#AD85FF'],['cyan','Cyan','#4CCCE6'],['orange','Orange','#FF9933'],
   ['amber','Ambre','#FFBF40'],['red','Rouge','#FF615A'],['pink','Rose','#FF73B3'],['gray','Gris','#9EA9B8']];
+// Sections activables du panneau d'info de chaque widget (clés alignées sur `on(section)` de
+// widget.html). Absent d'un réglage = affiché (défaut). Le titre, la grande valeur et la courbe
+// principale restent toujours présents — seules ces sections optionnelles se règlent.
+const PANEL_SECTIONS={
+  cpu:[['cores','cœurs'],['split','user/sys'],['load','charge'],['processes','processus']],
+  memory:[['breakdown','répartition'],['stats','totaux'],['processes','processus']],
+  gpu:[['stages','étages']],
+  network:[['interfaces','interfaces'],['session','session']],
+  temperature:[['chart','historique'],['fans','ventilateurs']],
+  battery:[['chart','historique'],['stats','indicateurs'],['details','détails']],
+  disk:[['chart','débits'],['volumes','volumes']]};
 function widgetConfigRows(p){
-  const enabled=p.menuBarWidgets||[],config=p.menuBarWidgetConfig||{};
+  const enabled=p.menuBarWidgets||[],config=p.menuBarWidgetConfig||{},panels=p.widgetPanelConfig||{};
   return WIDGETS.map(([id,label])=>{
     const on=enabled.includes(id),cfg=config[id]||{},shapes=WIDGET_SHAPES[id]||['text'];
     const shape=cfg.shape&&shapes.includes(cfg.shape)?cfg.shape:shapes[0],color=cfg.color||'auto';
@@ -300,7 +316,9 @@ function widgetConfigRows(p){
     if(!on)return `<div class="wc-row">${toggle}</div>`;
     const shapeSel=`<span class="segmented wc-shapes">${shapes.map(s=>`<button class="seg ${shape===s?'on':''}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',shape:'${s}'})">${SHAPE_LABELS[s]||s}</button>`).join('')}</span>`;
     const colorSel=`<span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${color===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',color:'${c}'})"></button>`).join('')}</span>`;
-    return `<div class="wc-row">${toggle}${shapeSel}${colorSel}</div>`;
+    const secs=PANEL_SECTIONS[id]||[],pcfg=panels[id]||{};
+    const secSel=secs.length?`<div class="wc-sub"><span class="wc-sublabel">Panneau</span><span class="segmented">${secs.map(([key,lab])=>{const sOn=pcfg[key]!==false;return `<button class="seg ${sOn?'on':''}" onclick="send('setWidgetPanelSection',{id:'${id}',section:'${key}',on:${!sOn}})">${lab}</button>`}).join('')}</span></div>`:'';
+    return `<div class="wc-row">${toggle}${shapeSel}${colorSel}</div>${secSel}`;
   }).join('');
 }
 let appData=null,currentView='overview';
@@ -417,7 +435,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Style de l\'icône</strong><small>Anneau (niveau instantané) ou courbe (tendance récente de la fenêtre épinglée).</small></div><div class="segmented">${['ring','spark'].map(v=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${v==='ring'?'Anneau':'Courbe'}</button>`).join('')}</div></div>
-  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Widgets système dans la barre des menus</strong><small>Des icônes système à côté de la jauge quota, chacune indépendante — activez-les, choisissez leur forme et leur couleur. Réordonnez-les en les ⌘-glissant dans la barre ; cliquez une icône pour son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Widgets système dans la barre des menus</strong><small>Des icônes système à côté de la jauge quota, chacune indépendante — activez-les, choisissez leur forme, leur couleur, et les infos affichées dans leur panneau (ligne « Panneau »). Réordonnez-les en les ⌘-glissant dans la barre ; cliquez une icône pour son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></div>
   ${p.windowManager?`
   <div class="setting"><div class="setting-copy"><strong>Marge entre fenêtres</strong><small>Espace laissé entre deux fenêtres voisines. À 0 elles se touchent.</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapBetween||0)===v?'on':''}" onclick="send('setWindowGap',{which:'between',value:${v}})">${v}</button>`).join('')}</div></div>
