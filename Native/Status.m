@@ -14,6 +14,7 @@
 #import "StatusCost.h"
 #import "StatusFx.h"
 #import "StatusDisplays.h"
+#import "StatusMenuBarWidgets.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 #import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
 
@@ -395,6 +396,7 @@ static const CGFloat TMTitleBarHeight = 28;
 @property TMWindowManager *windowManager;
 @property TMDisplayManager *displayManager;
 @property id brightnessGlobalMonitor, brightnessLocalMonitor;
+@property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
 @property NSPanel *pickerPanel;
 @property WKWebView *pickerWebView;
 @property NSArray<TMWindowCandidate *> *pickerCandidates;
@@ -470,6 +472,7 @@ static const CGFloat TMTitleBarHeight = 28;
     [self buildStatusItem];
     [self scheduleRefresh];
     [self startSystemMonitor];
+    [self rebuildMenuBarWidgets];  // icônes système activées par l'utilisateur, à côté de la jauge quota
     [self refreshCostsInBackground];
     [[TMFxRate shared] refreshIfStale];  // taux de change USD→EUR, en fond, si le cache est périmé
     self.keyboardLock = [TMKeyboardLock new];
@@ -604,6 +607,92 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusPopover.contentSize = frame.size;
     self.statusPopover.contentViewController = controller;
     [self updateStatusMenu];
+}
+
+#pragma mark - Widgets de la barre des menus (icônes système multiples)
+
+- (NSArray<NSString *> *)enabledWidgets {
+    NSArray *stored = [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"];
+    NSMutableArray *valid = [NSMutableArray array];
+    // Filtré et réordonné selon le catalogue : ignore un id inconnu, garde un ordre de création
+    // stable (macOS laisse ensuite l'utilisateur ⌘-glisser les icônes).
+    for (NSString *wid in TMMenuBarWidgetIDs())
+        if ([stored containsObject:wid]) [valid addObject:wid];
+    return valid;
+}
+
+// Crée/détruit les NSStatusItem pour coller à la liste activée. Idempotent : appelé au lancement
+// et à chaque bascule de réglage.
+- (void)rebuildMenuBarWidgets {
+    if (!self.widgetItems) self.widgetItems = [NSMutableDictionary dictionary];
+    NSArray<NSString *> *enabled = [self enabledWidgets];
+
+    // Retirer les widgets désactivés.
+    for (NSString *wid in self.widgetItems.allKeys)
+        if (![enabled containsObject:wid]) {
+            [NSStatusBar.systemStatusBar removeStatusItem:self.widgetItems[wid]];
+            [self.widgetItems removeObjectForKey:wid];
+        }
+
+    // Ajouter les nouveaux, dans l'ordre du catalogue.
+    for (NSString *wid in enabled) {
+        if (self.widgetItems[wid]) continue;
+        NSStatusItem *item = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
+        item.button.image = TMWidgetImage(TMWidgetReadout(wid, @{}));  // tiret en attendant le 1er tick
+        item.button.imagePosition = NSImageLeading;
+        item.button.target = self;
+        item.button.action = @selector(widgetClicked:);
+        item.button.identifier = wid;  // pour retrouver le widget au clic et au redessin
+        self.widgetItems[wid] = item;
+    }
+    [self updateMenuBarWidgetsFromMonitor];
+}
+
+- (void)widgetClicked:(NSButton *)sender {
+    // Clic seul (pas de survol) : ouvre ou ferme le popover partagé, ancré sous ce widget.
+    if (self.statusPopover.shown) { [self.statusPopover close]; return; }
+    self.popoverOpenedByHover = NO;
+    [self showPopoverFromButton:sender];
+}
+
+// Redessine chaque widget depuis un snapshot moniteur. Les styles « bars »/« pie » posent la
+// valeur en titre système à côté de l'image ; « twoLine »/« battery » embarquent tout leur texte
+// dans l'image (titre vide).
+// Forme et couleur choisies par l'utilisateur pour un widget (réglage menuBarWidgetConfig), ou nil
+// (= forme naturelle / couleur auto).
+- (NSDictionary *)widgetStyleFor:(NSString *)wid {
+    NSDictionary *config = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"];
+    NSDictionary *one = [config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : nil;
+    return one;
+}
+
+- (void)updateMenuBarWidgets:(NSDictionary *)snapshot {
+    if (!self.widgetItems.count) return;
+    [self.widgetItems enumerateKeysAndObjectsUsingBlock:^(NSString *wid, NSStatusItem *item, BOOL *stop) {
+        NSDictionary *readout = TMWidgetReadout(wid, snapshot);
+        NSDictionary *style = [self widgetStyleFor:wid];
+        NSString *shape = [style[@"shape"] isKindOfClass:NSString.class] ? style[@"shape"] : nil;
+        NSString *color = [style[@"color"] isKindOfClass:NSString.class] ? style[@"color"] : nil;
+        item.button.image = TMWidgetImageStyled(readout, shape, color);
+        // Le titre système (valeur à côté) n'accompagne que les formes « graphe/jauge » ; les formes
+        // qui portent déjà leur texte (twoLine/battery/text) n'ont pas de titre séparé.
+        BOOL shapeCarriesText = [shape isEqual:@"text"] || [shape isEqual:@"twoLine"] || [shape isEqual:@"battery"]
+            || (!shape.length && ([readout[@"style"] isEqual:@"twoLine"] || [readout[@"style"] isEqual:@"battery"]));
+        NSString *title = shapeCarriesText ? @"" : readout[@"title"];
+        if ([title length]) {
+            item.button.attributedTitle = TMMenuBarTitle(title, (TMSeverity)[readout[@"severity"] integerValue]);
+            item.button.imagePosition = NSImageLeading;
+        } else {
+            item.button.attributedTitle = [[NSAttributedString alloc] initWithString:@""];
+            item.button.imagePosition = NSImageOnly;
+        }
+        item.button.image.accessibilityDescription = TMMenuBarWidgetLabel(wid);
+    }];
+}
+
+- (void)updateMenuBarWidgetsFromMonitor {
+    if (self.widgetItems.count && self.systemMonitor)
+        [self updateMenuBarWidgets:[self.systemMonitor snapshot]];
 }
 
 #pragma mark - Session claude.ai (WebView)
@@ -913,8 +1002,14 @@ static const CGFloat TMTitleBarHeight = 28;
 }
 
 - (void)showStatusPopover {
-    [self.statusPopover showRelativeToRect:self.statusItem.button.bounds
-                                    ofView:self.statusItem.button preferredEdge:NSRectEdgeMinY];
+    [self showPopoverFromButton:self.statusItem.button];
+}
+
+// Le popover est partagé par toutes les icônes (jauge quota et widgets système) : on l'ancre sous
+// le bouton réellement cliqué, pas systématiquement sous la jauge.
+- (void)showPopoverFromButton:(NSButton *)button {
+    if (!button) button = self.statusItem.button;
+    [self.statusPopover showRelativeToRect:button.bounds ofView:button preferredEdge:NSRectEdgeMinY];
     [self refresh:nil];
 }
 
@@ -1310,6 +1405,31 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         if (display) [display setBrightnessPercent:[body[@"value"] doubleValue]];
         [self pushData];
     }
+    if ([action isEqualToString:@"setMenuBarWidget"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        if (wid) {
+            NSMutableArray *widgets = [([NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[]) mutableCopy];
+            BOOL on = [body[@"on"] boolValue];
+            if (on && ![widgets containsObject:wid]) [widgets addObject:wid];
+            if (!on) [widgets removeObject:wid];
+            [NSUserDefaults.standardUserDefaults setObject:widgets forKey:@"menuBarWidgets"];
+            [self rebuildMenuBarWidgets];
+            [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"setMenuBarWidgetStyle"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        if (wid) {
+            NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{}) mutableCopy];
+            NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
+            if ([body[@"shape"] isKindOfClass:NSString.class]) one[@"shape"] = body[@"shape"];
+            if ([body[@"color"] isKindOfClass:NSString.class]) one[@"color"] = body[@"color"];
+            config[wid] = one;
+            [NSUserDefaults.standardUserDefaults setObject:config forKey:@"menuBarWidgetConfig"];
+            [self updateMenuBarWidgetsFromMonitor];  // redessine tout de suite avec le nouveau style
+            [self pushData];
+        }
+    }
     if ([action isEqualToString:@"toggleBrightnessKeys"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
@@ -1401,6 +1521,8 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"windowManager": @([self windowManagerEnabled]),
             @"brightnessKeys": @([self brightnessKeysEnabled]),
+            @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
+            @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},
             @"windowGapBetween": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapBetween"]),
             @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
             @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),
@@ -1658,6 +1780,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     [self.systemMonitor sample];
     NSDictionary *snapshot = [self.systemMonitor snapshot];
     [self checkSystemAlerts:snapshot];  // les alertes veillent même toutes surfaces fermées
+    [self updateMenuBarWidgets:snapshot];  // icônes système : toujours à jour, même surfaces fermées
 
     BOOL dashboardVisible = self.webReady && self.window.isVisible;
     BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;

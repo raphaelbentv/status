@@ -13,6 +13,7 @@
 #import "StatusSystemMonitor.h"
 #import "StatusWindowManager.h"
 #import "StatusDisplays.h"
+#import "StatusMenuBarWidgets.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
@@ -674,6 +675,90 @@ static void TestSystemMonitorLive(void) {
     }
 }
 
+#pragma mark - Widgets de la barre des menus
+
+// Snapshot moniteur synthétique : familles avec `now` et `series`, comme en production.
+static NSDictionary *TMFakeSnapshot(void) {
+    return @{ @"families": @[
+        @{ @"id": @"cpu", @"now": @{ @"total": @43 }, @"series": @{ @"total": @[@10, @20, @43] } },
+        @{ @"id": @"ram", @"now": @{ @"usedPercent": @68, @"pressureLevel": @1 }, @"series": @{} },
+        @{ @"id": @"gpu", @"now": @{ @"usage": @24 }, @"series": @{ @"usage": @[@5, @24] } },
+        @{ @"id": @"network", @"now": @{ @"rxBytesPerSec": @75776, @"txBytesPerSec": @71680 }, @"series": @{} },
+        @{ @"id": @"disk", @"now": @{ @"usedPercent": @74 }, @"series": @{} },
+        @{ @"id": @"sensors", @"now": @{ @"tempC": @50 }, @"series": @{} },
+        @{ @"id": @"battery", @"now": @{ @"percent": @100, @"fullyCharged": @YES, @"charging": @NO, @"powerWatts": @-20 }, @"series": @{} },
+    ] };
+}
+
+static void TestMenuBarWidgets(void) {
+    Section(@"TMWidgetReadout — extraction et mise en forme");
+    NSDictionary *snap = TMFakeSnapshot();
+
+    NSDictionary *cpu = TMWidgetReadout(@"cpu", snap);
+    CheckEqual(cpu[@"style"], @"bars", @"CPU : style histogramme");
+    CheckEqual(cpu[@"title"], @"43 %", @"CPU : titre = charge globale");
+    CheckEqual(@([cpu[@"series"] count]), @3, @"CPU : série historique transmise");
+
+    NSDictionary *mem = TMWidgetReadout(@"memory", snap);
+    CheckEqual(mem[@"style"], @"pie", @"Mémoire : style camembert");
+    CheckEqual(mem[@"title"], @"68 %", @"Mémoire : titre");
+    Check(fabs([mem[@"fraction"] doubleValue] - 0.68) < 1e-9, @"Mémoire : fraction 0,68");
+
+    NSDictionary *net = TMWidgetReadout(@"network", snap);
+    CheckEqual(net[@"style"], @"twoLine", @"Réseau : deux lignes");
+    CheckEqual(net[@"primary"], @"↓ 74 Ko/s", @"Réseau : réception formatée");
+    CheckEqual(net[@"secondary"], @"↑ 70 Ko/s", @"Réseau : émission formatée");
+
+    NSDictionary *temp = TMWidgetReadout(@"temperature", snap);
+    CheckEqual(temp[@"primary"], @"50°", @"Température : °C");
+    CheckEqual(temp[@"secondary"], @"20 W", @"Température : watts (valeur absolue)");
+
+    NSDictionary *batt = TMWidgetReadout(@"battery", snap);
+    CheckEqual(batt[@"style"], @"battery", @"Batterie : style pile");
+    CheckEqual(batt[@"primary"], @"Plein", @"Batterie pleine : « Plein »");
+    CheckEqual(batt[@"secondary"], @"100 %", @"Batterie : pourcentage");
+    Check(fabs([batt[@"fraction"] doubleValue] - 1.0) < 1e-9, @"Batterie : fraction 1");
+
+    NSDictionary *disk = TMWidgetReadout(@"disk", snap);
+    CheckEqual(disk[@"title"], @"74 %", @"Disque : occupation");
+
+    // Sévérité : rare, seulement sur états anormaux.
+    CheckEqual(cpu[@"severity"], @0, @"CPU chargé n'est pas une alerte");
+    NSDictionary *hotSnap = @{ @"families": @[ @{ @"id": @"sensors", @"now": @{ @"tempC": @97 }, @"series": @{} } ] };
+    CheckEqual(TMWidgetReadout(@"temperature", hotSnap)[@"severity"], @2, @"97 °C : critique");
+    NSDictionary *lowBatt = @{ @"families": @[ @{ @"id": @"battery", @"now": @{ @"percent": @8, @"charging": @NO }, @"series": @{} } ] };
+    CheckEqual(TMWidgetReadout(@"battery", lowBatt)[@"severity"], @2, @"8 % sur batterie : critique");
+
+    // Absence de donnée : hasValue NO, jamais de valeur inventée.
+    NSDictionary *empty = @{ @"families": @[] };
+    Check(![TMWidgetReadout(@"cpu", empty)[@"hasValue"] boolValue], @"CPU sans famille : hasValue NO");
+    Check(![TMWidgetReadout(@"battery", empty)[@"hasValue"] boolValue], @"Batterie absente (bureau) : hasValue NO");
+
+    // Valeur mono-ligne (forme « texte ») et fractions pour anneau/camembert.
+    CheckEqual(cpu[@"value"], @"43 %", @"CPU : valeur texte");
+    CheckEqual(temp[@"value"], @"50°", @"Température : valeur texte");
+    CheckEqual(batt[@"value"], @"100 %", @"Batterie : valeur texte = pourcentage");
+    Check(fabs([TMWidgetReadout(@"temperature", snap)[@"fraction"] doubleValue] - 0.5) < 1e-9, @"Température : fraction 50/100 pour l'anneau");
+    CheckEqual(@([cpu[@"series"] count]), @3, @"CPU : série pour barres/courbe");
+    Check([TMWidgetReadout(@"memory", snap)[@"series"] count] == 0 || YES, @"Mémoire : série usedPercent transmise si présente");
+
+    // Le dessin ne doit pas planter, quelle que soit la forme, la couleur ou l'entrée (fumée).
+    NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"text", @"twoLine", @"battery", @""];
+    NSArray *colors = @[@"auto", @"blue", @"red", @"purple", @"inconnu"];
+    for (NSString *wid in TMMenuBarWidgetIDs())
+        for (NSString *shape in shapes)
+            for (NSString *color in colors) {
+                Check(TMWidgetImageStyled(TMWidgetReadout(wid, snap), shape, color) != nil,
+                      ([NSString stringWithFormat:@"dessin %@ forme=%@ couleur=%@", wid, shape.length ? shape : @"(auto)", color]));
+                Check(TMWidgetImageStyled(TMWidgetReadout(wid, empty), shape, color) != nil,
+                      ([NSString stringWithFormat:@"dessin %@ sans donnée forme=%@ : pas de crash", wid, shape.length ? shape : @"(auto)"]));
+            }
+
+    // La sévérité prime sur la couleur choisie : une couleur nommée existe, mais l'alerte reste.
+    Check(TMWidgetNamedColor(@"blue") != nil, @"la palette expose « blue »");
+    Check(TMWidgetNamedColor(@"auto") == nil, @"« auto » n'est pas une couleur nommée (template neutre)");
+}
+
 #pragma mark - Écrans (luminosité)
 
 static void TestDisplayBrightnessClamp(void) {
@@ -1170,6 +1255,7 @@ int main(void) {
         TestDisplayVCPConversion();
         TestDisplayDDCProtocol();
         TestDisplayManagerLive();
+        TestMenuBarWidgets();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

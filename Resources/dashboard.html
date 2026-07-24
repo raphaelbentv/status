@@ -89,6 +89,18 @@
   .setting-state{font-size:10px;color:var(--muted);white-space:nowrap}.setting-state.ok{color:var(--green)}
   .button.on{border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
   .segmented{display:flex;border:1px solid var(--hair-strong);border-radius:var(--radius);overflow:hidden;flex:none}
+  /* Chips de widgets : plusieurs boutons indépendants qui passent à la ligne (contrairement au
+     segmented, un choix unique). Chacun encadré, activable séparément. */
+  .seg-wrap{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:220px;justify-content:flex-end}
+  .seg-wrap .seg{border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 10px}
+  /* Configuration des widgets : une rangée par widget (toggle nom, forme, couleurs). */
+  .widget-config{display:flex;flex-direction:column;gap:8px}
+  .wc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .wc-toggle{border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 12px;min-width:96px;text-align:left;flex:none}
+  .wc-shapes{flex:none}.wc-shapes .seg{font-size:9.5px;padding:5px 8px}
+  .wc-colors{display:flex;gap:4px;margin-left:auto;flex:none}
+  .wc-swatch{width:15px;height:15px;border-radius:50%;border:1px solid var(--hair-strong);cursor:pointer;padding:0}
+  .wc-swatch.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--blue)}
   .seg{border:0;background:transparent;color:var(--muted);padding:7px 11px;cursor:pointer;font:inherit;font-size:10px}
   .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
@@ -268,6 +280,29 @@ const THEMES=[
   {id:'holograme',label:'Holograme',blue:'#7CC8FF',purple:'#E29AFF'},
   {id:'ion',label:'Ion',blue:'#78E1FF',purple:'#B98CFF'}
 ];
+// Widgets système de la barre des menus (mêmes ids que TMMenuBarWidgetIDs côté natif).
+const WIDGETS=[['cpu','CPU'],['memory','Mémoire'],['gpu','GPU'],['network','Réseau'],['temperature','Température'],['battery','Batterie'],['disk','Disque']];
+// Formes valides par widget (défaut = 1re). Ids alignés sur TMWidgetImageStyled.
+const SHAPE_LABELS={bars:'barres',graph:'courbe',ring:'anneau',pie:'camembert',text:'texte',twoLine:'2 lignes',battery:'pile'};
+const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','text'],gpu:['bars','graph','ring','pie','text'],
+  memory:['pie','ring','bars','graph','text'],disk:['pie','ring','bars','graph','text'],
+  network:['twoLine','text'],temperature:['twoLine','ring','text'],battery:['battery','ring','twoLine','text']};
+// Palette (alignée sur TMWidgetNamedColor). « auto » = neutre adaptatif + alerte.
+const WIDGET_COLORS=[['auto','—','var(--muted)'],['blue','Bleu','#4C90FF'],['green','Vert','#4CD173'],
+  ['purple','Violet','#AD85FF'],['cyan','Cyan','#4CCCE6'],['orange','Orange','#FF9933'],
+  ['amber','Ambre','#FFBF40'],['red','Rouge','#FF615A'],['pink','Rose','#FF73B3'],['gray','Gris','#9EA9B8']];
+function widgetConfigRows(p){
+  const enabled=p.menuBarWidgets||[],config=p.menuBarWidgetConfig||{};
+  return WIDGETS.map(([id,label])=>{
+    const on=enabled.includes(id),cfg=config[id]||{},shapes=WIDGET_SHAPES[id]||['text'];
+    const shape=cfg.shape&&shapes.includes(cfg.shape)?cfg.shape:shapes[0],color=cfg.color||'auto';
+    const toggle=`<button class="seg wc-toggle ${on?'on':''}" onclick="send('setMenuBarWidget',{id:'${id}',on:${!on}})">${label}</button>`;
+    if(!on)return `<div class="wc-row">${toggle}</div>`;
+    const shapeSel=`<span class="segmented wc-shapes">${shapes.map(s=>`<button class="seg ${shape===s?'on':''}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',shape:'${s}'})">${SHAPE_LABELS[s]||s}</button>`).join('')}</span>`;
+    const colorSel=`<span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${color===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',color:'${c}'})"></button>`).join('')}</span>`;
+    return `<div class="wc-row">${toggle}${shapeSel}${colorSel}</div>`;
+  }).join('');
+}
 let appData=null,currentView='overview';
 
 // Rebuilds one window's series from the rolling history file and draws it as an inline sparkline.
@@ -382,6 +417,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Style de l\'icône</strong><small>Anneau (niveau instantané) ou courbe (tendance récente de la fenêtre épinglée).</small></div><div class="segmented">${['ring','spark'].map(v=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${v==='ring'?'Anneau':'Courbe'}</button>`).join('')}</div></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Widgets système dans la barre des menus</strong><small>Des icônes système à côté de la jauge quota, chacune indépendante — activez-les, choisissez leur forme et leur couleur. Réordonnez-les en les ⌘-glissant dans la barre ; cliquez une icône pour son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></div>
   ${p.windowManager?`
   <div class="setting"><div class="setting-copy"><strong>Marge entre fenêtres</strong><small>Espace laissé entre deux fenêtres voisines. À 0 elles se touchent.</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapBetween||0)===v?'on':''}" onclick="send('setWindowGap',{which:'between',value:${v}})">${v}</button>`).join('')}</div></div>
