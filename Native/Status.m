@@ -451,6 +451,10 @@ static const CGFloat TMTitleBarHeight = 28;
     if (migrations[stored]) [defaults setObject:migrations[stored] forKey:@"menuBarMetric"];
     self.openAIAccount = TMDisconnectedOpenAIAccount(@"");
     self.claudeAccount = TMEmptyClaudeAccount();
+    // Réafficher les derniers volumes connus immédiatement, sans attendre le premier sondage : ils
+    // ont été persistés en continu à chaque mise à jour. Sans cela, le grand chiffre et la barre
+    // des menus restent à « — » plusieurs secondes après chaque redémarrage.
+    [self restoreCachedAccounts];
     self.notifiedThresholds = [NSMutableDictionary dictionary];
     // Avant tout appel possible à pushData (refreshCostsInBackground en pousse un dès le
     // lancement) : `payload` lit self.displayManager sans filet, un nil ferait planter le
@@ -1545,7 +1549,46 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     };
 }
 
+// Volumes courants persistés en continu (écriture atomique), pour survivre à un redémarrage ou un
+// arrêt brutal : la dernière écriture reflète toujours le dernier état affiché, rien à vider à la
+// fermeture. Le collage vit dans pushData, l'unique point traversé après chaque changement de compte.
+- (void)persistAccountsCache {
+    NSDictionary *openai = [self.openAIAccount isKindOfClass:NSDictionary.class] ? self.openAIAccount : nil;
+    NSDictionary *claude = [self.claudeAccount isKindOfClass:NSDictionary.class] ? self.claudeAccount : nil;
+    if (!openai && !claude) return;
+    TMSaveAccountsCache(@{ @"openai": openai ?: @{}, @"claude": claude ?: @{} });
+}
+
+// Remet un compte restauré dans un état sûr : fenêtres périmées écartées, fraîcheur recalculée
+// (des heures hors ligne = mesure figée), drapeaux transitoires remis à plat — le premier sondage
+// réévaluera tout. Une donnée restaurée n'est jamais « en direct ».
+- (NSDictionary *)sanitizedRestoredAccount:(id)raw now:(long long)now {
+    if (![raw isKindOfClass:NSDictionary.class] || ![(NSDictionary *)raw count]) return nil;
+    NSMutableDictionary *account = [raw mutableCopy];
+    NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
+    account[@"windows"] = TMDropExpiredWindows(windows);
+    long long capturedAt = TMInteger(account[@"capturedAt"]);
+    if (capturedAt > 0) account[@"stale"] = @(now - capturedAt > 1800);
+    account[@"liveSource"] = @NO;
+    account[@"actionRunning"] = @NO;
+    account[@"authChecking"] = @NO;
+    account[@"connecting"] = @NO;
+    account[@"error"] = @"";
+    return account;
+}
+
+- (void)restoreCachedAccounts {
+    NSDictionary *cache = TMLoadAccountsCache();
+    if (!cache) return;
+    long long now = (long long)NSDate.date.timeIntervalSince1970;
+    NSDictionary *claude = [self sanitizedRestoredAccount:cache[@"claude"] now:now];
+    NSDictionary *openai = [self sanitizedRestoredAccount:cache[@"openai"] now:now];
+    if (claude) self.claudeAccount = claude;
+    if (openai) self.openAIAccount = openai;
+}
+
 - (void)pushData {
+    [self persistAccountsCache];
     NSData *data = [NSJSONSerialization dataWithJSONObject:[self payload] options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (self.webReady) {
@@ -1844,6 +1887,16 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         BOOL live = usageWindows.count > 0;
         NSArray *windows = live ? usageWindows : TMDropExpiredWindows(TMClaudeWindowsFromSnapshot(snapshot));
         long long capturedAt = live ? (long long)NSDate.date.timeIntervalSince1970 : TMInteger(snapshot[@"captured_at_epoch"]);
+        // Viscosité : quand le sondage ne rapporte aucune fenêtre (pas de source directe, snapshot
+        // status line absent ou vidé), garder les dernières fenêtres connues avec leur horodatage
+        // plutôt que de vider l'affichage. Une fenêtre réinitialisée réapparaît à bas pourcentage,
+        // pas à zéro fenêtre ; « aucune fenêtre » signale une lacune de collecte, pas une remise à
+        // zéro. Les fenêtres réellement périmées sont écartées ensuite.
+        if (windows.count == 0) {
+            NSArray *previous = [self.claudeAccount[@"windows"] isKindOfClass:NSArray.class] ? self.claudeAccount[@"windows"] : @[];
+            NSArray *kept = TMDropExpiredWindows(previous);
+            if (kept.count > 0) { windows = kept; capturedAt = TMInteger(self.claudeAccount[@"capturedAt"]); }
+        }
         NSTimeInterval age = capturedAt > 0 ? NSDate.date.timeIntervalSince1970 - capturedAt : 0;
 
         self.claudeAccount = @{

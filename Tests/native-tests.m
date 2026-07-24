@@ -287,6 +287,35 @@ static void TestHistory(void) {
     [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
 }
 
+static void TestAccountsCache(void) {
+    Section(@"TMSaveAccountsCache / TMLoadAccountsCache — volumes persistés au redémarrage");
+    NSString *sandbox = [NSTemporaryDirectory() stringByAppendingPathComponent:@"status-tests-accounts"];
+    [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
+    setenv("STATUS_SUPPORT_DIR", sandbox.UTF8String, 1);
+
+    Check(TMLoadAccountsCache() == nil, @"aucun cache au départ : nil (démarrage vide, comme avant)");
+
+    NSDictionary *accounts = @{
+        @"claude": @{ @"windows": @[@{@"windowId": @"seven_day", @"usedPercent": @62.0, @"resetsAt": @4102444800}],
+                      @"capturedAt": @1784000000, @"authenticated": @YES },
+        @"openai": @{ @"windows": @[], @"connected": @NO }
+    };
+    TMSaveAccountsCache(accounts);
+    NSDictionary *loaded = TMLoadAccountsCache();
+    Check(loaded != nil, @"le cache se recharge après écriture");
+    CheckEqual(loaded[@"claude"][@"windows"][0][@"usedPercent"], @62, @"les volumes Claude survivent au round-trip");
+    CheckEqual(loaded[@"claude"][@"capturedAt"], @1784000000, @"l'horodatage de la dernière mesure est conservé");
+
+    // Robustesse : une entrée non sérialisable n'écrase pas un cache valide par un fichier corrompu.
+    TMSaveAccountsCache((NSDictionary *)@"pas un dictionnaire");
+    Check(TMLoadAccountsCache() != nil, @"une entrée invalide laisse le cache précédent intact");
+    TMSaveAccountsCache(@{});
+    // Un dictionnaire vide est ignoré (guard !count) : le dernier cache valide reste.
+    CheckEqual(TMLoadAccountsCache()[@"claude"][@"windows"][0][@"usedPercent"], @62, @"dictionnaire vide ignoré : cache valide préservé");
+
+    [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
+}
+
 // Interroge IOKit plutôt que notre propre état : c'est la seule façon de savoir si l'assertion
 // existe vraiment. Filtré sur notre pid — une autre app tenant la même assertion ne doit pas
 // rendre ce test faussement vert.
@@ -1098,6 +1127,7 @@ int main(void) {
         TestExpiredWindows();
         TestWindowClassification();
         TestHistory();
+        TestAccountsCache();
         TestOpenAIWindowIdentity();
         TestOpenAIHistoryCollision();
         TestAwake();

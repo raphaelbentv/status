@@ -46,6 +46,14 @@ NSString *TMSupportDirectory(void);
 NSString *TMHistoryPath(void);
 NSArray *TMLoadHistory(void);
 
+// Cache du dernier état de comptes connu (volumes courants), pour réafficher les volumes tout de
+// suite au lancement au lieu d'attendre le premier sondage. Écriture atomique. `accounts` est un
+// dictionnaire { "openai": <payload>, "claude": <payload> } ; seul le contenu sérialisable en JSON
+// est conservé. Le chargement renvoie nil si rien n'est en cache ou si le fichier est illisible.
+NSString *TMAccountsCachePath(void);
+void TMSaveAccountsCache(NSDictionary *accounts);
+NSDictionary *TMLoadAccountsCache(void);
+
 // Historique en CSV, format long : une ligne par (instant, fenêtre). Colonnes
 // timestamp_unix, date_iso_utc, fenetre, pourcent. Le format long tient sans peine des fenêtres
 // qui apparaissent et disparaissent (Fable, limites OpenAI), là où un format large laisserait des
