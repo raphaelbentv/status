@@ -261,6 +261,23 @@ NSDictionary *TMLoadAccountsCache(void) {
     return [cache isKindOfClass:NSDictionary.class] ? cache : nil;
 }
 
+NSString *TMMetricsHistoryPath(void) {
+    return [TMSupportDirectory() stringByAppendingPathComponent:@"metrics-history.json"];
+}
+
+void TMSaveMetricsHistory(NSArray *rows) {
+    if (![rows isKindOfClass:NSArray.class]) return;
+    if (![NSJSONSerialization isValidJSONObject:rows]) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:rows options:0 error:nil];
+    if (data) [data writeToFile:TMMetricsHistoryPath() atomically:YES];
+}
+
+NSArray *TMLoadMetricsHistory(void) {
+    NSData *data = [NSData dataWithContentsOfFile:TMMetricsHistoryPath()];
+    NSArray *rows = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [rows isKindOfClass:NSArray.class] ? rows : @[];
+}
+
 const NSTimeInterval TMForecastMinimumSpan = 900;
 
 BOOL TMStaleAlertShouldFire(BOOL *wasStale, BOOL isStale) {

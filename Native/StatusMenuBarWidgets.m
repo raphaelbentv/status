@@ -14,6 +14,18 @@ NSString *TMMenuBarWidgetLabel(NSString *widgetId) {
     return labels[widgetId] ?: widgetId;
 }
 
+NSArray<NSString *> *TMArrayByMovingItem(NSArray<NSString *> *list, NSString *item, NSInteger delta) {
+    if (!list.count || !item || !delta) return list ?: @[];
+    NSUInteger from = [list indexOfObject:item];
+    if (from == NSNotFound) return list;
+    NSInteger to = (NSInteger)from + delta;
+    if (to < 0 || to >= (NSInteger)list.count) return list;  // en butée : rien à faire
+    NSMutableArray *result = [list mutableCopy];
+    [result removeObjectAtIndex:from];
+    [result insertObject:item atIndex:(NSUInteger)to];
+    return result;
+}
+
 #pragma mark - Accès au snapshot
 
 // `now` d'une famille du snapshot, ou nil si la famille n'a pas répondu ce tick.

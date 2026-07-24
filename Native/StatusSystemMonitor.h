@@ -57,6 +57,22 @@ NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *cu
 // oscille autour du seuil mitraille de notifications.
 BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, double rearmBelow);
 
+// Seuil de réarmement déduit d'un seuil d'alerte réglable par l'utilisateur. L'hystérésis vaut 8 %
+// du seuil (soit ~7 points pour 90 °C, proche des marges d'origine) et au moins 2 unités, pour que
+// des seuils bas gardent une bande utile. Toujours < threshold, et jamais négatif.
+double TMAlertRearmThreshold(double threshold);
+
+// Famille d'un capteur thermique, d'après son nom matériel. Les noms Apple Silicon sont opaques
+// (« PMU tdie3 », « PMU tdev1 », « gas gauge battery ») : aucune étiquette « CPU » ou « GPU »
+// n'existe, on ne peut donc pas en inventer. On regroupe ce qui est identifiable de façon sûre :
+//   @"die"     — température de die du SoC (tdie…) : le point chaud qui gouverne le bridage ;
+//   @"device"  — périphériques / alimentation (tdev…) : plus froids, moins critiques ;
+//   @"battery" — cellule (« gas gauge battery ») : la famille battery l'expose déjà, on l'écarte
+//                pour ne pas polluer la moyenne du SoC ;
+//   nil        — non classé (calibration « tcal », capteurs inconnus) : ignoré des agrégats.
+// Insensible à la casse. Le nom Intel courant (TC0P/PECI) tombe aussi dans « die ».
+NSString * _Nullable TMSensorFamilyForName(NSString * _Nullable name);
+
 #pragma mark - Moniteur
 
 // Un collecteur échantillonne une famille de métriques : dictionnaire clé → NSNumber, ou nil si
@@ -77,6 +93,27 @@ typedef NSDictionary<NSString *, NSNumber *> * _Nullable (^TMMetricCollector)(vo
 
 // Le moniteur de production : tous les collecteurs réels branchés, dans l'ordre de la spec.
 TMSystemMonitor *TMSystemMonitorCreate(void);
+
+#pragma mark - Historique long (24 h)
+
+// Les anneaux du moniteur ne couvrent que quelques minutes et vivent en RAM. Cet historique-ci est
+// l'autre échelle : une ligne par minute, horodatée, conservée sur disque, pour répondre à « qu'est-ce
+// qui a chauffé cette nuit ? ». Chaque ligne : { @"t": epoch (s), puis les métriques présentes }.
+extern const NSTimeInterval TMLongHistoryMaxAge;   // 24 h
+extern const NSTimeInterval TMLongHistoryInterval; // 60 s entre deux lignes
+
+// Ajoute `row` à `rows` puis élague : lignes plus vieilles que `maxAge` par rapport à la plus
+// récente, et débordement au-delà de `maxRows` (garde-fou si l'horloge saute). Retourne un nouveau
+// tableau, trié du plus ancien au plus récent. `row` sans clé @"t" numérique est ignorée.
+// Une ligne dont l'horodatage précède la dernière conservée est rejetée : après un changement
+// d'heure ou une restauration, mieux vaut perdre un point que d'obtenir un historique non monotone
+// que les courbes afficheraient à l'envers.
+NSArray<NSDictionary *> *TMLongHistoryAppend(NSArray<NSDictionary *> * _Nullable rows,
+                                             NSDictionary *row, NSTimeInterval maxAge, NSUInteger maxRows);
+
+// Extrait d'un snapshot les quelques métriques qui méritent d'être suivies sur 24 h, horodatées à
+// `timestamp`. nil si le snapshot n'en contient aucune (rien à journaliser).
+NSDictionary * _Nullable TMLongHistoryRow(NSDictionary *snapshot, NSTimeInterval timestamp);
 
 // Relevé instantané des processus via libproc, au format attendu par TMTopProcesses.
 // nil si la liste des pids est illisible. Coûte quelques centaines d'appels noyau : à n'appeler

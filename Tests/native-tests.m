@@ -594,6 +594,28 @@ static void TestThresholdFire(void) {
     Check(TMThresholdShouldFire(&exact, 90, 90, 85), @"la valeur exacte du seuil compte comme franchie");
 }
 
+static void TestAlertRearm(void) {
+    Section(@"TMAlertRearmThreshold — hystérésis des seuils réglables");
+    // 8 % du seuil : 90 → 82,8, proche de la marge d'origine codée en dur (82).
+    Check(fabs(TMAlertRearmThreshold(90) - 82.8) < 0.01, @"seuil 90 → réarmement 82,8 (8 %)");
+    Check(fabs(TMAlertRearmThreshold(100) - 92) < 0.01, @"seuil 100 → réarmement 92");
+    // Plancher de 2 unités : sans lui, un seuil bas donnerait une bande d'hystérésis quasi nulle
+    // et l'alerte se remettrait à mitrailler au moindre frémissement.
+    Check(fabs(TMAlertRearmThreshold(10) - 8) < 0.01, @"seuil bas : marge plancher de 2 unités");
+    Check(fabs(TMAlertRearmThreshold(4) - 2) < 0.01, @"seuil 4 (pression mémoire) → 2");
+    Check(TMAlertRearmThreshold(90) < 90, @"le réarmement reste sous le seuil");
+    Check(TMAlertRearmThreshold(1) >= 0, @"seuil minuscule : réarmement jamais négatif");
+    Check(TMAlertRearmThreshold(0) == 0, @"seuil nul : dégénéré mais sans crash");
+    Check(TMAlertRearmThreshold(-5) == 0, @"seuil négatif : ramené à 0");
+    // Le couple seuil/réarmement doit rester exploitable par TMThresholdShouldFire.
+    BOOL above = NO;
+    double t = 75, r = TMAlertRearmThreshold(t);
+    Check(TMThresholdShouldFire(&above, 80, t, r), @"seuil réglé à 75 : franchissement détecté");
+    Check(!TMThresholdShouldFire(&above, 72, t, r), @"72 > réarmement (69) : reste armé");
+    TMThresholdShouldFire(&above, 60, t, r);
+    Check(!above, @"60 < réarmement : désarmé");
+}
+
 // Fumée sur les collecteurs réels — même esprit que TestAwake : on interroge la vraie machine,
 // pas un mock. On ne vérifie que le contrat (familles plausibles, JSON valide), pas les valeurs.
 static void TestSystemMonitorLive(void) {
@@ -672,7 +694,97 @@ static void TestSystemMonitorLive(void) {
                thermal.description.UTF8String,
                [sensorsNow[@"tempC"] ?: @"—" description].UTF8String,
                fans.count ? [[fans componentsJoinedByString:@"/"] UTF8String] : "aucun");
+
+        // Agrégats par famille : cohérence des relations max ≥ moyenne, et tempC = point chaud.
+        NSNumber *dieMax = sensorsNow[@"dieMaxC"], *dieAvg = sensorsNow[@"dieAvgC"];
+        if (dieMax) {
+            Check(dieMax.doubleValue >= dieAvg.doubleValue, @"capteurs : die max ≥ die moyenne");
+            Check([sensorsNow[@"tempC"] isEqualToNumber:dieMax], @"capteurs : tempC = point chaud du die");
+            Check([sensorsNow[@"dieCount"] integerValue] > 0, @"capteurs : au moins un die identifié");
+            printf("  dies : %s capteurs, max=%s moy=%s | périph. : max=%s moy=%s\n",
+                   [sensorsNow[@"dieCount"] description].UTF8String,
+                   dieMax.description.UTF8String, dieAvg.description.UTF8String,
+                   [sensorsNow[@"deviceMaxC"] ?: @"—" description].UTF8String,
+                   [sensorsNow[@"deviceAvgC"] ?: @"—" description].UTF8String);
+        }
+        NSNumber *devMax = sensorsNow[@"deviceMaxC"];
+        if (devMax) Check(devMax.doubleValue >= [sensorsNow[@"deviceAvgC"] doubleValue],
+                          @"capteurs : périphériques max ≥ moyenne");
     }
+}
+
+static NSDictionary *TMFakeSnapshot(void);  // défini avec les tests de widgets, plus bas
+
+static void TestLongHistory(void) {
+    Section(@"TMLongHistoryAppend — historique 24 h, une ligne par minute");
+    const NSTimeInterval day = 24 * 60 * 60;
+    NSArray *rows = TMLongHistoryAppend(nil, @{ @"t": @1000, @"cpu": @10 }, day, 2000);
+    Check(rows.count == 1, @"première ligne : historique créé depuis nil");
+    rows = TMLongHistoryAppend(rows, @{ @"t": @1060, @"cpu": @20 }, day, 2000);
+    Check(rows.count == 2 && [rows.lastObject[@"cpu"] isEqual:@20], @"ligne suivante ajoutée en fin");
+
+    // Élagage par âge : seules les lignes de plus de 24 h par rapport à la plus récente tombent.
+    // Ici t=1000 est à 86 401 s (dehors) mais t=1060 à 86 341 s (dedans) : la frontière se voit.
+    NSArray *aged = TMLongHistoryAppend(rows, @{ @"t": @(1000 + day + 1), @"cpu": @30 }, day, 2000);
+    Check(aged.count == 2, @"au-delà de 24 h : seule la ligne hors fenêtre tombe");
+    Check([aged.firstObject[@"t"] isEqual:@1060], @"la plus ancienne survivante est celle encore dans la fenêtre");
+    Check([aged.lastObject[@"t"] doubleValue] == 1000 + day + 1, @"la ligne récente est conservée");
+
+    // La fenêtre est relative à la ligne la plus récente, pas à l'heure courante : un historique
+    // entièrement ancien mais cohérent doit survivre.
+    NSArray *old = TMLongHistoryAppend(@[@{ @"t": @10 }], @{ @"t": @70 }, day, 2000);
+    Check(old.count == 2, @"historique ancien mais dans la fenêtre : conservé intégralement");
+
+    // Garde-fou de volume, indépendant de l'âge.
+    NSArray *capped = TMLongHistoryAppend(@[@{ @"t": @1 }, @{ @"t": @2 }, @{ @"t": @3 }], @{ @"t": @4 }, day, 2);
+    Check(capped.count == 2 && [capped.firstObject[@"t"] isEqual:@3], @"plafond de lignes : les plus anciennes tombent");
+
+    // Robustesse : sans horodatage exploitable, on ne corrompt pas l'historique existant.
+    NSArray *base = @[@{ @"t": @100 }];
+    Check(TMLongHistoryAppend(base, @{ @"cpu": @5 }, day, 2000).count == 1, @"ligne sans « t » : ignorée");
+    Check(TMLongHistoryAppend(base, @{ @"t": @"x" }, day, 2000).count == 1, @"« t » non numérique : ignorée");
+    // Horodatage qui recule (changement d'heure, restauration) : refusé plutôt que d'obtenir une
+    // série non monotone que les courbes dessineraient à l'envers.
+    Check(TMLongHistoryAppend(base, @{ @"t": @50 }, day, 2000).count == 1, @"horodatage antérieur : refusé");
+    Check(TMLongHistoryAppend(base, @{ @"t": @100 }, day, 2000).count == 2, @"horodatage identique : accepté");
+
+    Section(@"TMLongHistoryRow — extraction des métriques suivies");
+    NSDictionary *snapshot = TMFakeSnapshot();
+    NSDictionary *row = TMLongHistoryRow(snapshot, 1700000000.4);
+    Check([row[@"t"] doubleValue] == 1700000000, @"horodatage arrondi à la seconde");
+    Check([row[@"cpu"] isEqual:@43], @"CPU relevé depuis la famille cpu");
+    Check([row[@"ram"] isEqual:@68], @"RAM relevée depuis usedPercent");
+    Check([row[@"temp"] isEqual:@50], @"température relevée depuis sensors.tempC");
+    Check([row[@"batt"] isEqual:@100], @"batterie relevée depuis battery.percent");
+    Check(row[@"rx"] != nil && row[@"tx"] != nil, @"débits réseau relevés");
+    // Une famille absente ne doit pas fabriquer de zéro : la clé disparaît, comme partout ailleurs.
+    NSDictionary *partial = @{ @"families": @[ @{ @"id": @"cpu", @"now": @{ @"total": @7 }, @"series": @{} } ] };
+    NSDictionary *thin = TMLongHistoryRow(partial, 1000);
+    Check(thin[@"cpu"] != nil && thin[@"temp"] == nil, @"famille absente : clé omise, pas de zéro inventé");
+    Check(TMLongHistoryRow(@{ @"families": @[] }, 1000) == nil, @"aucune métrique : pas de ligne vide");
+}
+
+static void TestSensorFamily(void) {
+    Section(@"TMSensorFamilyForName — regroupement des capteurs thermiques");
+    // Noms réels relevés sur Apple Silicon (M-series) : ce sont ceux que la machine expose.
+    Check([TMSensorFamilyForName(@"PMU tdie3") isEqualToString:@"die"], @"« PMU tdie3 » → die");
+    Check([TMSensorFamilyForName(@"PMU tdie10") isEqualToString:@"die"], @"« PMU tdie10 » → die");
+    Check([TMSensorFamilyForName(@"PMU tdev1") isEqualToString:@"device"], @"« PMU tdev1 » → périphérique");
+    Check([TMSensorFamilyForName(@"gas gauge battery") isEqualToString:@"battery"], @"« gas gauge battery » → batterie");
+    // tcal est une référence de calibration qui lit ~10 °C au-dessus des dies : l'inclure
+    // fausserait le point chaud. Il doit être écarté malgré son préfixe « PMU t… ».
+    Check(TMSensorFamilyForName(@"PMU tcal") == nil, @"« PMU tcal » (calibration) → écarté");
+    // Noms Intel/génériques : le motif doit rester utile hors Apple Silicon.
+    Check([TMSensorFamilyForName(@"PECI CPU") isEqualToString:@"die"], @"« PECI CPU » (Intel) → die");
+    Check([TMSensorFamilyForName(@"SOC MTR Temp Sensor") isEqualToString:@"die"], @"nom contenant « SOC » → die");
+    // Insensibilité à la casse et cas dégénérés.
+    Check([TMSensorFamilyForName(@"PMU TDIE1") isEqualToString:@"die"], @"casse ignorée");
+    Check(TMSensorFamilyForName(nil) == nil, @"nom absent → non classé");
+    Check(TMSensorFamilyForName(@"") == nil, @"nom vide → non classé");
+    Check(TMSensorFamilyForName(@"NAND Q1") == nil, @"nom inconnu → non classé (pas de famille inventée)");
+    // La batterie prime : un capteur de batterie ne doit jamais compter comme un die, même si
+    // son nom contenait par ailleurs un motif « die ».
+    Check([TMSensorFamilyForName(@"battery tdie") isEqualToString:@"battery"], @"batterie prioritaire sur die");
 }
 
 #pragma mark - Widgets de la barre des menus
@@ -688,6 +800,29 @@ static NSDictionary *TMFakeSnapshot(void) {
         @{ @"id": @"sensors", @"now": @{ @"tempC": @50 }, @"series": @{} },
         @{ @"id": @"battery", @"now": @{ @"percent": @100, @"fullyCharged": @YES, @"charging": @NO, @"powerWatts": @-20 }, @"series": @{} },
     ] };
+}
+
+static void TestWidgetOrdering(void) {
+    Section(@"TMArrayByMovingItem — ordre des widgets dans la barre");
+    NSArray *list = @[@"cpu", @"memory", @"network"];
+    Check([TMArrayByMovingItem(list, @"memory", -1) isEqual:(@[@"memory", @"cpu", @"network"])],
+          @"déplacement vers la gauche");
+    Check([TMArrayByMovingItem(list, @"memory", 1) isEqual:(@[@"cpu", @"network", @"memory"])],
+          @"déplacement vers la droite");
+    // Butées : un bouton en bout de liste ne doit rien réordonner ni faire disparaître d'élément.
+    Check([TMArrayByMovingItem(list, @"cpu", -1) isEqual:list], @"premier vers la gauche : inchangé");
+    Check([TMArrayByMovingItem(list, @"network", 1) isEqual:list], @"dernier vers la droite : inchangé");
+    Check([TMArrayByMovingItem(list, @"gpu", 1) isEqual:list], @"élément absent : inchangé");
+    Check([TMArrayByMovingItem(list, @"cpu", 0) isEqual:list], @"delta nul : inchangé");
+    Check(TMArrayByMovingItem(@[], @"cpu", 1).count == 0, @"liste vide : pas de crash");
+    // Un déplacement de plusieurs rangs d'un coup reste borné aux extrémités.
+    Check([TMArrayByMovingItem(list, @"cpu", 2) isEqual:(@[@"memory", @"network", @"cpu"])],
+          @"déplacement de deux rangs");
+    Check([TMArrayByMovingItem(list, @"cpu", 5) isEqual:list], @"delta hors bornes : inchangé");
+    // Aucun élément perdu ni dupliqué, quel que soit le mouvement.
+    NSArray *moved = TMArrayByMovingItem(list, @"network", -2);
+    Check(moved.count == list.count && [[NSSet setWithArray:moved] isEqual:[NSSet setWithArray:list]],
+          @"le déplacement conserve exactement les mêmes éléments");
 }
 
 static void TestMenuBarWidgets(void) {
@@ -1250,11 +1385,15 @@ int main(void) {
         TestTopProcesses();
         TestTopProcessesEnergy();
         TestThresholdFire();
+        TestAlertRearm();
+        TestLongHistory();
+        TestSensorFamily();
         TestSystemMonitorLive();
         TestDisplayBrightnessClamp();
         TestDisplayVCPConversion();
         TestDisplayDDCProtocol();
         TestDisplayManagerLive();
+        TestWidgetOrdering();
         TestMenuBarWidgets();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",

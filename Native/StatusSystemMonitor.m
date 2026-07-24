@@ -146,6 +146,74 @@ BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, doubl
     return NO;
 }
 
+const NSTimeInterval TMLongHistoryMaxAge = 24 * 60 * 60;
+const NSTimeInterval TMLongHistoryInterval = 60;
+
+NSArray<NSDictionary *> *TMLongHistoryAppend(NSArray<NSDictionary *> *rows, NSDictionary *row,
+                                             NSTimeInterval maxAge, NSUInteger maxRows) {
+    NSNumber *stamp = [row[@"t"] isKindOfClass:NSNumber.class] ? row[@"t"] : nil;
+    if (!stamp) return rows ?: @[];
+    NSMutableArray *result = [(rows ?: @[]) mutableCopy];
+    // Rejette un point antérieur au dernier connu : l'historique doit rester monotone.
+    NSNumber *lastStamp = [result.lastObject[@"t"] isKindOfClass:NSNumber.class] ? result.lastObject[@"t"] : nil;
+    if (lastStamp && stamp.doubleValue < lastStamp.doubleValue) return rows ?: @[];
+    [result addObject:row];
+    // Élagage par âge, relatif à la ligne la plus récente (et non à « maintenant ») : l'appelant
+    // peut ainsi rejouer un historique importé sans qu'il s'auto-efface.
+    double newest = stamp.doubleValue;
+    NSUInteger firstKept = 0;
+    while (firstKept < result.count) {
+        NSNumber *t = result[firstKept][@"t"];
+        if ([t isKindOfClass:NSNumber.class] && newest - t.doubleValue <= maxAge) break;
+        firstKept++;
+    }
+    if (firstKept) [result removeObjectsInRange:NSMakeRange(0, firstKept)];
+    if (maxRows && result.count > maxRows) [result removeObjectsInRange:NSMakeRange(0, result.count - maxRows)];
+    return result;
+}
+
+// Les clés suivies sur 24 h : une par famille, celle qui résume le mieux l'état. Volontairement
+// peu nombreuses — l'historique doit rester léger sur disque et en mémoire.
+NSDictionary *TMLongHistoryRow(NSDictionary *snapshot, NSTimeInterval timestamp) {
+    NSMutableDictionary *byId = [NSMutableDictionary dictionary];
+    for (NSDictionary *family in snapshot[@"families"]) {
+        if ([family[@"id"] isKindOfClass:NSString.class]) byId[family[@"id"]] = family[@"now"];
+    }
+    NSDictionary *tracked = @{ @"cpu": @[@"cpu", @"total"], @"ram": @[@"ram", @"usedPercent"],
+                               @"gpu": @[@"gpu", @"usage"], @"temp": @[@"sensors", @"tempC"],
+                               @"disk": @[@"disk", @"usedPercent"], @"batt": @[@"battery", @"percent"],
+                               @"rx": @[@"network", @"rxBytesPerSec"], @"tx": @[@"network", @"txBytesPerSec"] };
+    NSMutableDictionary *row = [NSMutableDictionary dictionary];
+    for (NSString *key in tracked) {
+        NSArray *path = tracked[key];
+        NSNumber *value = byId[path[0]][path[1]];
+        if ([value isKindOfClass:NSNumber.class]) row[key] = value;
+    }
+    if (!row.count) return nil;  // rien à journaliser : pas de ligne vide horodatée
+    row[@"t"] = @(round(timestamp));
+    return row;
+}
+
+double TMAlertRearmThreshold(double threshold) {
+    if (threshold <= 0) return 0;
+    double margin = MAX(2.0, threshold * 0.08);
+    return MAX(0.0, threshold - margin);
+}
+
+NSString *TMSensorFamilyForName(NSString *name) {
+    if (!name.length) return nil;
+    NSString *lower = name.lowercaseString;
+    // La batterie d'abord : « gas gauge battery » ne doit jamais compter comme un capteur SoC.
+    if ([lower containsString:@"battery"] || [lower containsString:@"gas gauge"]) return @"battery";
+    // « tcal » est un capteur de calibration, pas une mesure de die : exclu explicitement avant
+    // le test « tdie », sinon il gonflerait le point chaud (il lit ~10 °C au-dessus).
+    if ([lower containsString:@"tcal"]) return nil;
+    if ([lower containsString:@"tdie"] || [lower containsString:@"peci"]
+        || [lower containsString:@"soc"] || [lower containsString:@"cpu"]) return @"die";
+    if ([lower containsString:@"tdev"]) return @"device";
+    return nil;
+}
+
 #pragma mark - Moniteur
 
 @implementation TMSystemMonitor {
@@ -537,6 +605,8 @@ extern CFArrayRef IOHIDEventSystemClientCopyServices(TMHIDClientRef client);
 extern TMHIDEventRef IOHIDServiceClientCopyEvent(TMHIDServiceRef service, int64_t type,
                                                  int32_t options, int64_t timestamp);
 extern double IOHIDEventGetFloatValue(TMHIDEventRef event, int32_t field);
+// Nom matériel du capteur (clé « Product »), pour le regroupement par famille.
+extern CFTypeRef _Nullable IOHIDServiceClientCopyProperty(TMHIDServiceRef service, CFStringRef key);
 static const int64_t TMHIDEventTypeTemperature = 15;
 static const int32_t TMHIDEventFieldTemperature = 15 << 16;
 
@@ -606,16 +676,19 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
         }
     }
 
-    // Température — moyenne des capteurs HID plausibles. PrimaryUsagePage 0xff00 (AppleVendor),
-    // PrimaryUsage 5 : les capteurs thermiques.
+    // Températures — capteurs HID regroupés par famille. PrimaryUsagePage 0xff00 (AppleVendor),
+    // PrimaryUsage 5 : les capteurs thermiques. Une moyenne de TOUT serait trompeuse : elle mêle la
+    // cellule de batterie (~31 °C) aux dies du SoC (~44 °C) et masque le point chaud, qui est
+    // précisément la valeur qui gouverne le bridage. On agrège donc par famille (voir
+    // TMSensorFamilyForName) et `tempC` devient le maximum des dies.
     TMHIDClientRef client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
     if (client) {
         NSDictionary *matching = @{ @"PrimaryUsagePage": @(0xff00), @"PrimaryUsage": @5 };
         IOHIDEventSystemClientSetMatching(client, (__bridge CFDictionaryRef)matching);
         CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
         if (services) {
-            double sum = 0;
-            NSUInteger sensorCount = 0;
+            double dieSum = 0, dieMax = 0, deviceSum = 0, deviceMax = 0, anySum = 0;
+            NSUInteger dieCount = 0, deviceCount = 0, anyCount = 0;
             for (CFIndex i = 0; i < CFArrayGetCount(services); i++) {
                 TMHIDServiceRef service = (TMHIDServiceRef)CFArrayGetValueAtIndex(services, i);
                 TMHIDEventRef event = IOHIDServiceClientCopyEvent(service, TMHIDEventTypeTemperature, 0, 0);
@@ -623,10 +696,35 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
                 double celsius = IOHIDEventGetFloatValue(event, TMHIDEventFieldTemperature);
                 CFRelease(event);
                 // Filtre de plausibilité : les capteurs fantômes rendent 0 ou des valeurs folles.
-                if (celsius > 10 && celsius < 120) { sum += celsius; sensorCount++; }
+                if (!(celsius > 10 && celsius < 120)) continue;
+                anySum += celsius; anyCount++;
+                CFTypeRef nameRef = IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
+                NSString *name = (nameRef && CFGetTypeID(nameRef) == CFStringGetTypeID())
+                               ? (__bridge NSString *)nameRef : nil;
+                NSString *familyName = TMSensorFamilyForName(name);
+                if (nameRef) CFRelease(nameRef);
+                if ([familyName isEqualToString:@"die"]) {
+                    dieSum += celsius; dieCount++; dieMax = MAX(dieMax, celsius);
+                } else if ([familyName isEqualToString:@"device"]) {
+                    deviceSum += celsius; deviceCount++; deviceMax = MAX(deviceMax, celsius);
+                }
             }
             CFRelease(services);
-            if (sensorCount) values[@"tempC"] = @(round(sum / sensorCount));
+            if (dieCount) {
+                values[@"dieMaxC"] = @(round(dieMax));
+                values[@"dieAvgC"] = @(round(dieSum / dieCount));
+                values[@"dieCount"] = @(dieCount);
+            }
+            if (deviceCount) {
+                values[@"deviceMaxC"] = @(round(deviceMax));
+                values[@"deviceAvgC"] = @(round(deviceSum / deviceCount));
+                values[@"deviceCount"] = @(deviceCount);
+            }
+            // Point chaud : le die si on a su l'identifier, sinon la moyenne de tout (machines dont
+            // les noms de capteurs ne correspondent à aucun motif connu — mieux vaut l'ancienne
+            // approximation que pas de température du tout).
+            if (dieCount) values[@"tempC"] = @(round(dieMax));
+            else if (anyCount) values[@"tempC"] = @(round(anySum / anyCount));
         }
         CFRelease(client);
     }

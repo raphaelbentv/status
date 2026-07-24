@@ -177,9 +177,17 @@ function renderTemperature(){
   const f=famGet('sensors');if(!f)return empty('Capteurs');const n=f.now;
   const T=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']][n.thermalState]||['normal',''];
   const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
-  return head('Capteurs',bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C'))
+  // Détail par famille. Les noms de capteurs Apple Silicon sont opaques (« PMU tdie3 ») : on ne
+  // peut pas honnêtement étiqueter « CPU » ou « GPU », d'où « SoC » / « périphériques ».
+  const det=[];
+  if(n.dieMaxC!=null)det.push(row(`SoC · ${n.dieCount} capteurs`,`${Math.round(n.dieMaxC)} °C max · ${Math.round(n.dieAvgC)} °C moy.`));
+  if(n.deviceMaxC!=null)det.push(row(`périphériques · ${n.deviceCount}`,`${Math.round(n.deviceMaxC)} °C max · ${Math.round(n.deviceAvgC)} °C moy.`));
+  const batt=famGet('battery')?.now;
+  if(batt?.temperatureC!=null)det.push(row('batterie',Math.round(batt.temperatureC)+' °C'));
+  return head('Capteurs',bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?'point chaud du SoC':''))
     +(on('chart')?chart([series(f,'tempC','var(--amber)')],{percent:false}):'')
-    +`<div class="rows">
+    +(on('detail')&&det.length?`<div class="rows">${det.join('')}</div>`:'')
+    +`<div class="rows"${det.length?' style="margin-top:8px"':''}>
       <div class="row"><span class="k">état thermique</span><span class="badge ${T[1]}">${T[0]}</span></div>
       ${on('fans')?(fans.length?fans.map((k,i)=>row(fans.length>1?`ventilateur ${i+1}`:'ventilateur',Math.round(n[k]).toLocaleString('fr-FR')+' tr/min')).join(''):row('ventilateurs','aucun (refroidissement passif)')):''}
     </div>`;

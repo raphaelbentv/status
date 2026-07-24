@@ -98,6 +98,9 @@
   .wc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .wc-toggle{border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 12px;min-width:96px;text-align:left;flex:none}
   .wc-shapes{flex:none}.wc-shapes .seg{font-size:9.5px;padding:5px 8px}
+  .wc-move{display:flex;gap:0;border:1px solid var(--hair-strong);flex:none}
+  .wc-move .seg{padding:5px 8px;font-size:11px;line-height:1}
+  .wc-move .seg[disabled]{opacity:.28;cursor:default}
   .wc-colors{display:flex;gap:4px;margin-left:auto;flex:none}
   .wc-swatch{width:15px;height:15px;border-radius:50%;border:1px solid var(--hair-strong);cursor:pointer;padding:0}
   .wc-swatch.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--blue)}
@@ -183,6 +186,15 @@
   .metric-table th{color:var(--muted);font-weight:400;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
   .metric-table th:first-child,.metric-table td:first-child{text-align:left}
   .metric-table td:first-child{color:var(--muted)}
+  /* Vue 24 h : une bande par métrique, empilées pour comparer les moments d'un coup d'œil. */
+  .day-grid{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+  .day-card{border:1px solid var(--hair);background:var(--panel-bg);padding:10px 12px}
+  .day-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
+  .day-head strong{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text)}
+  .day-stats{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .day-stats b{color:var(--text);font-weight:700}
+  .day-chart{display:block;width:100%;height:56px}
+  .day-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums}
   .view-toggle{margin-left:auto;display:flex;gap:0;border:1px solid var(--hair-strong)}
   .view-toggle button{border:0;background:transparent;color:var(--muted);padding:5px 10px;cursor:pointer;font:inherit;font-size:9.5px}
   .view-toggle button.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
@@ -304,12 +316,34 @@ const PANEL_SECTIONS={
   memory:[['breakdown','répartition'],['stats','totaux'],['processes','processus']],
   gpu:[['stages','étages']],
   network:[['interfaces','interfaces'],['session','session']],
-  temperature:[['chart','historique'],['fans','ventilateurs']],
+  temperature:[['chart','historique'],['detail','par famille'],['fans','ventilateurs']],
   battery:[['chart','historique'],['stats','indicateurs'],['details','détails']],
   disk:[['chart','débits'],['volumes','volumes']]};
+// Alertes système réglables. La pression mémoire suit l'échelle noyau (2 = avertissement,
+// 4 = critique), pas un pourcentage : ses « seuils » sont donc deux niveaux nommés.
+const ALERTS=[
+  ['temp','Température',[75,85,90,95,100],v=>v+' °C'],
+  ['disk','Disque plein',[80,85,90,95],v=>v+' %'],
+  ['memory','Pression mémoire',[2,4],v=>v===4?'critique':'avertissement'],
+];
+function alertRows(p){
+  const cfg=p.alerts||{};
+  return ALERTS.map(([key,label,choices,fmt])=>{
+    const one=cfg[key]||{},on=one.on!==false,cur=one.threshold;
+    const toggle=`<button class="seg wc-toggle ${on?'on':''}" onclick="send('setAlert',{key:'${key}',on:${!on}})">${label}</button>`;
+    if(!on)return `<div class="wc-row">${toggle}</div>`;
+    const sel=`<span class="segmented wc-shapes">${choices.map(v=>`<button class="seg ${cur===v?'on':''}" onclick="send('setAlert',{key:'${key}',threshold:${v}})">${fmt(v)}</button>`).join('')}</span>`;
+    return `<div class="wc-row">${toggle}${sel}</div>`;
+  }).join('');
+}
 function widgetConfigRows(p){
-  const enabled=p.menuBarWidgets||[],config=p.menuBarWidgetConfig||{},panels=p.widgetPanelConfig||{};
-  return WIDGETS.map(([id,label])=>{
+  const enabled=(p.menuBarWidgets||[]).filter(id=>WIDGETS.some(([w])=>w===id));
+  const config=p.menuBarWidgetConfig||{},panels=p.widgetPanelConfig||{};
+  // Les widgets activés d'abord, dans leur ordre d'affichage (celui de la barre des menus, de
+  // gauche à droite) ; les inactifs ensuite, dans l'ordre du catalogue.
+  const ordered=[...enabled.map(id=>WIDGETS.find(([w])=>w===id)),
+                 ...WIDGETS.filter(([w])=>!enabled.includes(w))];
+  return ordered.map(([id,label],index)=>{
     const on=enabled.includes(id),cfg=config[id]||{},shapes=WIDGET_SHAPES[id]||['text'];
     const shape=cfg.shape&&shapes.includes(cfg.shape)?cfg.shape:shapes[0],color=cfg.color||'auto';
     const toggle=`<button class="seg wc-toggle ${on?'on':''}" onclick="send('setMenuBarWidget',{id:'${id}',on:${!on}})">${label}</button>`;
@@ -318,7 +352,9 @@ function widgetConfigRows(p){
     const colorSel=`<span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${color===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',color:'${c}'})"></button>`).join('')}</span>`;
     const secs=PANEL_SECTIONS[id]||[],pcfg=panels[id]||{};
     const secSel=secs.length?`<div class="wc-sub"><span class="wc-sublabel">Panneau</span><span class="segmented">${secs.map(([key,lab])=>{const sOn=pcfg[key]!==false;return `<button class="seg ${sOn?'on':''}" onclick="send('setWidgetPanelSection',{id:'${id}',section:'${key}',on:${!sOn}})">${lab}</button>`}).join('')}</span></div>`:'';
-    return `<div class="wc-row">${toggle}${shapeSel}${colorSel}</div>${secSel}`;
+    // Déplacement dans la barre des menus : ← vers la gauche, → vers la droite. Désactivés en butée.
+    const move=`<span class="wc-move"><button class="seg" ${index===0?'disabled':''} title="Vers la gauche" onclick="send('moveMenuBarWidget',{id:'${id}',delta:-1})">←</button><button class="seg" ${index===enabled.length-1?'disabled':''} title="Vers la droite" onclick="send('moveMenuBarWidget',{id:'${id}',delta:1})">→</button></span>`;
+    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}`;
   }).join('');
 }
 let appData=null,currentView='overview';
@@ -435,7 +471,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Style de l\'icône</strong><small>Anneau (niveau instantané) ou courbe (tendance récente de la fenêtre épinglée).</small></div><div class="segmented">${['ring','spark'].map(v=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${v==='ring'?'Anneau':'Courbe'}</button>`).join('')}</div></div>
-  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Widgets système dans la barre des menus</strong><small>Des icônes système à côté de la jauge quota, chacune indépendante — activez-les, choisissez leur forme, leur couleur, et les infos affichées dans leur panneau (ligne « Panneau »). Réordonnez-les en les ⌘-glissant dans la barre ; cliquez une icône pour son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Widgets système dans la barre des menus</strong><small>Des icônes système à côté de la jauge quota, chacune indépendante — activez-les, choisissez leur forme, leur couleur, et les infos affichées dans leur panneau (ligne « Panneau »). Les flèches ← → règlent leur ordre dans la barre (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône pour son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></div>
   ${p.windowManager?`
   <div class="setting"><div class="setting-copy"><strong>Marge entre fenêtres</strong><small>Espace laissé entre deux fenêtres voisines. À 0 elles se touchent.</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapBetween||0)===v?'on':''}" onclick="send('setWindowGap',{which:'between',value:${v}})">${v}</button>`).join('')}</div></div>
@@ -450,6 +486,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Coût équivalent API</strong><small>Calculé sur les logs de session terminal (Claude Code, Codex). L\'usage web n\'est pas journalisé et n\'est pas inclus. Tarifs relevés le ${data.costs?.asOf||'—'} ; Codex approximatif. Taux de change USD→EUR indicatif (BCE), relevé du ${data.costs?.fxAsOf||'—'}, rafraîchi automatiquement.</small></div><span class="setting-state">${data.costs?.scanning?'calcul en cours':'actif'}</span></div>
   <div class="setting"><div class="setting-copy"><strong>Exporter l\'historique</strong><small>Toute la consommation enregistrée, au format CSV (une ligne par instant et par fenêtre) — pour l\'analyser ailleurs.</small></div><button class="button" onclick="send('exportHistoryCSV')">Exporter…</button></div>
   <div class="setting"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Une notification à 80 % puis à 95 % de chaque fenêtre.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Alertes système</strong><small>Notification quand la machine sort de son régime normal. Chaque alerte s’active et se règle séparément ; elle ne se répète pas tant que la valeur n’est pas redescendue nettement sous le seuil.</small></div><div class="widget-config">${alertRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>
 </div>`}
 function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
@@ -602,9 +639,15 @@ function sensorsCard(){
   const badge=n.thermalState>0?`<span class="metric-badge ${tclass}">thermique ${tlabel}</span> `:'';
   const temp=n.tempC!=null?`<span class="metric-value">${Math.round(n.tempC)}<span class="unit">°C</span></span>`:'<span class="metric-value" style="font-size:14px">—</span>';
   const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
-  const fanLine=fans.length?`<div class="detail-rows" style="margin-top:8px"><div class="detail-row"><span class="detail-label">ventilateurs</span><span>${fans.map(k=>Math.round(n[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')}</span></div></div>`:'';
+  // Détail par famille de capteurs. Les noms matériels Apple Silicon sont opaques (« PMU tdie3 ») :
+  // impossible d'étiqueter honnêtement « CPU » ou « GPU », d'où « SoC » / « périphériques ».
+  const rows=[];
+  if(n.dieMaxC!=null)rows.push([`SoC · ${n.dieCount} capteurs`,`${Math.round(n.dieMaxC)} °C max · ${Math.round(n.dieAvgC)} °C moy.`]);
+  if(n.deviceMaxC!=null)rows.push([`périphériques · ${n.deviceCount}`,`${Math.round(n.deviceMaxC)} °C max · ${Math.round(n.deviceAvgC)} °C moy.`]);
+  if(fans.length)rows.push(['ventilateurs',fans.map(k=>Math.round(n[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')]);
+  const detailLines=rows.length?`<div class="detail-rows" style="margin-top:8px">${rows.map(([l,v])=>`<div class="detail-row"><span class="detail-label">${l}</span><span>${v}</span></div>`).join('')}</div>`:'';
   const chart=n.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):'';
-  return metricCard('sensors','Capteurs',`<span>${badge}${temp}</span>`,chart+fanLine);
+  return metricCard('sensors','Capteurs',`<span>${badge}${temp}</span>`,chart+detailLines);
 }
 function systemCard(){
   const system=famGet('system');if(!system)return '';
@@ -641,9 +684,12 @@ function monitorView(){
   // La batterie a sa propre carte : Capteurs porte la température, l'état thermique et les ventilateurs.
   const sensorsHTML=sensorsCard();if(sensorsHTML)cards.push(sensorsHTML);
   const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
-  const toggle=`<div class="view-toggle"><button class="${monitorMode==='charts'?'on':''}" onclick="setMonitorMode('charts')">graphiques</button><button class="${monitorMode==='table'?'on':''}" onclick="setMonitorMode('table')">tableau</button></div>`;
-  const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min</span>${toggle}</div>`;
+  const modes=[['charts','graphiques'],['table','tableau'],['day','24 h']];
+  const toggle=`<div class="view-toggle">${modes.map(([m,l])=>`<button class="${monitorMode===m?'on':''}" onclick="setMonitorMode('${m}')">${l}</button>`).join('')}</div>`;
+  const meta=monitorMode==='day'?'1 point/min · 24 h glissantes':`1 échantillon/${interval} s · fenêtre ${windowMin} min`;
+  const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">${meta}</span>${toggle}</div>`;
   if(monitorMode==='table')return head+monitorTable();
+  if(monitorMode==='day')return head+monitorDay();
   return head+`<div class="metric-grid">${cards.join('')}${systemCard()}${processesCard()}</div>`;
 }
 // Les courbes sont muettes au clavier et au lecteur d'écran. Ce tableau dit la même chose en
@@ -675,6 +721,47 @@ function monitorTable(){
   }
   if(!rows.length)return '<div class="metric-empty">Mesure en cours…</div>';
   return `<table class="metric-table"><thead><tr><th>Métrique</th><th>Actuel</th><th>Min</th><th>Max</th><th>Moyenne</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+// Vue 24 h : alimentée par l'historique long (une ligne par minute, persisté), pas par les anneaux
+// en mémoire. Les points sont horodatés, donc une coupure d'app laisse un trou réel dans la courbe
+// plutôt qu'un raccord silencieux — on trace en fonction du temps, pas de l'index.
+const DAY_METRICS=[
+  ['cpu','CPU','%',v=>Math.round(v)+' %'],
+  ['temp','Température','°C',v=>Math.round(v)+' °C'],
+  ['ram','Mémoire','%',v=>Math.round(v)+' %'],
+  ['gpu','GPU','%',v=>Math.round(v)+' %'],
+  ['batt','Batterie','%',v=>Math.round(v)+' %'],
+];
+function monitorDay(){
+  const log=(appData?.metricsLog||[]).filter(r=>r&&typeof r.t==='number');
+  if(log.length<2)return `<div class="metric-empty">L’historique 24 h se constitue — un point par minute. Revenez dans quelques minutes.</div>`;
+  const t0=log[0].t,t1=log[log.length-1].t,span=Math.max(1,t1-t0);
+  const spanH=span/3600;
+  const cards=DAY_METRICS.map(([key,label,unit,fmt])=>{
+    const pts=log.filter(r=>typeof r[key]==='number');
+    if(pts.length<2)return '';
+    const vals=pts.map(r=>r[key]);
+    const min=Math.min(...vals),max=Math.max(...vals),avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+    // Échelle Y : 0-100 pour les pourcentages, ajustée aux valeurs pour les températures.
+    const lo=unit==='%'?0:Math.floor(min-2),hi=unit==='%'?100:Math.ceil(max+2);
+    const W=560,H=90;
+    // Un écart de plus de 3 min entre deux points = trou (app fermée, veille) : on coupe le tracé.
+    let d='',open=false;
+    pts.forEach((r,i)=>{
+      const gap=i>0&&(r.t-pts[i-1].t)>180;
+      const x=((r.t-t0)/span*W).toFixed(1),y=(H-(r[key]-lo)/Math.max(1,hi-lo)*H).toFixed(1);
+      if(!open||gap){d+=`M${x},${y}`;open=true}else d+=`L${x},${y}`;
+    });
+    const peak=pts.reduce((a,b)=>b[key]>a[key]?b:a);
+    const peakAt=new Date(peak.t*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    return `<div class="day-card">
+      <div class="day-head"><strong>${label}</strong><span class="day-stats">max <b>${fmt(max)}</b> à ${peakAt} · moy. ${fmt(avg)} · min ${fmt(min)}</span></div>
+      <svg class="day-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--chart-a)" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg>
+    </div>`;
+  }).filter(Boolean);
+  if(!cards.length)return '<div class="metric-empty">Historique 24 h vide.</div>';
+  const axis=`<div class="day-axis"><span>${new Date(t0*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span><span>${spanH<1?Math.round(span/60)+' min':Math.round(spanH)+' h d’historique'}</span><span>${new Date(t1*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span></div>`;
+  return `<div class="day-grid">${cards.join('')}</div>${axis}`;
 }
 function setMonitorMode(mode){monitorMode=mode;renderMonitor()}
 function renderMonitor(){if(currentView!=='monitor')return;const section=document.querySelector('#monitor');if(section)section.innerHTML=monitorView()}

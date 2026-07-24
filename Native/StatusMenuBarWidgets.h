@@ -21,6 +21,11 @@ NSString *TMMenuBarWidgetLabel(NSString *widgetId);
 
 #pragma mark - Logique pure (testable)
 
+// Déplace `item` de `delta` rangs dans `list` (−1 = vers la gauche, +1 = vers la droite).
+// Retourne une nouvelle liste. Inchangée si l'élément est absent, si `delta` est nul, ou si le
+// déplacement sortirait des bornes — un bouton en butée ne doit rien casser.
+NSArray<NSString *> *TMArrayByMovingItem(NSArray<NSString *> *list, NSString *item, NSInteger delta);
+
 // Lecture d'un widget depuis un snapshot moniteur ({ families: [ { id, now, series } ] }).
 // Retourne un dictionnaire sérialisable :
 //   style     : « bars » | « pie » | « battery » | « twoLine »

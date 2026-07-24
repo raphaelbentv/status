@@ -54,6 +54,13 @@ NSString *TMAccountsCachePath(void);
 void TMSaveAccountsCache(NSDictionary *accounts);
 NSDictionary *TMLoadAccountsCache(void);
 
+// Historique système long (24 h, une ligne par minute) — voir TMLongHistoryAppend. Persisté à part
+// de l'historique quota : cadence, durée de vie et contenu n'ont rien à voir. Écriture atomique ;
+// un fichier illisible se solde par un historique vide, jamais par un échec de lancement.
+NSString *TMMetricsHistoryPath(void);
+void TMSaveMetricsHistory(NSArray *rows);
+NSArray *TMLoadMetricsHistory(void);
+
 // Historique en CSV, format long : une ligne par (instant, fenêtre). Colonnes
 // timestamp_unix, date_iso_utc, fenetre, pourcent. Le format long tient sans peine des fenêtres
 // qui apparaissent et disparaissent (Fable, limites OpenAI), là où un format large laisserait des
