@@ -556,6 +556,8 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
     NSNumber *fullCap = num(props[@"AppleRawMaxCapacity"]) ?: num(props[@"NominalChargeCapacity"]) ?: num(batteryData[@"NominalChargeCapacity"]);
     if (designCap.doubleValue > 1000 && fullCap.doubleValue > 1000) {
         values[@"healthPercent"] = @(round(MIN(100.0, 100.0 * fullCap.doubleValue / designCap.doubleValue)));
+        values[@"designCapacity"] = @(designCap.integerValue);   // mAh de conception
+        values[@"fullCapacity"] = @(fullCap.integerValue);       // mAh à pleine charge aujourd'hui
     }
 
     // Condition : « Normal » vs besoin de révision. PermanentFailureStatus non nul = défaut.

@@ -126,6 +126,12 @@
     text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
   .proc-head span:not(:first-child){text-align:right}
   .proc-head .sorted{color:var(--blue);font-weight:700}
+  /* Rangée de tuiles-stats : les chiffres clés lisibles d'un coup d'œil, sans déplier. */
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(66px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);margin:11px 0 4px}
+  .stat-cell{background:var(--soft);padding:8px 10px}
+  .stat-cell b{display:block;font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.15}
+  .stat-cell span{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .stat-cell.warn b{color:var(--amber)}
   .metric-badge{font-size:10px;padding:2px 7px;border:1px solid var(--hair);color:var(--muted)}
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
@@ -474,15 +480,14 @@ function detailGPU(gpu){
 }
 const fmtMinutes=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${String(mm).padStart(2,'0')}`:`${mm} min`};
 const fmtDecimal=v=>String(v).replace('.',',');
+// Le dépliage complète la rangée de stats (santé/cycles/watts/autonomie déjà en tête) : santé
+// détaillée en mAh, condition, chargeur, température, tension.
 function detailBattery(battery){
   const n=battery.now;
   const row=(label,value)=>`<div class="detail-row"><span class="detail-label">${label}</span><span>${value}</span></div>`;
   const rows=[];
-  if(n.healthPercent!=null)rows.push(row('santé (capacité max / conception)',Math.round(n.healthPercent)+' %'));
-  if(n.cycleCount!=null)rows.push(row('cycles de charge',n.cycleCount));
   rows.push(row('condition',n.conditionOK?'normale':'à faire réviser'));
-  if(n.minutesRemaining!=null)rows.push(row(n.charging?'avant charge pleine':'autonomie restante',fmtMinutes(n.minutesRemaining)));
-  if(n.powerWatts!=null)rows.push(row(n.powerWatts<0?'décharge':'charge',fmtDecimal(Math.abs(n.powerWatts))+' W'));
+  if(n.designCapacity!=null&&n.fullCapacity!=null)rows.push(row('capacité (pleine / conception)',`${n.fullCapacity} / ${n.designCapacity} mAh`));
   if(n.adapterWatts!=null)rows.push(row('chargeur',n.adapterWatts+' W'));
   if(n.temperatureC!=null)rows.push(row('température',Math.round(n.temperatureC)+' °C'));
   if(n.voltageV!=null)rows.push(row('tension',fmtDecimal(n.voltageV)+' V'));
@@ -515,10 +520,18 @@ function batteryCard(){
   const battery=famGet('battery');if(!battery)return '';
   const n=battery.now;
   const state=n.charging?'en charge':n.externalConnected?(n.fullyCharged?'branché · plein':'branché'):'sur batterie';
-  const power=n.powerWatts!=null&&n.powerWatts!==0?` · ${fmtDecimal(Math.abs(n.powerWatts))} W`:'';
+  // Rangée de stats toujours visible : les chiffres réclamés d'un coup d'œil, sans déplier.
+  const cell=(value,label,warn)=>`<div class="stat-cell${warn?' warn':''}"><b>${value}</b><span>${label}</span></div>`;
+  const stats=[];
+  if(n.healthPercent!=null)stats.push(cell(Math.round(n.healthPercent)+' %','santé',n.healthPercent<80));
+  if(n.cycleCount!=null)stats.push(cell(n.cycleCount,'cycles'));
+  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${fmtDecimal(Math.abs(n.powerWatts))} W`,n.powerWatts<0?'décharge':'charge'));
+  if(n.minutesRemaining!=null)stats.push(cell(fmtMinutes(n.minutesRemaining),n.charging?'avant plein':'autonomie'));
+  if(!n.conditionOK)stats.push(cell('à réviser','condition',true));
+  const statRow=stats.length?`<div class="stat-row">${stats.join('')}</div>`:'';
   return metricCard('battery','Batterie',
-    `<span><span class="unit">${state}${power}</span> <span class="metric-value">${n.percent==null?'—':Math.round(n.percent)+'<span class="unit">%</span>'}</span></span>`,
-    metricChart('battery',[{key:'percent',color:'var(--chart-a)',label:'charge'}],{percent:true}));
+    `<span><span class="unit">${state}</span> <span class="metric-value">${n.percent==null?'—':Math.round(n.percent)+'<span class="unit">%</span>'}</span></span>`,
+    statRow+metricChart('battery',[{key:'percent',color:'var(--chart-a)',label:'charge'}],{percent:true}));
 }
 function systemCard(){
   const system=famGet('system');if(!system)return '';
