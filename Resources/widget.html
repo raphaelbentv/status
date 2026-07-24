@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="themes.css">
+<style>
+  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:12px/1.4 var(--font)}
+  .panel{padding:12px 14px;min-width:250px}
+  .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--hair-strong);padding-bottom:8px;margin-bottom:10px}
+  .head h1{margin:0;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--blue);font-weight:700}
+  .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1}
+  .big .u{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
+  .badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--hair-strong);border-radius:var(--radius);padding:2px 7px;color:var(--muted)}
+  .badge.warn{color:var(--amber);border-color:var(--amber)}.badge.crit{color:var(--danger);border-color:var(--danger)}
+  svg.chart{display:block;width:100%;height:44px;margin:8px 0}
+  .chart .area{opacity:.14}.chart .line{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
+  .rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11.5px}
+  .row .k{color:var(--muted)}.row .v{font-variant-numeric:tabular-nums}
+  .cores{display:flex;gap:14px;margin:8px 0 2px}
+  .cores .grp .lbl{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
+  .bars{display:flex;gap:2px;height:26px;align-items:flex-end}.bars i{width:7px;background:var(--chart-a);min-height:1px}
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(62px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);margin:6px 0}
+  .stat{background:var(--soft);padding:7px 9px}.stat b{display:block;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}.stat span{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .stat.warn b{color:var(--amber)}
+  .empty{color:var(--muted);padding:14px 0;text-align:center}
+  .track{height:12px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin:3px 0 8px;overflow:hidden}.track i{display:block;height:100%;background:var(--chart-a)}
+</style>
+</head>
+<body>
+<div class="panel" id="panel"><div class="empty">…</div></div>
+<script>
+let widgetId=null,metrics=null;
+const famGet=id=>metrics?.families?.find(f=>f.id===id);
+const num=v=>typeof v==='number'?v:null;
+const pct=v=>v==null?'—':Math.round(v)+' %';
+const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const u=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<3){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+u[i]};
+const fmtSize=v=>{if(v==null||isNaN(v))return '—';const u=['o','Ko','Mo','Go'];let i=0;while(v>=1024&&i<3){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+u[i]};
+const fmtMin=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${String(mm).padStart(2,'0')}`:`${mm} min`};
+const dec=v=>String(v).replace('.',',');
+// Mini-courbe SVG, une ou deux séries, échelle % fixe (percent) ou auto (débits).
+function chart(series,{percent=true,colors=['var(--chart-a)']}={}){
+  const drawn=series.filter(s=>s.values&&s.values.length>1);
+  if(!drawn.length)return '';
+  const w=250,h=44,len=Math.max(...drawn.map(s=>s.values.length));
+  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values));
+  const paths=drawn.map((s,i)=>{const off=len-s.values.length;
+    const d=s.values.map((v,j)=>`${j?'L':'M'}${((off+j)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
+    const c=s.color||colors[i]||'var(--chart-a)';
+    return `<path class="area" fill="${c}" d="${d} L${w},${h} L${(off/(len-1)*w).toFixed(1)},${h} Z"/><path class="line" stroke="${c}" d="${d}"/>`}).join('');
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${paths}</svg>`;
+}
+const head=(title,rightHTML)=>`<div class="head"><h1>${title}</h1>${rightHTML||''}</div>`;
+const series=(fam,key)=>({values:(fam?.series?.[key])||[]});
+
+function renderCPU(){
+  const f=famGet('cpu');if(!f)return empty('CPU');
+  const cores=Object.keys(f.now).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
+  const types=f.now.coreTypes;
+  const bar=i=>`<i style="height:${Math.max(4,f.now['core'+i]??0)}%"></i>`;
+  let coresHTML='';
+  if(types){const P=[],E=[];for(let i=0;i<types.length;i++)(types[i]==='E'?E:P).push(i);
+    const grp=(l,idx)=>idx.length?`<div class="grp"><div class="lbl">${l} · ${idx.length}</div><div class="bars">${idx.map(bar).join('')}</div></div>`:'';
+    coresHTML=`<div class="cores">${grp('Performance',P)}${grp('Efficience',E)}</div>`;
+  }else coresHTML=`<div class="bars" style="margin:8px 0">${cores.map(c=>bar(+c.slice(4))).join('')}</div>`;
+  return head('CPU',`<span class="big">${pct(f.now.total).replace(' %','')}<span class="u">%</span></span>`)
+    +chart([series(f,'total')])+coresHTML;
+}
+function renderMemory(){
+  const f=famGet('ram');if(!f)return empty('Mémoire');
+  const P={1:['normale',''],2:['élevée','warn'],4:['critique','crit']}[f.now.pressureLevel]||['',''];
+  return head('Mémoire',`<span class="big">${pct(f.now.usedPercent).replace(' %','')}<span class="u">%</span></span>`)
+    +(P[0]?`<div class="row"><span class="k">pression mémoire</span><span class="badge ${P[1]}">${P[0]}</span></div>`:'')
+    +chart([series(f,'usedPercent')]);
+}
+function renderGPU(){
+  const f=famGet('gpu');if(!f)return empty('GPU');
+  return head('GPU',`<span class="big">${pct(f.now.usage).replace(' %','')}<span class="u">%</span></span>`)
+    +chart([series(f,'usage')])
+    +`<div class="rows">
+      ${f.now.renderer!=null?`<div class="row"><span class="k">rendu</span><span class="v">${pct(f.now.renderer)}</span></div>`:''}
+      ${f.now.tiler!=null?`<div class="row"><span class="k">tuilage</span><span class="v">${pct(f.now.tiler)}</span></div>`:''}
+      ${f.now.memInUse!=null?`<div class="row"><span class="k">mémoire GPU</span><span class="v">${fmtSize(f.now.memInUse)}</span></div>`:''}
+    </div>`;
+}
+function renderNetwork(){
+  const f=famGet('network');if(!f)return empty('Réseau');
+  const ifaces=[...new Set(Object.keys(f.now).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
+  return head('Réseau',`<span class="big" style="font-size:15px">↓ ${fmtBytes(f.now.rxBytesPerSec)}<br>↑ ${fmtBytes(f.now.txBytesPerSec)}</span>`)
+    +chart([{...series(f,'rxBytesPerSec'),color:'var(--chart-a)'},{...series(f,'txBytesPerSec'),color:'var(--chart-b)'}],{percent:false})
+    +`<div class="rows">${ifaces.map(n=>`<div class="row"><span class="k">${n}</span><span class="v">↓ ${fmtBytes(f.now['rx:'+n])} · ↑ ${fmtBytes(f.now['tx:'+n])}</span></div>`).join('')||'<div class="row"><span class="k">aucune interface active</span></div>'}</div>`;
+}
+function renderTemperature(){
+  const f=famGet('sensors');if(!f)return empty('Capteurs');
+  const T=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']][f.now.thermalState]||['',''];
+  const fans=Object.keys(f.now).filter(k=>k.startsWith('fan')).sort();
+  return head('Capteurs',`<span class="big">${f.now.tempC==null?'—':Math.round(f.now.tempC)}<span class="u">°C</span></span>`)
+    +(f.now.thermalState>0?`<div class="row"><span class="k">état thermique</span><span class="badge ${T[1]}">${T[0]}</span></div>`:`<div class="row"><span class="k">état thermique</span><span class="v">normal</span></div>`)
+    +(fans.length?`<div class="row"><span class="k">ventilateurs</span><span class="v">${fans.map(k=>Math.round(f.now[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')}</span></div>`:'');
+}
+function renderBattery(){
+  const f=famGet('battery');if(!f)return empty('Batterie');
+  const n=f.now;
+  const state=n.charging?'en charge':n.externalConnected?(n.fullyCharged?'branché · plein':'branché'):'sur batterie';
+  const cell=(v,l,warn)=>`<div class="stat${warn?' warn':''}"><b>${v}</b><span>${l}</span></div>`;
+  const stats=[];
+  if(n.healthPercent!=null)stats.push(cell(Math.round(n.healthPercent)+' %','santé',n.healthPercent<80));
+  if(n.cycleCount!=null)stats.push(cell(n.cycleCount,'cycles'));
+  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${dec(Math.abs(n.powerWatts))} W`,n.powerWatts<0?'décharge':'charge'));
+  if(n.minutesRemaining!=null)stats.push(cell(fmtMin(n.minutesRemaining),n.charging?'avant plein':'autonomie'));
+  return head('Batterie',`<span class="big">${n.percent==null?'—':Math.round(n.percent)}<span class="u">%</span></span>`)
+    +`<div class="row"><span class="k">état</span><span class="v">${state}</span></div>`
+    +`<div class="track"><i style="width:${n.percent??0}%"></i></div>`
+    +(stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
+    +`<div class="rows">${n.temperatureC!=null?`<div class="row"><span class="k">température</span><span class="v">${Math.round(n.temperatureC)} °C</span></div>`:''}${n.adapterWatts!=null?`<div class="row"><span class="k">chargeur</span><span class="v">${n.adapterWatts} W</span></div>`:''}</div>`;
+}
+function renderDisk(){
+  const f=famGet('disk');if(!f)return empty('Disque');
+  const vols=Object.keys(f.now).filter(k=>k.startsWith('vol:')).sort();
+  return head('Disque',`<span class="big">${pct(f.now.usedPercent).replace(' %','')}<span class="u">%</span></span>`)
+    +`<div class="row"><span class="k">débits</span><span class="v">R ${fmtBytes(f.now.readBytesPerSec)} · W ${fmtBytes(f.now.writeBytesPerSec)}</span></div>`
+    +`<div class="rows" style="margin-top:8px">${vols.map(k=>{const p=Math.round(f.now[k]);return `<div class="row"><span class="k">${k.slice(4)}</span><span class="v">${p} %</span></div><div class="track"><i style="width:${p}%"></i></div>`}).join('')}</div>`;
+}
+function empty(title){return head(title,'')+`<div class="empty">Mesure en cours…</div>`}
+const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};
+function render(){
+  if(metrics?.prefs?.theme)document.documentElement.dataset.theme=metrics.prefs.theme;
+  const r=RENDERERS[widgetId];
+  document.querySelector('#panel').innerHTML=r?r():`<div class="empty">—</div>`;
+}
+window.StatusWidget={
+  show(id,data){widgetId=id;metrics=data;render()},
+  updateMetrics(data){metrics=data;render()}
+};
+</script>
+</body>
+</html>

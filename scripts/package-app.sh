@@ -14,7 +14,7 @@ clang -fobjc-arc -O2 -I "$ROOT/Native" \
   "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
-  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" -o "$BUILD"
+  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/scripts" "$OUTPUT/Contents/Resources/icons"
@@ -23,6 +23,7 @@ cp "$ROOT/Resources/Info.plist" "$OUTPUT/Contents/Info.plist"
 cp "$ROOT/Resources/StatusIcon.icns" "$OUTPUT/Contents/Resources/StatusIcon.icns"
 cp "$ROOT/Resources/dashboard.html" "$OUTPUT/Contents/Resources/dashboard.html"
 cp "$ROOT/Resources/menubar.html" "$OUTPUT/Contents/Resources/menubar.html"
+cp "$ROOT/Resources/widget.html" "$OUTPUT/Contents/Resources/widget.html"
 cp "$ROOT/Resources/picker.html" "$OUTPUT/Contents/Resources/picker.html"
 cp "$ROOT/Resources/themes.css" "$OUTPUT/Contents/Resources/themes.css"
 cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"

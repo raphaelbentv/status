@@ -397,6 +397,10 @@ static const CGFloat TMTitleBarHeight = 28;
 @property TMDisplayManager *displayManager;
 @property id brightnessGlobalMonitor, brightnessLocalMonitor;
 @property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
+@property NSPopover *widgetPopover;
+@property WKWebView *widgetWebView;
+@property BOOL widgetWebReady;
+@property (copy) NSString *currentWidgetId;
 @property NSPanel *pickerPanel;
 @property WKWebView *pickerWebView;
 @property NSArray<TMWindowCandidate *> *pickerCandidates;
@@ -648,11 +652,51 @@ static const CGFloat TMTitleBarHeight = 28;
     [self updateMenuBarWidgetsFromMonitor];
 }
 
+// Chaque widget a son propre panneau d'info (façon iStat), distinct du popover quota : un WKWebView
+// léger (widget.html) qui affiche le détail focalisé de la métrique cliquée.
+- (void)ensureWidgetPopover {
+    if (self.widgetPopover) return;
+    NSRect frame = NSMakeRect(0, 0, 264, 220);
+    WKWebViewConfiguration *config = [WKWebViewConfiguration new];
+    [config.userContentController addScriptMessageHandler:self name:@"native"];
+    self.widgetWebView = [[WKWebView alloc] initWithFrame:frame configuration:config];
+    self.widgetWebView.navigationDelegate = self;
+    self.widgetWebView.underPageBackgroundColor = NSColor.clearColor;
+    NSURL *url = [NSBundle.mainBundle URLForResource:@"widget" withExtension:@"html"];
+    [self.widgetWebView loadFileURL:url allowingReadAccessToURL:url.URLByDeletingLastPathComponent];
+    NSViewController *controller = [NSViewController new];
+    controller.view = self.widgetWebView;
+    controller.preferredContentSize = frame.size;
+    self.widgetPopover = [NSPopover new];
+    self.widgetPopover.behavior = NSPopoverBehaviorTransient;
+    self.widgetPopover.contentSize = frame.size;
+    self.widgetPopover.contentViewController = controller;
+}
+
+- (NSDictionary *)widgetMetricsPayload {
+    NSMutableDictionary *payload = [[self.systemMonitor snapshot] mutableCopy];
+    payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint" };
+    return payload;
+}
+
+// Pousse le contenu du widget courant (show = change de widget + données ; les ticks suivants ne
+// font qu'actualiser les données).
+- (void)pushWidgetMetrics {
+    if (!self.widgetWebReady || !self.currentWidgetId) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:[self widgetMetricsPayload] options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSString *script = [NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.show('%@', %@);", self.currentWidgetId, json];
+    [self.widgetWebView evaluateJavaScript:script completionHandler:nil];
+}
+
 - (void)widgetClicked:(NSButton *)sender {
-    // Clic seul (pas de survol) : ouvre ou ferme le popover partagé, ancré sous ce widget.
-    if (self.statusPopover.shown) { [self.statusPopover close]; return; }
-    self.popoverOpenedByHover = NO;
-    [self showPopoverFromButton:sender];
+    NSString *wid = sender.identifier;
+    // Reclic sur le même widget déjà ouvert : on ferme (bascule).
+    if (self.widgetPopover.shown && [self.currentWidgetId isEqual:wid]) { [self.widgetPopover close]; return; }
+    [self ensureWidgetPopover];
+    self.currentWidgetId = wid;
+    [self pushWidgetMetrics];  // remplit avant l'affichage si le web est prêt
+    [self.widgetPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMinY];
 }
 
 // Redessine chaque widget depuis un snapshot moniteur. Les styles « bars »/« pie » posent la
@@ -1347,6 +1391,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         }];
         return;
     }
+    if (webView == self.widgetWebView) { self.widgetWebReady = YES; [self pushWidgetMetrics]; return; }
     if (webView == self.menuWebView) self.menuWebReady = YES;
     else self.webReady = YES;
     [self pushData];
@@ -1781,6 +1826,11 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     NSDictionary *snapshot = [self.systemMonitor snapshot];
     [self checkSystemAlerts:snapshot];  // les alertes veillent même toutes surfaces fermées
     [self updateMenuBarWidgets:snapshot];  // icônes système : toujours à jour, même surfaces fermées
+    if (self.widgetPopover.isShown && self.widgetWebReady) {  // panneau d'info d'un widget ouvert
+        NSData *data = [NSJSONSerialization dataWithJSONObject:[self widgetMetricsPayload] options:0 error:nil];
+        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        [self.widgetWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.updateMetrics(%@);", json] completionHandler:nil];
+    }
 
     BOOL dashboardVisible = self.webReady && self.window.isVisible;
     BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
