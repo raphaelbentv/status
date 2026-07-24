@@ -52,6 +52,28 @@ assumée** : avec plusieurs externes, l'ordre entre `CGGetActiveDisplayList` et
 `DCPAVServiceProxy` n'est pas garanti correspondre à l'agencement physique ; non levée faute de
 matériel de test multi-écrans.
 
+## Correctif (écrans externes Apple) — DisplayServices d'abord, DDC en repli
+
+La première version pilotait tout écran externe en DDC/CI. Débogué ensuite sur un **Studio
+Display** branché : les écrans **Apple** ne parlent **pas** DDC/CI (lectures en charabia, écritures
+sans effet) — ils se pilotent par le même canal que l'écran interne, `DisplayServices`. Corrigé :
+`syncFromHardware` tente **DisplayServices pour tout écran** (interne ET externe) ; le DDC/CI n'est
+plus qu'un **repli pour les moniteurs tiers**. Vérifié : sur le Studio Display, réglage à 40 % relu
+à 40 %.
+
+Deux corrections au chemin DDC lui-même, au passage (format erroné dans la v1, décelé en comparant
+à la source de **m1ddc**) :
+- Trames au format m1ddc exact : buffer **sans** octet source 0x51 (celui-ci est l'offset I2C,
+  3ᵉ argument = `DEFAULT_INPUT_ADDRESS` 0x51), écriture **répétée 2 fois**, réponse lue sur 12
+  octets (max en [6-7], courant en [8-9]). La v1 injectait un 0x51 parasite → aucun moniteur piloté.
+- Pilotage **découplé de la lecture** : un moniteur tiers pilotable en écriture mais illisible en
+  DDC est quand même déclaré pilotable (curseur actionnable, valeur d'attente), comme MonitorControl.
+- Appariement service↔écran filtré sur `Location == "External"` (le registre expose aussi un
+  `DCPAVServiceProxy` « Embedded » à ne pas viser).
+
+Le chemin DDC tiers reste **non vérifié sur matériel** (pas de moniteur non-Apple ici), mais son
+format est désormais celui de la référence connue.
+
 ## Écran interne — DisplayServices, pas CoreDisplay (découvert au test)
 
 Le design initial visait `CoreDisplay_Display_Get/SetUserBrightness`. **Vérifié empiriquement sur

@@ -705,41 +705,46 @@ static void TestDisplayVCPConversion(void) {
 // design). Ce test valide donc la cohérence interne construction/lecture — pas la conformité à un
 // vrai moniteur, qui reste à vérifier sur matériel réel.
 static void TestDisplayDDCProtocol(void) {
-    Section(@"TMDDCGetVCPRequest / TMDDCSetVCPRequest / TMDDCParseVCPReply — cohérence du protocole");
+    Section(@"TMDDCGetVCPRequest / TMDDCSetVCPRequest / TMDDCParseVCPReply — format m1ddc");
+    // Get : [0x82, 0x01, vcp, checksum], sans octet source 0x51 (celui-ci est l'offset I2C).
     NSData *getRequest = TMDDCGetVCPRequest(TMDDCBrightnessVCPCode);
-    CheckEqual(@(getRequest.length), @5, @"requête Get VCP : 5 octets (source, longueur, opcode, code VCP, checksum)");
-    const uint8_t *getBytes = getRequest.bytes;
-    CheckEqual(@(getBytes[0]), @(0x51), @"octet source = adresse virtuelle hôte 0x51");
-    CheckEqual(@(getBytes[2]), @(0x01), @"opcode Get VCP Feature = 0x01");
-    CheckEqual(@(getBytes[3]), @(TMDDCBrightnessVCPCode), @"code VCP transmis = luminosité (0x10)");
+    CheckEqual(@(getRequest.length), @4, @"requête Get VCP : 4 octets (longueur, opcode, code VCP, checksum)");
+    const uint8_t *g = getRequest.bytes;
+    CheckEqual(@(g[0]), @(0x82), @"longueur 0x82 (0x80 | 2 octets de données)");
+    CheckEqual(@(g[1]), @(0x01), @"opcode Get VCP Feature = 0x01");
+    CheckEqual(@(g[2]), @(TMDDCBrightnessVCPCode), @"code VCP = luminosité (0x10)");
+    CheckEqual(@(g[3]), @(0x6E ^ 0x82 ^ 0x01 ^ TMDDCBrightnessVCPCode), @"checksum Get = 0x6E ^ octets (sans 0x51)");
 
+    // Set : [0x84, 0x03, vcp, MSB, LSB, checksum] ; checksum inclut l'adresse source 0x51.
     NSData *setRequest = TMDDCSetVCPRequest(TMDDCBrightnessVCPCode, 42);
-    CheckEqual(@(setRequest.length), @7, @"requête Set VCP : 7 octets (valeur sur 2 octets en plus)");
-    const uint8_t *setBytes = setRequest.bytes;
-    CheckEqual(@(setBytes[2]), @(0x03), @"opcode Set VCP Feature = 0x03");
-    CheckEqual(@(((setBytes[4] << 8) | setBytes[5])), @42, @"valeur reconstruite depuis MSB/LSB");
+    CheckEqual(@(setRequest.length), @6, @"requête Set VCP : 6 octets");
+    const uint8_t *s = setRequest.bytes;
+    CheckEqual(@(s[0]), @(0x84), @"longueur 0x84 (0x80 | 4)");
+    CheckEqual(@(s[1]), @(0x03), @"opcode Set VCP Feature = 0x03");
+    CheckEqual(@(((s[3] << 8) | s[4])), @42, @"valeur reconstruite depuis MSB/LSB");
+    CheckEqual(@(s[5]), @(0x6E ^ 0x51 ^ 0x84 ^ 0x03 ^ TMDDCBrightnessVCPCode ^ 0 ^ 42), @"checksum Set inclut 0x51");
 
-    // Trame de réponse synthétique, construite avec la même fonction de checksum que le code de
-    // production : valide la cohérence du décodage, pas un octet de référence d'un vrai moniteur.
-    uint8_t reply[11] = { 0x6E, 0x88, 0x02, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x00, 100, 0x00, 62, 0x00 };
-    NSMutableData *replyData = [NSMutableData dataWithBytes:reply length:sizeof(reply) - 1];
-    // Checksum calculé à la main (graine 0x50, cf. TMDDCChecksum) pour rester indépendant de
-    // l'implémentation testée.
-    uint8_t checksum = 0x50;
-    for (NSUInteger i = 0; i < replyData.length; i++) checksum ^= ((const uint8_t *)replyData.bytes)[i];
-    [replyData appendBytes:&checksum length:1];
+    // Réponse « Get VCP Feature » : opcode [2]=0x02, résultat [3]=0x00, code VCP [4], max [6-7],
+    // courant [8-9]. Le checksum n'est plus validé (convention de graine incertaine ; m1ddc ne la
+    // vérifie pas non plus) — on s'appuie sur opcode + code VCP + plausibilité du maximum.
+    uint8_t reply[12] = { 0x6E, 0x88, 0x02, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x00, 100, 0x00, 62, 0x00, 0x00 };
+    NSData *replyData = [NSData dataWithBytes:reply length:sizeof(reply)];
     uint16_t current = 0, maximum = 0;
     Check(TMDDCParseVCPReply(replyData, TMDDCBrightnessVCPCode, &current, &maximum), @"trame valide acceptée");
-    CheckEqual(@(current), @62, @"valeur courante extraite");
-    CheckEqual(@(maximum), @100, @"maximum extrait");
+    CheckEqual(@(current), @62, @"valeur courante extraite (octets 8-9)");
+    CheckEqual(@(maximum), @100, @"maximum extrait (octets 6-7)");
 
-    NSMutableData *corrupted = [replyData mutableCopy];
-    ((uint8_t *)corrupted.mutableBytes)[10] ^= 0xFF;
-    Check(!TMDDCParseVCPReply(corrupted, TMDDCBrightnessVCPCode, &current, &maximum), @"checksum invalide -> rejetée");
+    uint8_t badOp[12] = { 0x6E, 0x88, 0x6D, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x00, 100, 0x00, 62, 0x00, 0x00 };
+    Check(!TMDDCParseVCPReply([NSData dataWithBytes:badOp length:12], TMDDCBrightnessVCPCode, &current, &maximum),
+          @"charabia d'un écran Apple (opcode ≠ 0x02) -> rejeté");
 
-    NSMutableData *wrongVCP = [replyData mutableCopy];
-    ((uint8_t *)wrongVCP.mutableBytes)[4] = 0x12;  // code VCP différent, checksum désormais invalide aussi
-    Check(!TMDDCParseVCPReply(wrongVCP, TMDDCBrightnessVCPCode, &current, &maximum), @"code VCP inattendu -> rejetée");
+    uint8_t wrongVCP[12] = { 0x6E, 0x88, 0x02, 0x00, 0x12, 0x00, 0x00, 100, 0x00, 62, 0x00, 0x00 };
+    Check(!TMDDCParseVCPReply([NSData dataWithBytes:wrongVCP length:12], TMDDCBrightnessVCPCode, &current, &maximum),
+          @"code VCP inattendu -> rejeté");
+
+    uint8_t absurdMax[12] = { 0x6E, 0x88, 0x02, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x80, 0xC1, 0x37, 0x2F, 0x00, 0x00 };
+    Check(!TMDDCParseVCPReply([NSData dataWithBytes:absurdMax length:12], TMDDCBrightnessVCPCode, &current, &maximum),
+          @"maximum invraisemblable (0x80C1) -> rejeté");
 
     Check(!TMDDCParseVCPReply([NSData data], TMDDCBrightnessVCPCode, &current, &maximum), @"trame vide -> rejetée, pas de crash");
 }

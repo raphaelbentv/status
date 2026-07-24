@@ -40,41 +40,42 @@ static uint8_t TMDDCChecksum(NSData *bytes, uint8_t seed) {
     return checksum;
 }
 
+// Format aligné sur m1ddc (référence connue pour fonctionner sur les moniteurs tiers, sources
+// vérifiées) : le buffer ne contient PAS l'octet source 0x51 — celui-ci est l'« offset » I2C passé
+// en 3ᵉ argument de IOAVService (TMDDCInputAddress). D'où des trames plus courtes que la variante
+// initiale, qui, elle, injectait un 0x51 en trop et ne pilotait aucun moniteur.
+const uint32_t TMDDCInputAddress = 0x51;  // DEFAULT_INPUT_ADDRESS de m1ddc, passé en offset I2C
+
+// Requête « Get VCP » : [0x82, 0x01, vcp, checksum]. Checksum = 0x6E ^ octets (sans 0x51 ici,
+// exactement comme prepareDDCRead de m1ddc).
 NSData *TMDDCGetVCPRequest(uint8_t vcpCode) {
-    uint8_t payload[] = { 0x51, 0x82, 0x01, vcpCode };
-    NSData *body = [NSData dataWithBytes:payload length:sizeof(payload)];
-    uint8_t checksum = TMDDCChecksum(body, 0x6E);
-    NSMutableData *packet = [body mutableCopy];
-    [packet appendBytes:&checksum length:1];
-    return packet;
+    uint8_t p[4] = { 0x82, 0x01, vcpCode, 0 };
+    p[3] = 0x6E ^ p[0] ^ p[1] ^ p[2];
+    return [NSData dataWithBytes:p length:sizeof(p)];
 }
 
+// Requête « Set VCP » : [0x84, 0x03, vcp, valeurMSB, valeurLSB, checksum]. Checksum inclut l'adresse
+// source 0x51 (comme prepareDDCWrite de m1ddc — asymétrie assumée avec le Get).
 NSData *TMDDCSetVCPRequest(uint8_t vcpCode, uint16_t value) {
-    uint8_t payload[] = { 0x51, 0x84, 0x03, vcpCode, (uint8_t)(value >> 8), (uint8_t)(value & 0xFF) };
-    NSData *body = [NSData dataWithBytes:payload length:sizeof(payload)];
-    uint8_t checksum = TMDDCChecksum(body, 0x6E);
-    NSMutableData *packet = [body mutableCopy];
-    [packet appendBytes:&checksum length:1];
-    return packet;
+    uint8_t p[6] = { 0x84, 0x03, vcpCode, (uint8_t)(value >> 8), (uint8_t)(value & 0xFF), 0 };
+    p[5] = 0x6E ^ (uint8_t)TMDDCInputAddress ^ p[0] ^ p[1] ^ p[2] ^ p[3] ^ p[4];
+    return [NSData dataWithBytes:p length:sizeof(p)];
 }
 
-// Trame de réponse « Get VCP Feature » (11 octets) :
-//   [0] source (0x6E) [1] longueur|0x80 [2] opcode (0x02) [3] résultat [4] code VCP
-//   [5] type VCP [6-7] maximum (MSB,LSB) [8-9] courant (MSB,LSB) [10] checksum
-// La graine de checksum d'une réponse (0x50) diffère de celle d'une requête (0x6E) par
-// convention DDC/CI — direction de transmission inversée. Repli sûr en cas de désaccord : NO,
-// jamais une valeur inventée.
+// Réponse « Get VCP Feature » (12 octets lus) : [2] opcode 0x02, [3] résultat, [4] code VCP,
+// [6-7] maximum, [8-9] courant (gros-boutiste). On valide l'opcode, le code VCP et un maximum
+// plausible — assez pour écarter une réponse parasite (un écran Apple, qui ne parle pas DDC, rend
+// du charabia dont l'octet [2] n'est pas 0x02) sans dépendre d'une convention de checksum de
+// réponse incertaine selon les sources (m1ddc ne la vérifie pas).
 BOOL TMDDCParseVCPReply(NSData *reply, uint8_t expectedVCPCode, uint16_t *outCurrent, uint16_t *outMaximum) {
-    if (reply.length < 11) return NO;
+    if (reply.length < 10) return NO;
     const uint8_t *b = reply.bytes;
-    NSData *bodyForChecksum = [reply subdataWithRange:NSMakeRange(0, reply.length - 1)];
-    if (TMDDCChecksum(bodyForChecksum, 0x50) != b[10]) return NO;
-    if (b[2] != 0x02) return NO;              // pas une réponse « Get VCP Feature »
-    if (b[3] != 0x00) return NO;              // le moniteur signale une erreur (VCP non pris en charge…)
+    if (b[2] != 0x02) return NO;               // pas une réponse « Get VCP Feature »
+    if (b[3] != 0x00) return NO;               // le moniteur signale une erreur (VCP non pris en charge…)
     if (b[4] != expectedVCPCode) return NO;    // trame décalée ou corrompue
     uint16_t maximum = (uint16_t)((b[6] << 8) | b[7]);
     uint16_t current = (uint16_t)((b[8] << 8) | b[9]);
-    if (maximum == 0) return NO;
+    if (maximum == 0 || maximum > 0x2710) return NO;  // 10000 : borne de plausibilité MCCS
     if (outMaximum) *outMaximum = maximum;
     if (outCurrent) *outCurrent = current;
     return YES;
@@ -135,8 +136,10 @@ static NSString *TMDisplayIdentifier(CGDirectDisplayID displayID, BOOL builtin) 
     return [NSString stringWithFormat:@"ext-id-%u", displayID];  // repli : stable pour la session, pas au rebranchement
 }
 
-// Un service par port de sortie vidéo externe candidat au DDC/CI (Apple Silicon). L'appelant
-// possède les io_service_t retournés et doit les libérer.
+// Un service par port de sortie vidéo EXTERNE candidat au DDC/CI (Apple Silicon). On filtre sur la
+// propriété Location == « External » : le registre expose aussi un DCPAVServiceProxy « Embedded »
+// (la dalle interne), qu'il ne faut pas apparier à un moniteur externe — sinon le DDC viserait le
+// mauvais port. L'appelant possède les io_service_t retournés et doit les libérer.
 static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     NSMutableArray<NSValue *> *services = [NSMutableArray array];
     io_iterator_t iterator = IO_OBJECT_NULL;
@@ -144,7 +147,12 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
         return services;
     io_object_t service;
     while ((service = IOIteratorNext(iterator))) {
-        [services addObject:[NSValue valueWithPointer:(void *)(uintptr_t)service]];
+        CFTypeRef location = IORegistryEntryCreateCFProperty(service, CFSTR("Location"), kCFAllocatorDefault, 0);
+        BOOL external = location && CFGetTypeID(location) == CFStringGetTypeID()
+                     && CFStringCompare(location, CFSTR("External"), 0) == kCFCompareEqualTo;
+        if (location) CFRelease(location);
+        if (external) [services addObject:[NSValue valueWithPointer:(void *)(uintptr_t)service]];
+        else IOObjectRelease(service);  // Embedded ou sans Location : pas un port externe
     }
     IOObjectRelease(iterator);
     return services;
@@ -156,6 +164,8 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     CGDirectDisplayID _displayID;
     CFTypeRef _avService;    // +1, écrans externes uniquement ; libéré au dealloc
     uint16_t _ddcMaximum;    // maximum VCP relevé à la détection ; nécessaire pour reconvertir un %
+    BOOL _useDisplayServices; // méthode retenue : DisplayServices (Apple) plutôt que DDC/CI (tiers)
+    BOOL _ddcWriteOnly;      // DDC pilotable en écriture mais illisible : on n'exige pas la lecture
 }
 
 - (instancetype)initWithDisplayID:(CGDirectDisplayID)displayID
@@ -180,50 +190,69 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
 
 - (void)syncFromHardware {
     TMLoadPrivateDisplaySymbols();
-    if (_kind == TMDisplayKindBuiltin) {
-        if (!TMDisplayServicesGet) { _available = NO; _brightnessPercent = nil; return; }
+
+    // 1) DisplayServices d'abord, pour TOUT écran. C'est le canal de l'écran interne — mais aussi
+    //    des écrans Apple externes (Studio Display, Pro Display XDR), qui NE parlent PAS DDC/CI :
+    //    vérifié sur un Studio Display, DisplayServicesGetBrightness y rend une vraie valeur
+    //    propre à l'écran. Tenter DDC sur un écran Apple ne renvoie que du charabia.
+    if (TMDisplayServicesGet) {
         float value = -1;
-        if (TMDisplayServicesGet(_displayID, &value) != 0 || value < 0) { _available = NO; _brightnessPercent = nil; return; }
-        _available = YES;
-        _brightnessPercent = @(round(TMClampBrightnessPercent(value * 100.0)));
-        return;
+        if (TMDisplayServicesGet(_displayID, &value) == 0 && value >= 0) {
+            _useDisplayServices = YES;
+            _available = YES;
+            _brightnessPercent = @(round(TMClampBrightnessPercent(value * 100.0)));
+            return;
+        }
     }
-    if (!_avService || !TMIOAVServiceReadI2C || !TMIOAVServiceWriteI2C) { _available = NO; _brightnessPercent = nil; return; }
-    NSData *request = TMDDCGetVCPRequest(TMDDCBrightnessVCPCode);
-    IOReturn writeResult = TMIOAVServiceWriteI2C(_avService, 0x37, 0, (void *)request.bytes, (uint32_t)request.length);
-    if (writeResult != kIOReturnSuccess) { _available = NO; _brightnessPercent = nil; return; }
-    // La norme DDC/CI impose un délai minimal de ~40 ms entre l'envoi d'une requête et la lecture
-    // de sa réponse — le moniteur a besoin de ce temps pour la préparer. Lire immédiatement
-    // échouerait sur beaucoup d'écrans. `rescan` est appelé sur le thread principal, donc ce
-    // sommeil le bloque le temps de sonder chaque externe ; c'est assumé : les rescans sont rares
-    // (lancement, branchement/débranchement, réveil), pas une boucle continue, et seul le premier
-    // écran externe non-DDC coûte ce délai. L'écran interne, lui, n'attend jamais.
-    usleep(40000);
-    uint8_t replyBuffer[11] = {0};
-    IOReturn readResult = TMIOAVServiceReadI2C(_avService, 0x37, 0, replyBuffer, sizeof(replyBuffer));
-    NSData *reply = [NSData dataWithBytes:replyBuffer length:sizeof(replyBuffer)];
-    uint16_t current, maximum;
-    if (readResult != kIOReturnSuccess || !TMDDCParseVCPReply(reply, TMDDCBrightnessVCPCode, &current, &maximum)) {
+
+    // 2) Repli DDC/CI pour les moniteurs tiers (non-Apple). Format aligné sur m1ddc.
+    _useDisplayServices = NO;
+    if (_kind == TMDisplayKindBuiltin || !_avService || !TMIOAVServiceWriteI2C) {
         _available = NO; _brightnessPercent = nil; return;
     }
-    _ddcMaximum = maximum;
+
+    // Lecture best-effort : certains moniteurs pilotables en écriture ne répondent pas aux lectures
+    // DDC. On ne bloque donc PAS le pilotage sur une lecture réussie — si l'IOAVService existe et
+    // que les écritures partent, l'écran est déclaré pilotable (curseur actionnable), quitte à
+    // partir d'une valeur par défaut faute de lecture. C'est le comportement de MonitorControl.
+    _ddcMaximum = 100;        // échelle MCCS par défaut ; corrigée si une lecture réussit
+    _ddcWriteOnly = YES;
     _available = YES;
-    _brightnessPercent = @(TMPercentFromVCPValue(current, maximum));
+    _brightnessPercent = @50;  // valeur d'attente tant qu'aucune lecture n'a abouti
+
+    if (TMIOAVServiceReadI2C) {
+        NSData *request = TMDDCGetVCPRequest(TMDDCBrightnessVCPCode);
+        // m1ddc envoie la requête deux fois (certains écrans ignorent la première), puis lit.
+        for (int i = 0; i < 2; i++) { usleep(10000); TMIOAVServiceWriteI2C(_avService, 0x37, TMDDCInputAddress, (void *)request.bytes, (uint32_t)request.length); }
+        uint8_t replyBuffer[12] = {0};
+        usleep(10000);
+        if (TMIOAVServiceReadI2C(_avService, 0x37, TMDDCInputAddress, replyBuffer, sizeof(replyBuffer)) == kIOReturnSuccess) {
+            uint16_t current, maximum;
+            if (TMDDCParseVCPReply([NSData dataWithBytes:replyBuffer length:sizeof(replyBuffer)],
+                                   TMDDCBrightnessVCPCode, &current, &maximum)) {
+                _ddcMaximum = maximum;
+                _ddcWriteOnly = NO;
+                _brightnessPercent = @(TMPercentFromVCPValue(current, maximum));
+            }
+        }
+    }
 }
 
 - (BOOL)setBrightnessPercent:(double)percent {
     double clamped = TMClampBrightnessPercent(percent);
-    if (_kind == TMDisplayKindBuiltin) {
+    if (_useDisplayServices) {
         if (!TMDisplayServicesSet) return NO;
         if (TMDisplayServicesSet(_displayID, (float)(clamped / 100.0)) != 0) return NO;
         _brightnessPercent = @(round(clamped));
         return YES;
     }
+    // DDC/CI : écriture répétée deux fois (comme m1ddc), échelle _ddcMaximum.
     if (!_avService || !TMIOAVServiceWriteI2C || _ddcMaximum == 0) return NO;
     NSData *request = TMDDCSetVCPRequest(TMDDCBrightnessVCPCode, TMVCPValueFromPercent(clamped, _ddcMaximum));
-    IOReturn result = TMIOAVServiceWriteI2C(_avService, 0x37, 0, (void *)request.bytes, (uint32_t)request.length);
+    IOReturn result = kIOReturnError;
+    for (int i = 0; i < 2; i++) { usleep(10000); result = TMIOAVServiceWriteI2C(_avService, 0x37, TMDDCInputAddress, (void *)request.bytes, (uint32_t)request.length); }
     if (result != kIOReturnSuccess) return NO;
-    _brightnessPercent = @(round(clamped));  // optimiste : pas de relecture DDC à chaque écriture (coût I2C)
+    _brightnessPercent = @(round(clamped));  // optimiste : pas de relecture DDC à chaque écriture
     return YES;
 }
 

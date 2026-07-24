@@ -83,6 +83,7 @@
      dashboard pour l'état « sans réponse » détaillé) : le popover est trop dense pour l'expliquer. */
   .brightness{display:flex;flex-direction:column;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
   .b-row{display:flex;align-items:center;gap:8px;background:var(--panel-bg-strong);padding:7px 10px}
+  .b-sun{font-size:11px;color:var(--blue);flex:none;line-height:1}
   .b-label{font-size:9.5px;color:var(--muted);width:44px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .b-slider{flex:1;-webkit-appearance:none;appearance:none;height:10px;background:rgba(255,255,255,.04);border:1px solid var(--hair);cursor:pointer}
   .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:15px;background:var(--blue);border:1px solid var(--hair-strong);cursor:pointer}
@@ -163,7 +164,9 @@ function tools(t){
 function brightnessRow(displays){
   const pilotable=(displays||[]).filter(d=>d.available);
   if(!pilotable.length)return '';
-  return pilotable.map(d=>`<div class="b-row"><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
+  // Un glyphe ☀ ouvre la section : le curseur se lit alors comme « luminosité », pas comme une
+  // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne.
+  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="Luminosité — ${esc(d.name)}">☀</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
 }
 let lastData=null;
 function renderMenu(data){
