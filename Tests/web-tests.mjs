@@ -156,14 +156,14 @@ const noJunk = h => !/NaN|undefined/.test(h) && !/>null</.test(h);
 
 const wCPU = widget('renderCPU()');
 check(noJunk(wCPU), 'CPU : aucun NaN/undefined/null');
-check(/Utilisateur/.test(wCPU) && /Système/.test(wCPU), 'CPU : découpe utilisateur/système présente');
+check(/utilisateur/.test(wCPU) && /système/.test(wCPU), 'CPU : découpe utilisateur/système présente');
 check(/2,66 · 3,16 · 3,68/.test(wCPU), 'CPU : charge moyenne en décimales françaises');
 check(wCPU.indexOf('Gros CPU') > -1 && wCPU.indexOf('Gros CPU') < wCPU.indexOf('Grosse RAM'),
   'CPU : liste des processus triée par CPU (le plus gros d’abord)');
 
 const wMem = widget('renderMemory()');
 check(noJunk(wMem), 'Mémoire : aucun NaN/undefined/null');
-check(/App/.test(wMem) && /Compressée/.test(wMem) && /Cache/.test(wMem), 'Mémoire : répartition app/compressée/cache');
+check(/App/.test(wMem) && /Compr\./.test(wMem) && /Cache/.test(wMem), 'Mémoire : répartition app/compressée/cache');
 check(/13,4 Go/.test(wMem), 'Mémoire : octets en Go français (App 13,4 Go)');
 check(wMem.indexOf('Grosse RAM') > -1 && wMem.indexOf('Grosse RAM') < wMem.indexOf('Gros CPU'),
   'Mémoire : liste des processus triée par RAM');
@@ -171,6 +171,14 @@ check(wMem.indexOf('Grosse RAM') > -1 && wMem.indexOf('Grosse RAM') < wMem.index
 const wNet = widget('renderNetwork()');
 check(noJunk(wNet), 'Réseau : aucun NaN/undefined/null');
 check(/Session/.test(wNet) && /4,2 Mo/.test(wNet), 'Réseau : totaux de session cumulés');
+// Les tunnels VPN inactifs (utun*, souvent 6 ou plus) noyaient la seule interface qui transmet.
+widget('Object.assign(metrics.families.find(f=>f.id==="network").now,' +
+  '{"rx:utun0":0,"tx:utun0":0,"rx:utun1":0,"tx:utun1":0,"rx:awdl0":0,"tx:awdl0":0})');
+const wNetIdle = widget('renderNetwork()');
+check(!/utun0/.test(wNetIdle) && !/awdl0/.test(wNetIdle), 'Réseau : interfaces sans trafic masquées');
+check(/en0/.test(wNetIdle), 'Réseau : l’interface active reste listée');
+check(/\+ 3 inactives/.test(wNetIdle), 'Réseau : le nombre d’interfaces masquées est annoncé');
+widget('metrics = ' + JSON.stringify(wsnap));
 
 const wSens = widget('renderTemperature()');
 check(noJunk(wSens), 'Capteurs : aucun NaN/undefined/null');
@@ -182,7 +190,13 @@ check(/91 %/.test(wBat) && /218/.test(wBat) && /13,10 V/.test(wBat), 'Batterie :
 
 const wDisk = widget('renderDisk()');
 check(noJunk(wDisk), 'Disque : aucun NaN/undefined/null');
-check(/Macintosh HD/.test(wDisk) && /libres/.test(wDisk), 'Disque : volume nommé avec espace libre');
+check(/Macintosh HD/.test(wDisk) && /92 \/ 926 Go/.test(wDisk), 'Disque : volume nommé, espace libre / total');
+// Unités différentes : l'unité du libre ne doit pas être omise, sinon « 800 / 1,2 To » se lirait
+// 800 To. Volume de 1,2 To dont 800 Mo libres.
+widget('metrics.families.find(f=>f.id==="disk").now["volTotal:/"] = 1319413953331');
+widget('metrics.families.find(f=>f.id==="disk").now["volFree:/"] = 838860800');
+check(/800 Mo \/ 1,2 To/.test(widget('renderDisk()')), 'Disque : unités distinctes toutes deux affichées');
+widget('metrics = ' + JSON.stringify(wsnap));
 
 const wGPU = widget('renderGPU()');
 check(noJunk(wGPU), 'GPU : aucun NaN/undefined/null');
@@ -196,7 +210,7 @@ widget('widgetId = "cpu"');  // les renderers lisent la variable de module widge
 const gCPU = widget('renderCPU()');
 check(!/Processus · CPU/.test(gCPU), 'CPU : section processus masquée quand désactivée');
 check(!/charge moy\./.test(gCPU), 'CPU : section charge masquée quand désactivée');
-check(/Utilisateur/.test(gCPU), 'CPU : les sections non désactivées restent (user/système)');
+check(/utilisateur/.test(gCPU), 'CPU : les sections non désactivées restent (user/système)');
 widget('widgetId = "memory"');
 const gMem = widget('renderMemory()');
 check(!/Résidente/.test(gMem), 'Mémoire : répartition masquée quand désactivée');

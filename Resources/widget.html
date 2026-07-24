@@ -11,27 +11,42 @@
   .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1;text-align:right}
   .big .u{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
   .big .sub{display:block;font-size:10px;color:var(--muted);font-weight:400;margin-top:2px;letter-spacing:0}
+  /* Deux valeurs de rang égal (débits ↓/↑) : même corps, alignées à droite. */
+  .dual{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .dual b{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15;white-space:nowrap}
   .badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--hair-strong);border-radius:var(--radius);padding:2px 7px;color:var(--muted)}
   .badge.warn{color:var(--amber);border-color:var(--amber)}.badge.crit{color:var(--danger);border-color:var(--danger)}
-  svg.chart{display:block;width:100%;height:44px;margin:6px 0}
+  svg.chart{display:block;width:100%;height:34px;margin:6px 0}
   .chart .area{opacity:.14}.chart .line{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
   .rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
-  .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11.5px}
-  .row .k{color:var(--muted)}.row .v{font-variant-numeric:tabular-nums;text-align:right}
+  /* Une ligne = une donnée, sur UNE ligne. Le libellé s'élide, la valeur ne se coupe jamais :
+     sans cela « SoC · 20 capteurs » et sa valeur passaient chacun à la ligne (4 lignes pour une
+     donnée) et la colonne de droite perdait son alignement. */
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:11.5px;line-height:1.35}
+  .row .k{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;display:flex;align-items:center;gap:5px}
+  .row .v{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;flex:none}
   .cores{display:flex;gap:14px;margin:8px 0 2px}
   .cores .grp .lbl{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
   .bars{display:flex;gap:2px;height:26px;align-items:flex-end}.bars i{width:7px;background:var(--chart-a);min-height:1px}
-  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);margin:6px 0}
-  .stat{background:var(--soft);padding:7px 9px}.stat b{display:block;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}.stat span{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  /* Deux colonnes fixes plutôt qu'auto-fit : à 236 px, auto-fit casait 4 cellules en 3 + 1
+     orphelin. En 2×2 la grille reste pleine, et une cellule seule en fin de liste impaire occupe
+     toute la largeur au lieu de laisser un trou. */
+  .stat-row{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border:1px solid var(--hair);margin:7px 0}
+  .stat{background:var(--soft);padding:6px 9px;min-width:0}
+  .stat:last-child:nth-child(odd){grid-column:1/-1}
+  .stat b{display:block;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat span{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);white-space:nowrap}
   .stat.warn b{color:var(--amber)}.stat.crit b{color:var(--danger)}
   .empty{color:var(--muted);padding:14px 0;text-align:center}
   .track{height:12px;background:rgba(127,127,127,.12);border:1px solid var(--hair);margin:3px 0 8px;overflow:hidden}.track i{display:block;height:100%;background:var(--chart-a)}
   .section{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:12px 0 6px;padding-top:9px;border-top:1px solid var(--hair)}
   .split{display:flex;height:14px;border:1px solid var(--hair);overflow:hidden;margin:6px 0;background:rgba(127,127,127,.10)}
   .split i{height:100%;min-width:0}
-  .legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px}
-  .legend .lg{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted)}
-  .legend .lg b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:600}
+  /* Légende en deux colonnes régulières : en flex libre, les entrées de largeurs inégales
+     produisaient des lignes bancales de 2 puis 3 éléments. */
+  .legend{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;margin-top:7px}
+  .legend .lg{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);min-width:0;white-space:nowrap;overflow:hidden}
+  .legend .lg b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:600;margin-left:auto}
   .dot{width:8px;height:8px;border-radius:2px;flex:none}
   .plist{display:flex;flex-direction:column;gap:5px}
   .p{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline}
@@ -39,7 +54,10 @@
   .p .vv{font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px}
   .p .pbar{grid-column:1/-1;height:3px;background:var(--hair);overflow:hidden;margin-top:1px}
   .p .pbar i{display:block;height:100%;background:var(--chart-a)}
-  .vol{margin-top:8px}.vol .vh{display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px}.vol .vh .vf{color:var(--muted);font-variant-numeric:tabular-nums}
+  .vol{margin-top:8px}
+  .vol .vh{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;margin-bottom:3px}
+  .vol .vh .vn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .vol .vh .vf{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none;font-size:10.5px}
 </style>
 </head>
 <body>
@@ -63,12 +81,15 @@ const fmtDur=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.floo
   if(d)return `${d} j ${h} h`;if(h)return `${h} h ${String(m).padStart(2,'0')}`;return `${m} min`};
 
 // Mini-courbe SVG, une ou deux séries, échelle % fixe (percent) ou auto (débits).
+// L'aire est toujours remplie : elle donne le niveau d'un coup d'œil et occupe le cadre. Sans
+// elle, une série plate (batterie pleine, CPU au repos) laissait un grand rectangle vide qui se
+// lisait comme une zone morte du panneau.
 function chart(list,{percent=true}={}){
   const drawn=list.filter(s=>s.values&&s.values.length>1);
   if(!drawn.length)return '';
-  const w=296,h=44,len=Math.max(...drawn.map(s=>s.values.length));
+  const w=210,h=34,len=Math.max(...drawn.map(s=>s.values.length));
   const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values));
-  const paths=drawn.map((s,i)=>{const off=len-s.values.length;
+  const paths=drawn.map(s=>{const off=len-s.values.length;
     const d=s.values.map((v,j)=>`${j?'L':'M'}${((off+j)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
     const c=s.color||'var(--chart-a)';
     return `<path class="area" fill="${c}" d="${d} L${w},${h} L${(off/(len-1)*w).toFixed(1)},${h} Z"/><path class="line" stroke="${c}" d="${d}"/>`}).join('');
@@ -108,14 +129,17 @@ function renderCPU(){
     const grp=(l,idx)=>idx.length?`<div class="grp"><div class="lbl">${l} · ${idx.length}</div><div class="bars">${idx.map(bar).join('')}</div></div>`:'';
     coresHTML=`<div class="cores">${grp('Performance',P)}${grp('Efficience',E)}</div>`;
   }else coresHTML=`<div class="bars" style="margin:8px 0">${cores.map(c=>bar(+c.slice(4))).join('')}</div>`;
+  // Découpe utilisateur/système : barre proportionnelle + deux lignes ordinaires. En légende
+  // compacte, « Utilisateur 10 % » dépassait la demi-largeur et se faisait rogner ; en lignes, le
+  // libellé tient en toutes lettres et s'aligne sur le reste du panneau.
   let splitHTML='';
   if(n.userPercent!=null){
-    splitHTML=splitBar([
-      {label:'Utilisateur',value:n.userPercent,color:'var(--chart-a)',fmt:v=>Math.round(v)+' %'},
-      {label:'Système',value:n.systemPercent||0,color:'var(--amber)',fmt:v=>Math.round(v)+' %'},
-    ],100,{free:null});
+    const u=n.userPercent,s=n.systemPercent||0;
+    splitHTML=`<div class="split"><i style="width:${u}%;background:var(--chart-a)"></i><i style="width:${s}%;background:var(--amber)"></i></div>`
+      +`<div class="rows">${row('<span class="dot" style="background:var(--chart-a)"></span> utilisateur',Math.round(u)+' %')}`
+      +`${row('<span class="dot" style="background:var(--amber)"></span> système',Math.round(s)+' %')}</div>`;
   }
-  const loads=(s.load1!=null)?row('charge moy.',`${fr(s.load1)} · ${fr(s.load5)} · ${fr(s.load15)}`):'';
+  const loads=(s.load1!=null)?row('charge',`${fr(s.load1)} · ${fr(s.load5)} · ${fr(s.load15)}`):'';
   const procN=(s.processCount!=null)?row('processus',s.processCount):'';
   const up=(s.uptimeSec!=null)?row('actif depuis',fmtDur(s.uptimeSec)):'';
   const loadRows=(loads||procN||up)?`<div class="rows" style="margin-top:8px">${loads}${procN}${up}</div>`:'';
@@ -131,10 +155,12 @@ function renderMemory(){
   const P={1:['normale',''],2:['élevée','warn'],4:['critique','crit']}[n.pressureLevel]||['',''];
   let breakdown='';
   if(n.totalBytes){
+    // Libellés abrégés : en toutes lettres, « Compressée 7,8 Go » dépassait la demi-largeur de la
+    // légende et le « Go » sortait du panneau.
     const segs=[
       {label:'App',value:n.appBytes||0,color:'var(--blue)',fmt:fmtGo},
-      {label:'Résidente',value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
-      {label:'Compressée',value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
+      {label:'Résid.',value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
+      {label:'Compr.',value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
       {label:'Cache',value:n.cachedBytes||0,color:'rgba(127,140,160,.55)',fmt:fmtGo},
     ];
     breakdown=splitBar(segs,n.totalBytes,{free:n.freeBytes,freeLabel:'Libre'});
@@ -166,10 +192,19 @@ function renderGPU(){
 }
 function renderNetwork(){
   const f=famGet('network');if(!f)return empty('Réseau');const n=f.now;
-  const ifaces=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
-  return head('Réseau',bigVal(`↓ ${fmtRate(n.rxBytesPerSec)}`,'',`↑ ${fmtRate(n.txBytesPerSec)}`))
+  // Seules les interfaces qui transmettent réellement. Sans ce filtre, six tunnels VPN (utun*) à
+  // 0 o/s noyaient la seule interface active — la liste ne disait plus rien.
+  const ifaces=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))]
+    .filter(nm=>(n['rx:'+nm]||0)+(n['tx:'+nm]||0)>0)
+    .sort((a,b)=>((n['rx:'+b]||0)+(n['tx:'+b]||0))-((n['rx:'+a]||0)+(n['tx:'+a]||0))).slice(0,4);
+  const hidden=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].length-ifaces.length;
+  // Deux débits de même importance : deux lignes de même poids, plutôt qu'un chiffre géant et un
+  // second relégué en sous-titre.
+  const dual=`<span class="dual"><b>↓ ${fmtRate(n.rxBytesPerSec)}</b><b>↑ ${fmtRate(n.txBytesPerSec)}</b></span>`;
+  return head('Réseau',dual)
     +chart([series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')],{percent:false})
-    +(on('interfaces')?`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')||'<div class="row"><span class="k">aucune interface active</span></div>'}</div>`:'')
+    +(on('interfaces')?`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')
+      ||'<div class="row"><span class="k">aucun trafic</span></div>'}${hidden>0&&ifaces.length?`<div class="row"><span class="k">+ ${hidden} inactive${hidden>1?'s':''}</span></div>`:''}</div>`:'')
     +(on('session')&&n.rxSessionBytes!=null?section('Session')
       +`<div class="rows">${row('reçu',fmtSize(n.rxSessionBytes))}${row('envoyé',fmtSize(n.txSessionBytes))}</div>`:'');
 }
@@ -179,9 +214,11 @@ function renderTemperature(){
   const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
   // Détail par famille. Les noms de capteurs Apple Silicon sont opaques (« PMU tdie3 ») : on ne
   // peut pas honnêtement étiqueter « CPU » ou « GPU », d'où « SoC » / « périphériques ».
+  // Libellés courts et valeurs compactes « max / moy. » : la forme longue débordait et cassait
+  // la ligne en deux, libellé comme valeur.
   const det=[];
-  if(n.dieMaxC!=null)det.push(row(`SoC · ${n.dieCount} capteurs`,`${Math.round(n.dieMaxC)} °C max · ${Math.round(n.dieAvgC)} °C moy.`));
-  if(n.deviceMaxC!=null)det.push(row(`périphériques · ${n.deviceCount}`,`${Math.round(n.deviceMaxC)} °C max · ${Math.round(n.deviceAvgC)} °C moy.`));
+  if(n.dieMaxC!=null)det.push(row('SoC',`${Math.round(n.dieMaxC)}° max · ${Math.round(n.dieAvgC)}° moy.`));
+  if(n.deviceMaxC!=null)det.push(row('périph.',`${Math.round(n.deviceMaxC)}° max · ${Math.round(n.deviceAvgC)}° moy.`));
   const batt=famGet('battery')?.now;
   if(batt?.temperatureC!=null)det.push(row('batterie',Math.round(batt.temperatureC)+' °C'));
   return head('Capteurs',bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?'point chaud du SoC':''))
@@ -207,9 +244,10 @@ function renderBattery(){
   if(n.fullCapacity!=null&&n.designCapacity!=null)rows.push(row('capacité',`${n.fullCapacity.toLocaleString('fr-FR')} / ${n.designCapacity.toLocaleString('fr-FR')} mAh`));
   if(n.adapterWatts!=null&&n.adapterWatts>0)rows.push(row('chargeur',n.adapterWatts+' W'));
   if(n.conditionOK!=null)rows.push(row('état','<span class="badge'+(n.conditionOK?'':' warn')+'">'+(n.conditionOK?'normal':'à vérifier')+'</span>'));
+  // Pas de barre de niveau ici : le grand pourcentage la double déjà, et la courbe en donne
+  // l'historique. Trois représentations de la même valeur encombraient le panneau.
   return head('Batterie',bigVal(n.percent==null?'—':Math.round(n.percent),'%',state))
-    +`<div class="track"><i style="width:${n.percent??0}%"></i></div>`
-    +(on('chart')?chart([series(f,'percent','var(--green)')]):'')
+    +(on('chart')?chart([series(f,'percent','var(--green)')]):`<div class="track"><i style="width:${n.percent??0}%"></i></div>`)
     +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
     +(on('details')&&rows.length?`<div class="rows" style="margin-top:8px">${rows.join('')}</div>`:'');
 }
@@ -219,8 +257,12 @@ function renderDisk(){
   const volHTML=vols.map(k=>{const mnt=k.slice(4);const p=Math.round(n[k]);
     const tot=n['volTotal:'+mnt],free=n['volFree:'+mnt];
     const label=mnt==='/'?'Macintosh HD':mnt.replace('/Volumes/','');
-    const foot=tot!=null?`${fmtSize(free)} libres · ${fmtSize(tot)}`:`${p} %`;
-    return `<div class="vol"><div class="vh"><span>${esc(label)}</span><span class="vf">${foot}</span></div><div class="track"><i style="width:${p}%;background:${p>=90?'var(--danger)':'var(--chart-a)'}"></i></div></div>`;
+    // Forme courte « 88 / 926 Go » : en toutes lettres, le pied poussait le nom du volume à
+    // l'ellipse (« Macintosh… »). L'unité de l'espace libre n'est omise que si elle est identique
+    // à celle du total — sinon « 800 / 1,2 To » ferait lire 800 To au lieu de 800 Mo.
+    const [freeNum,freeUnit]=fmtSize(free).split(' '),totalUnit=fmtSize(tot).split(' ')[1];
+    const foot=tot!=null?`${freeUnit===totalUnit?freeNum:fmtSize(free)} / ${fmtSize(tot)}`:`${p} %`;
+    return `<div class="vol"><div class="vh"><span class="vn">${esc(label)}</span><span class="vf">${foot}</span></div><div class="track"><i style="width:${p}%;background:${p>=90?'var(--danger)':'var(--chart-a)'}"></i></div></div>`;
   }).join('');
   return head('Disque',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtSize(n.totalBytes)+' au total':''))
     +(on('chart')?chart([series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')],{percent:false})
