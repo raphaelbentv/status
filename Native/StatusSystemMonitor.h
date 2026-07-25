@@ -38,11 +38,16 @@ BOOL TMRatePerSecond(uint64_t previous, uint64_t current, NSTimeInterval elapsed
 BOOL TMCPUPercentBetweenTicks(uint64_t activePrevious, uint64_t totalPrevious,
                               uint64_t activeCurrent, uint64_t totalCurrent, double *outPercent);
 
-// Top des processus entre deux relevés. Chaque relevé : pid (clé texte) → { name, cpuTimeNs,
-// rssBytes }. Retourne les `count` plus gourmands en CPU sur l'intervalle, triés décroissant :
-// [{ pid, name, cpuPercent, rssBytes }]. Un pid absent du relevé précédent n'a pas de delta et
-// n'apparaît pas ; un temps CPU qui recule (pid réutilisé) écarte le processus. Le pourcentage
-// n'est pas plafonné à 100 : un processus multithread dépasse légitimement un cœur.
+// Processus les plus gourmands entre deux relevés, sur TROIS dimensions. Chaque relevé : pid (clé
+// texte) → { name, cpuTimeNs, rssBytes, energyNJ }. Retourne l'union — dédupliquée par pid — des
+// `count` plus gros par CPU, par RAM et par énergie : [{ pid, name, cpuPercent, rssBytes,
+// energyWatts }]. L'interface trie ensuite selon la dimension voulue ; garder les trois tops évite
+// qu'un gros consommateur d'une ressource disparaisse au tri d'une autre. energyWatts est la
+// puissance moyenne sur l'intervalle (delta de nanojoules / temps) ; la dimension énergie n'entre
+// dans l'union que si des deltas non nuls existent. Taille : de `count` (tops confondus) à 3×count
+// (disjoints). Un pid absent du relevé précédent garde cpuPercent/energyWatts = 0 mais reste
+// éligible au tri mémoire ; un compteur qui recule (pid réutilisé) laisse aussi 0. Le pourcentage
+// CPU n'est pas plafonné à 100 : un processus multithread dépasse légitimement un cœur.
 NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *current,
                                         NSTimeInterval elapsed, NSUInteger count);
 
@@ -51,6 +56,22 @@ NSArray<NSDictionary *> *TMTopProcesses(NSDictionary *previous, NSDictionary *cu
 // `rearmBelow` (< threshold), pas dès qu'elle repasse sous le seuil — sinon une valeur qui
 // oscille autour du seuil mitraille de notifications.
 BOOL TMThresholdShouldFire(BOOL *wasAbove, double value, double threshold, double rearmBelow);
+
+// Seuil de réarmement déduit d'un seuil d'alerte réglable par l'utilisateur. L'hystérésis vaut 8 %
+// du seuil (soit ~7 points pour 90 °C, proche des marges d'origine) et au moins 2 unités, pour que
+// des seuils bas gardent une bande utile. Toujours < threshold, et jamais négatif.
+double TMAlertRearmThreshold(double threshold);
+
+// Famille d'un capteur thermique, d'après son nom matériel. Les noms Apple Silicon sont opaques
+// (« PMU tdie3 », « PMU tdev1 », « gas gauge battery ») : aucune étiquette « CPU » ou « GPU »
+// n'existe, on ne peut donc pas en inventer. On regroupe ce qui est identifiable de façon sûre :
+//   @"die"     — température de die du SoC (tdie…) : le point chaud qui gouverne le bridage ;
+//   @"device"  — périphériques / alimentation (tdev…) : plus froids, moins critiques ;
+//   @"battery" — cellule (« gas gauge battery ») : la famille battery l'expose déjà, on l'écarte
+//                pour ne pas polluer la moyenne du SoC ;
+//   nil        — non classé (calibration « tcal », capteurs inconnus) : ignoré des agrégats.
+// Insensible à la casse. Le nom Intel courant (TC0P/PECI) tombe aussi dans « die ».
+NSString * _Nullable TMSensorFamilyForName(NSString * _Nullable name);
 
 #pragma mark - Moniteur
 
@@ -72,6 +93,27 @@ typedef NSDictionary<NSString *, NSNumber *> * _Nullable (^TMMetricCollector)(vo
 
 // Le moniteur de production : tous les collecteurs réels branchés, dans l'ordre de la spec.
 TMSystemMonitor *TMSystemMonitorCreate(void);
+
+#pragma mark - Historique long (24 h)
+
+// Les anneaux du moniteur ne couvrent que quelques minutes et vivent en RAM. Cet historique-ci est
+// l'autre échelle : une ligne par minute, horodatée, conservée sur disque, pour répondre à « qu'est-ce
+// qui a chauffé cette nuit ? ». Chaque ligne : { @"t": epoch (s), puis les métriques présentes }.
+extern const NSTimeInterval TMLongHistoryMaxAge;   // 24 h
+extern const NSTimeInterval TMLongHistoryInterval; // 60 s entre deux lignes
+
+// Ajoute `row` à `rows` puis élague : lignes plus vieilles que `maxAge` par rapport à la plus
+// récente, et débordement au-delà de `maxRows` (garde-fou si l'horloge saute). Retourne un nouveau
+// tableau, trié du plus ancien au plus récent. `row` sans clé @"t" numérique est ignorée.
+// Une ligne dont l'horodatage précède la dernière conservée est rejetée : après un changement
+// d'heure ou une restauration, mieux vaut perdre un point que d'obtenir un historique non monotone
+// que les courbes afficheraient à l'envers.
+NSArray<NSDictionary *> *TMLongHistoryAppend(NSArray<NSDictionary *> * _Nullable rows,
+                                             NSDictionary *row, NSTimeInterval maxAge, NSUInteger maxRows);
+
+// Extrait d'un snapshot les quelques métriques qui méritent d'être suivies sur 24 h, horodatées à
+// `timestamp`. nil si le snapshot n'en contient aucune (rien à journaliser).
+NSDictionary * _Nullable TMLongHistoryRow(NSDictionary *snapshot, NSTimeInterval timestamp);
 
 // Relevé instantané des processus via libproc, au format attendu par TMTopProcesses.
 // nil si la liste des pids est illisible. Coûte quelques centaines d'appels noyau : à n'appeler

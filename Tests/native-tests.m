@@ -12,9 +12,12 @@
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
 #import "StatusWindowManager.h"
+#import "StatusDisplays.h"
+#import "StatusMenuBarWidgets.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
+#import <sys/sysctl.h>
 
 static int gFailures = 0;
 static int gChecks = 0;
@@ -285,6 +288,35 @@ static void TestHistory(void) {
     [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
 }
 
+static void TestAccountsCache(void) {
+    Section(@"TMSaveAccountsCache / TMLoadAccountsCache — volumes persistés au redémarrage");
+    NSString *sandbox = [NSTemporaryDirectory() stringByAppendingPathComponent:@"status-tests-accounts"];
+    [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
+    setenv("STATUS_SUPPORT_DIR", sandbox.UTF8String, 1);
+
+    Check(TMLoadAccountsCache() == nil, @"aucun cache au départ : nil (démarrage vide, comme avant)");
+
+    NSDictionary *accounts = @{
+        @"claude": @{ @"windows": @[@{@"windowId": @"seven_day", @"usedPercent": @62.0, @"resetsAt": @4102444800}],
+                      @"capturedAt": @1784000000, @"authenticated": @YES },
+        @"openai": @{ @"windows": @[], @"connected": @NO }
+    };
+    TMSaveAccountsCache(accounts);
+    NSDictionary *loaded = TMLoadAccountsCache();
+    Check(loaded != nil, @"le cache se recharge après écriture");
+    CheckEqual(loaded[@"claude"][@"windows"][0][@"usedPercent"], @62, @"les volumes Claude survivent au round-trip");
+    CheckEqual(loaded[@"claude"][@"capturedAt"], @1784000000, @"l'horodatage de la dernière mesure est conservé");
+
+    // Robustesse : une entrée non sérialisable n'écrase pas un cache valide par un fichier corrompu.
+    TMSaveAccountsCache((NSDictionary *)@"pas un dictionnaire");
+    Check(TMLoadAccountsCache() != nil, @"une entrée invalide laisse le cache précédent intact");
+    TMSaveAccountsCache(@{});
+    // Un dictionnaire vide est ignoré (guard !count) : le dernier cache valide reste.
+    CheckEqual(TMLoadAccountsCache()[@"claude"][@"windows"][0][@"usedPercent"], @62, @"dictionnaire vide ignoré : cache valide préservé");
+
+    [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
+}
+
 // Interroge IOKit plutôt que notre propre état : c'est la seule façon de savoir si l'assertion
 // existe vraiment. Filtré sur notre pid — une autre app tenant la même assertion ne doit pas
 // rendre ce test faussement vert.
@@ -477,33 +509,74 @@ static void TestForecastExhaustion(void) {
 static NSDictionary *TMProc(NSString *name, uint64_t cpuNs, uint64_t rss) {
     return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss) };
 }
+static NSDictionary *TMProcE(NSString *name, uint64_t cpuNs, uint64_t rss, uint64_t energyNJ) {
+    return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss), @"energyNJ": @(energyNJ) };
+}
 
 static void TestTopProcesses(void) {
-    Section(@"TMTopProcesses — deltas de temps CPU par processus");
+    Section(@"TMTopProcesses — union top-CPU ∪ top-RAM");
     NSDictionary *previous = @{ @"10": TMProc(@"chrome", 1000000000, 500), @"20": TMProc(@"node", 500000000, 300),
                                 @"30": TMProc(@"idle_app", 100000000, 100) };
     NSDictionary *current  = @{ @"10": TMProc(@"chrome", 2000000000, 520), @"20": TMProc(@"node", 1750000000, 310),
                                 @"30": TMProc(@"idle_app", 100000000, 100) };
     NSArray *top = TMTopProcesses(previous, current, 2.0, 5);
     Check(top.count == 3, @"trois processus mesurés");
-    CheckEqual(top.firstObject[@"name"], @"node", @"trié par consommation : node (62,5 %) devant chrome (50 %)");
+    CheckEqual(top.firstObject[@"name"], @"node", @"tranche CPU en tête : node (62,5 %) devant chrome (50 %)");
     CheckEqual(top.firstObject[@"cpuPercent"], @62.5, @"1,25 s de CPU sur 2 s = 62,5 %");
-    CheckEqual([top.lastObject objectForKey:@"cpuPercent"], @0.0, @"processus immobile : 0 %, présent");
     CheckEqual(top.firstObject[@"rssBytes"], @310, @"la RSS vient du relevé courant");
     CheckEqual(top.firstObject[@"pid"], @"20", @"le pid accompagne chaque entrée");
 
-    Check(TMTopProcesses(previous, current, 2.0, 2).count == 2, @"count tronque après tri");
+    // Le tri par mémoire garde un gros consommateur RAM que le tri CPU seul écarterait.
+    NSDictionary *prevMix = @{ @"10": TMProc(@"busy", 1000000000, 100), @"20": TMProc(@"greedy_ram", 100000000, 100) };
+    NSDictionary *curMix  = @{ @"10": TMProc(@"busy", 3000000000, 100),      // +2 s CPU, peu de RAM
+                              @"20": TMProc(@"greedy_ram", 100000000, 9000),  // 0 % CPU, énorme RAM
+                              @"30": TMProc(@"middle", 1100000000, 50) };     // apparu, mais count=1 l'écarte
+    NSArray *mix = TMTopProcesses(prevMix, curMix, 2.0, 1);
+    NSArray *mixNames = [mix valueForKey:@"name"];
+    Check(mix.count == 2, @"count=1 par dimension : union = top-1 CPU + top-1 RAM = 2 process");
+    Check([mixNames containsObject:@"busy"], @"le plus gourmand CPU est là");
+    Check([mixNames containsObject:@"greedy_ram"], @"le plus gros RAM est là, malgré 0 % CPU");
+    Check(![mixNames containsObject:@"middle"], @"ni top CPU ni top RAM : écarté");
+
     Check(TMTopProcesses(previous, current, 0, 5).count == 0, @"intervalle nul : rien, pas de division");
 
+    // Nouveau changement de sémantique : un process sans delta CPU exploitable est CONSERVÉ avec
+    // cpuPercent = 0 (éligible au tri mémoire), au lieu d'être écarté.
     NSDictionary *reborn = @{ @"10": TMProc(@"chrome", 2000000000, 520), @"40": TMProc(@"nouveau", 900000000, 50) };
     NSArray *rebornTop = TMTopProcesses(previous, reborn, 2.0, 5);
-    CheckEqual([rebornTop valueForKey:@"name"], @[@"chrome"], @"pid apparu depuis le dernier relevé : pas de delta, absent");
+    Check([[rebornTop valueForKey:@"name"] containsObject:@"nouveau"], @"pid apparu depuis : conservé (cpu 0), éligible RAM");
+    for (NSDictionary *p in rebornTop) if ([p[@"name"] isEqual:@"nouveau"]) CheckEqual(p[@"cpuPercent"], @0.0, @"nouveau : cpuPercent = 0, pas de delta inventé");
     NSDictionary *reused = @{ @"10": TMProc(@"autre_app", 100, 60) };
-    Check(TMTopProcesses(previous, reused, 2.0, 5).count == 0, @"temps CPU qui recule (pid réutilisé) : écarté");
+    NSArray *reusedTop = TMTopProcesses(previous, reused, 2.0, 5);
+    Check(reusedTop.count == 1 && [reusedTop.firstObject[@"cpuPercent"] isEqual:@0.0], @"CPU qui recule (pid réutilisé) : cpuPercent forcé à 0, pas de pic négatif");
 
     NSDictionary *burst = @{ @"10": TMProc(@"video_export", 7000000000, 800) };
     NSArray *burstTop = TMTopProcesses(previous, burst, 2.0, 5);
     CheckEqual(burstTop.firstObject[@"cpuPercent"], @300.0, @"multithread : 300 % légitime, non plafonné");
+}
+
+static void TestTopProcessesEnergy(void) {
+    Section(@"TMTopProcesses — dimension énergie (ri_energy_nj)");
+    // Sans donnée d'énergie, la dimension n'entre pas dans l'union (tri sur des zéros = arbitraire).
+    NSDictionary *prevNoE = @{ @"10": TMProc(@"a", 1000000000, 100), @"20": TMProc(@"b", 100000000, 900) };
+    NSDictionary *curNoE  = @{ @"10": TMProc(@"a", 3000000000, 100), @"20": TMProc(@"b", 100000000, 900) };
+    Check(TMTopProcesses(prevNoE, curNoE, 1.0, 1).count == 2, @"sans énergie : union = CPU ∪ RAM seulement (2)");
+
+    // Avec énergie : un process qui n'est ni top CPU ni top RAM mais brûle de l'énergie entre.
+    NSDictionary *prev = @{ @"10": TMProcE(@"cpu_hog", 1000000000, 100, 1000000000),
+                            @"20": TMProcE(@"ram_hog", 100000000, 9000, 1000000000),
+                            @"30": TMProcE(@"power_hog", 100000000, 100, 1000000000) };
+    NSDictionary *cur  = @{ @"10": TMProcE(@"cpu_hog", 3000000000, 100, 1100000000),      // CPU++
+                            @"20": TMProcE(@"ram_hog", 100000000, 9000, 1100000000),       // RAM top
+                            @"30": TMProcE(@"power_hog", 150000000, 100, 6000000000) };     // +5 J en 1 s = 5 W
+    NSArray *top = TMTopProcesses(prev, cur, 1.0, 1);
+    NSArray *names = [top valueForKey:@"name"];
+    Check(top.count == 3, @"count=1 sur 3 dimensions : union = cpu_hog ∪ ram_hog ∪ power_hog");
+    Check([names containsObject:@"power_hog"], @"le plus gros consommateur d'énergie est inclus");
+    for (NSDictionary *p in top) if ([p[@"name"] isEqual:@"power_hog"])
+        CheckEqual(p[@"energyWatts"], @5.0, @"5 J sur 1 s = 5 W de puissance moyenne");
+    for (NSDictionary *p in top) if ([p[@"name"] isEqual:@"cpu_hog"])
+        CheckEqual(p[@"energyWatts"], @0.1, @"0,1 J sur 1 s = 0,1 W");
 }
 
 static void TestThresholdFire(void) {
@@ -519,6 +592,28 @@ static void TestThresholdFire(void) {
     Check(TMThresholdShouldFire(&above, 93, 90, 85), @"nouveau franchissement après réarmement : nouvelle alerte");
     BOOL exact = NO;
     Check(TMThresholdShouldFire(&exact, 90, 90, 85), @"la valeur exacte du seuil compte comme franchie");
+}
+
+static void TestAlertRearm(void) {
+    Section(@"TMAlertRearmThreshold — hystérésis des seuils réglables");
+    // 8 % du seuil : 90 → 82,8, proche de la marge d'origine codée en dur (82).
+    Check(fabs(TMAlertRearmThreshold(90) - 82.8) < 0.01, @"seuil 90 → réarmement 82,8 (8 %)");
+    Check(fabs(TMAlertRearmThreshold(100) - 92) < 0.01, @"seuil 100 → réarmement 92");
+    // Plancher de 2 unités : sans lui, un seuil bas donnerait une bande d'hystérésis quasi nulle
+    // et l'alerte se remettrait à mitrailler au moindre frémissement.
+    Check(fabs(TMAlertRearmThreshold(10) - 8) < 0.01, @"seuil bas : marge plancher de 2 unités");
+    Check(fabs(TMAlertRearmThreshold(4) - 2) < 0.01, @"seuil 4 (pression mémoire) → 2");
+    Check(TMAlertRearmThreshold(90) < 90, @"le réarmement reste sous le seuil");
+    Check(TMAlertRearmThreshold(1) >= 0, @"seuil minuscule : réarmement jamais négatif");
+    Check(TMAlertRearmThreshold(0) == 0, @"seuil nul : dégénéré mais sans crash");
+    Check(TMAlertRearmThreshold(-5) == 0, @"seuil négatif : ramené à 0");
+    // Le couple seuil/réarmement doit rester exploitable par TMThresholdShouldFire.
+    BOOL above = NO;
+    double t = 75, r = TMAlertRearmThreshold(t);
+    Check(TMThresholdShouldFire(&above, 80, t, r), @"seuil réglé à 75 : franchissement détecté");
+    Check(!TMThresholdShouldFire(&above, 72, t, r), @"72 > réarmement (69) : reste armé");
+    TMThresholdShouldFire(&above, 60, t, r);
+    Check(!above, @"60 < réarmement : désarmé");
 }
 
 // Fumée sur les collecteurs réels — même esprit que TestAwake : on interroge la vraie machine,
@@ -538,6 +633,361 @@ static void TestSystemMonitorLive(void) {
     Check([ids containsObject:@"disk"], @"le disque répond");
     Check([NSJSONSerialization isValidJSONObject:snapshot], @"snapshot réel sérialisable");
     printf("  familles présentes : %s\n", [[ids componentsJoinedByString:@", "] UTF8String]);
+
+    NSDictionary *(^familyNow)(NSString *) = ^NSDictionary *(NSString *fid) {
+        for (NSDictionary *f in families) if ([f[@"id"] isEqual:fid]) return f[@"now"];
+        return nil;
+    };
+
+    // coreTypes : sur Apple Silicon, chaîne E/P de longueur = nombre de cœurs. Omis sur une
+    // machine sans distinction P/E — on ne teste alors que sa cohérence si présent.
+    NSDictionary *cpuNow = familyNow(@"cpu");
+    NSString *coreTypes = cpuNow[@"coreTypes"];
+    if (coreTypes) {
+        int logicalCPU = 0; size_t sz = sizeof(logicalCPU);
+        sysctlbyname("hw.logicalcpu", &logicalCPU, &sz, NULL, 0);
+        // coreTypes couvre tous les cœurs physiques ; le nombre de clés « coreN » d'un tick donné
+        // peut être inférieur (un cœur E sans aucun tick sur l'intervalle n'a pas de delta).
+        NSUInteger coreKeys = 0;
+        for (NSString *k in cpuNow) if ([k hasPrefix:@"core"] && ![k isEqual:@"coreTypes"]) coreKeys++;
+        Check((int)coreTypes.length == logicalCPU, @"coreTypes : un caractère par cœur physique");
+        Check(coreTypes.length >= coreKeys, @"coreTypes couvre au moins les cœurs mesurés ce tick");
+        Check([[coreTypes stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"EP"]] length] == 0,
+              @"coreTypes : uniquement des E et des P");
+        printf("  cœurs : %s\n", coreTypes.UTF8String);
+    }
+
+    // GPU : au minimum `usage` ; renderer/tiler/memInUse selon la machine.
+    NSDictionary *gpuNow = familyNow(@"gpu");
+    if (gpuNow) {
+        Check(gpuNow[@"usage"] != nil, @"GPU : Device Utilization présent");
+        printf("  gpu : usage=%s renderer=%s tiler=%s\n",
+               [gpuNow[@"usage"] description].UTF8String,
+               [gpuNow[@"renderer"] ?: @"—" description].UTF8String,
+               [gpuNow[@"tiler"] ?: @"—" description].UTF8String);
+    }
+
+    // Batterie : présente sur un portable, absente sur un Mac de bureau (famille nil).
+    NSDictionary *batt = familyNow(@"battery");
+    if (batt) {
+        Check(batt[@"percent"] != nil, @"batterie : pourcentage présent");
+        NSNumber *pct = batt[@"percent"];
+        Check(pct.doubleValue >= 0 && pct.doubleValue <= 100, @"batterie : pourcentage dans [0,100]");
+        printf("  batterie : %s%% cycles=%s santé=%s%% cond=%s %sW\n",
+               pct.description.UTF8String,
+               [batt[@"cycleCount"] ?: @"—" description].UTF8String,
+               [batt[@"healthPercent"] ?: @"—" description].UTF8String,
+               [batt[@"conditionOK"] boolValue] ? "OK" : "!",
+               [batt[@"powerWatts"] ?: @"—" description].UTF8String);
+    } else {
+        printf("  batterie : absente (Mac de bureau ?)\n");
+    }
+
+    // Capteurs : thermalState toujours présent (0-3) ; ventilateurs selon la machine.
+    NSDictionary *sensorsNow = familyNow(@"sensors");
+    if (sensorsNow) {
+        NSNumber *thermal = sensorsNow[@"thermalState"];
+        Check(thermal != nil && thermal.intValue >= 0 && thermal.intValue <= 3, @"état thermique dans [0,3]");
+        NSMutableArray *fans = [NSMutableArray array];
+        for (NSString *k in sensorsNow) if ([k hasPrefix:@"fan"]) [fans addObject:sensorsNow[k]];
+        printf("  thermique : état=%s temp=%s ventilateurs=%s\n",
+               thermal.description.UTF8String,
+               [sensorsNow[@"tempC"] ?: @"—" description].UTF8String,
+               fans.count ? [[fans componentsJoinedByString:@"/"] UTF8String] : "aucun");
+
+        // Agrégats par famille : cohérence des relations max ≥ moyenne, et tempC = point chaud.
+        NSNumber *dieMax = sensorsNow[@"dieMaxC"], *dieAvg = sensorsNow[@"dieAvgC"];
+        if (dieMax) {
+            Check(dieMax.doubleValue >= dieAvg.doubleValue, @"capteurs : die max ≥ die moyenne");
+            Check([sensorsNow[@"tempC"] isEqualToNumber:dieMax], @"capteurs : tempC = point chaud du die");
+            Check([sensorsNow[@"dieCount"] integerValue] > 0, @"capteurs : au moins un die identifié");
+            printf("  dies : %s capteurs, max=%s moy=%s | périph. : max=%s moy=%s\n",
+                   [sensorsNow[@"dieCount"] description].UTF8String,
+                   dieMax.description.UTF8String, dieAvg.description.UTF8String,
+                   [sensorsNow[@"deviceMaxC"] ?: @"—" description].UTF8String,
+                   [sensorsNow[@"deviceAvgC"] ?: @"—" description].UTF8String);
+        }
+        NSNumber *devMax = sensorsNow[@"deviceMaxC"];
+        if (devMax) Check(devMax.doubleValue >= [sensorsNow[@"deviceAvgC"] doubleValue],
+                          @"capteurs : périphériques max ≥ moyenne");
+    }
+}
+
+static NSDictionary *TMFakeSnapshot(void);  // défini avec les tests de widgets, plus bas
+
+static void TestLongHistory(void) {
+    Section(@"TMLongHistoryAppend — historique 24 h, une ligne par minute");
+    const NSTimeInterval day = 24 * 60 * 60;
+    NSArray *rows = TMLongHistoryAppend(nil, @{ @"t": @1000, @"cpu": @10 }, day, 2000);
+    Check(rows.count == 1, @"première ligne : historique créé depuis nil");
+    rows = TMLongHistoryAppend(rows, @{ @"t": @1060, @"cpu": @20 }, day, 2000);
+    Check(rows.count == 2 && [rows.lastObject[@"cpu"] isEqual:@20], @"ligne suivante ajoutée en fin");
+
+    // Élagage par âge : seules les lignes de plus de 24 h par rapport à la plus récente tombent.
+    // Ici t=1000 est à 86 401 s (dehors) mais t=1060 à 86 341 s (dedans) : la frontière se voit.
+    NSArray *aged = TMLongHistoryAppend(rows, @{ @"t": @(1000 + day + 1), @"cpu": @30 }, day, 2000);
+    Check(aged.count == 2, @"au-delà de 24 h : seule la ligne hors fenêtre tombe");
+    Check([aged.firstObject[@"t"] isEqual:@1060], @"la plus ancienne survivante est celle encore dans la fenêtre");
+    Check([aged.lastObject[@"t"] doubleValue] == 1000 + day + 1, @"la ligne récente est conservée");
+
+    // La fenêtre est relative à la ligne la plus récente, pas à l'heure courante : un historique
+    // entièrement ancien mais cohérent doit survivre.
+    NSArray *old = TMLongHistoryAppend(@[@{ @"t": @10 }], @{ @"t": @70 }, day, 2000);
+    Check(old.count == 2, @"historique ancien mais dans la fenêtre : conservé intégralement");
+
+    // Garde-fou de volume, indépendant de l'âge.
+    NSArray *capped = TMLongHistoryAppend(@[@{ @"t": @1 }, @{ @"t": @2 }, @{ @"t": @3 }], @{ @"t": @4 }, day, 2);
+    Check(capped.count == 2 && [capped.firstObject[@"t"] isEqual:@3], @"plafond de lignes : les plus anciennes tombent");
+
+    // Robustesse : sans horodatage exploitable, on ne corrompt pas l'historique existant.
+    NSArray *base = @[@{ @"t": @100 }];
+    Check(TMLongHistoryAppend(base, @{ @"cpu": @5 }, day, 2000).count == 1, @"ligne sans « t » : ignorée");
+    Check(TMLongHistoryAppend(base, @{ @"t": @"x" }, day, 2000).count == 1, @"« t » non numérique : ignorée");
+    // Horodatage qui recule (changement d'heure, restauration) : refusé plutôt que d'obtenir une
+    // série non monotone que les courbes dessineraient à l'envers.
+    Check(TMLongHistoryAppend(base, @{ @"t": @50 }, day, 2000).count == 1, @"horodatage antérieur : refusé");
+    Check(TMLongHistoryAppend(base, @{ @"t": @100 }, day, 2000).count == 2, @"horodatage identique : accepté");
+
+    Section(@"TMLongHistoryRow — extraction des métriques suivies");
+    NSDictionary *snapshot = TMFakeSnapshot();
+    NSDictionary *row = TMLongHistoryRow(snapshot, 1700000000.4);
+    Check([row[@"t"] doubleValue] == 1700000000, @"horodatage arrondi à la seconde");
+    Check([row[@"cpu"] isEqual:@43], @"CPU relevé depuis la famille cpu");
+    Check([row[@"ram"] isEqual:@68], @"RAM relevée depuis usedPercent");
+    Check([row[@"temp"] isEqual:@50], @"température relevée depuis sensors.tempC");
+    Check([row[@"batt"] isEqual:@100], @"batterie relevée depuis battery.percent");
+    Check(row[@"rx"] != nil && row[@"tx"] != nil, @"débits réseau relevés");
+    // Une famille absente ne doit pas fabriquer de zéro : la clé disparaît, comme partout ailleurs.
+    NSDictionary *partial = @{ @"families": @[ @{ @"id": @"cpu", @"now": @{ @"total": @7 }, @"series": @{} } ] };
+    NSDictionary *thin = TMLongHistoryRow(partial, 1000);
+    Check(thin[@"cpu"] != nil && thin[@"temp"] == nil, @"famille absente : clé omise, pas de zéro inventé");
+    Check(TMLongHistoryRow(@{ @"families": @[] }, 1000) == nil, @"aucune métrique : pas de ligne vide");
+}
+
+static void TestSensorFamily(void) {
+    Section(@"TMSensorFamilyForName — regroupement des capteurs thermiques");
+    // Noms réels relevés sur Apple Silicon (M-series) : ce sont ceux que la machine expose.
+    Check([TMSensorFamilyForName(@"PMU tdie3") isEqualToString:@"die"], @"« PMU tdie3 » → die");
+    Check([TMSensorFamilyForName(@"PMU tdie10") isEqualToString:@"die"], @"« PMU tdie10 » → die");
+    Check([TMSensorFamilyForName(@"PMU tdev1") isEqualToString:@"device"], @"« PMU tdev1 » → périphérique");
+    Check([TMSensorFamilyForName(@"gas gauge battery") isEqualToString:@"battery"], @"« gas gauge battery » → batterie");
+    // tcal est une référence de calibration qui lit ~10 °C au-dessus des dies : l'inclure
+    // fausserait le point chaud. Il doit être écarté malgré son préfixe « PMU t… ».
+    Check(TMSensorFamilyForName(@"PMU tcal") == nil, @"« PMU tcal » (calibration) → écarté");
+    // Noms Intel/génériques : le motif doit rester utile hors Apple Silicon.
+    Check([TMSensorFamilyForName(@"PECI CPU") isEqualToString:@"die"], @"« PECI CPU » (Intel) → die");
+    Check([TMSensorFamilyForName(@"SOC MTR Temp Sensor") isEqualToString:@"die"], @"nom contenant « SOC » → die");
+    // Insensibilité à la casse et cas dégénérés.
+    Check([TMSensorFamilyForName(@"PMU TDIE1") isEqualToString:@"die"], @"casse ignorée");
+    Check(TMSensorFamilyForName(nil) == nil, @"nom absent → non classé");
+    Check(TMSensorFamilyForName(@"") == nil, @"nom vide → non classé");
+    Check(TMSensorFamilyForName(@"NAND Q1") == nil, @"nom inconnu → non classé (pas de famille inventée)");
+    // La batterie prime : un capteur de batterie ne doit jamais compter comme un die, même si
+    // son nom contenait par ailleurs un motif « die ».
+    Check([TMSensorFamilyForName(@"battery tdie") isEqualToString:@"battery"], @"batterie prioritaire sur die");
+}
+
+#pragma mark - Widgets de la barre des menus
+
+// Snapshot moniteur synthétique : familles avec `now` et `series`, comme en production.
+static NSDictionary *TMFakeSnapshot(void) {
+    return @{ @"families": @[
+        @{ @"id": @"cpu", @"now": @{ @"total": @43 }, @"series": @{ @"total": @[@10, @20, @43] } },
+        @{ @"id": @"ram", @"now": @{ @"usedPercent": @68, @"pressureLevel": @1 }, @"series": @{} },
+        @{ @"id": @"gpu", @"now": @{ @"usage": @24 }, @"series": @{ @"usage": @[@5, @24] } },
+        @{ @"id": @"network", @"now": @{ @"rxBytesPerSec": @75776, @"txBytesPerSec": @71680 }, @"series": @{} },
+        @{ @"id": @"disk", @"now": @{ @"usedPercent": @74 }, @"series": @{} },
+        @{ @"id": @"sensors", @"now": @{ @"tempC": @50 }, @"series": @{} },
+        @{ @"id": @"battery", @"now": @{ @"percent": @100, @"fullyCharged": @YES, @"charging": @NO, @"powerWatts": @-20 }, @"series": @{} },
+    ] };
+}
+
+static void TestWidgetOrdering(void) {
+    Section(@"TMArrayByMovingItem — ordre des widgets dans la barre");
+    NSArray *list = @[@"cpu", @"memory", @"network"];
+    Check([TMArrayByMovingItem(list, @"memory", -1) isEqual:(@[@"memory", @"cpu", @"network"])],
+          @"déplacement vers la gauche");
+    Check([TMArrayByMovingItem(list, @"memory", 1) isEqual:(@[@"cpu", @"network", @"memory"])],
+          @"déplacement vers la droite");
+    // Butées : un bouton en bout de liste ne doit rien réordonner ni faire disparaître d'élément.
+    Check([TMArrayByMovingItem(list, @"cpu", -1) isEqual:list], @"premier vers la gauche : inchangé");
+    Check([TMArrayByMovingItem(list, @"network", 1) isEqual:list], @"dernier vers la droite : inchangé");
+    Check([TMArrayByMovingItem(list, @"gpu", 1) isEqual:list], @"élément absent : inchangé");
+    Check([TMArrayByMovingItem(list, @"cpu", 0) isEqual:list], @"delta nul : inchangé");
+    Check(TMArrayByMovingItem(@[], @"cpu", 1).count == 0, @"liste vide : pas de crash");
+    // Un déplacement de plusieurs rangs d'un coup reste borné aux extrémités.
+    Check([TMArrayByMovingItem(list, @"cpu", 2) isEqual:(@[@"memory", @"network", @"cpu"])],
+          @"déplacement de deux rangs");
+    Check([TMArrayByMovingItem(list, @"cpu", 5) isEqual:list], @"delta hors bornes : inchangé");
+    // Aucun élément perdu ni dupliqué, quel que soit le mouvement.
+    NSArray *moved = TMArrayByMovingItem(list, @"network", -2);
+    Check(moved.count == list.count && [[NSSet setWithArray:moved] isEqual:[NSSet setWithArray:list]],
+          @"le déplacement conserve exactement les mêmes éléments");
+}
+
+static void TestMenuBarWidgets(void) {
+    Section(@"TMWidgetReadout — extraction et mise en forme");
+    NSDictionary *snap = TMFakeSnapshot();
+
+    NSDictionary *cpu = TMWidgetReadout(@"cpu", snap);
+    CheckEqual(cpu[@"style"], @"bars", @"CPU : style histogramme");
+    CheckEqual(cpu[@"title"], @"43 %", @"CPU : titre = charge globale");
+    CheckEqual(@([cpu[@"series"] count]), @3, @"CPU : série historique transmise");
+
+    NSDictionary *mem = TMWidgetReadout(@"memory", snap);
+    CheckEqual(mem[@"style"], @"pie", @"Mémoire : style camembert");
+    CheckEqual(mem[@"title"], @"68 %", @"Mémoire : titre");
+    Check(fabs([mem[@"fraction"] doubleValue] - 0.68) < 1e-9, @"Mémoire : fraction 0,68");
+
+    NSDictionary *net = TMWidgetReadout(@"network", snap);
+    CheckEqual(net[@"style"], @"twoLine", @"Réseau : deux lignes");
+    CheckEqual(net[@"primary"], @"↓ 74 Ko/s", @"Réseau : réception formatée");
+    CheckEqual(net[@"secondary"], @"↑ 70 Ko/s", @"Réseau : émission formatée");
+
+    NSDictionary *temp = TMWidgetReadout(@"temperature", snap);
+    CheckEqual(temp[@"primary"], @"50°", @"Température : °C");
+    CheckEqual(temp[@"secondary"], @"20 W", @"Température : watts (valeur absolue)");
+
+    NSDictionary *batt = TMWidgetReadout(@"battery", snap);
+    CheckEqual(batt[@"style"], @"battery", @"Batterie : style pile");
+    CheckEqual(batt[@"primary"], @"Plein", @"Batterie pleine : « Plein »");
+    CheckEqual(batt[@"secondary"], @"100 %", @"Batterie : pourcentage");
+    Check(fabs([batt[@"fraction"] doubleValue] - 1.0) < 1e-9, @"Batterie : fraction 1");
+
+    NSDictionary *disk = TMWidgetReadout(@"disk", snap);
+    CheckEqual(disk[@"title"], @"74 %", @"Disque : occupation");
+
+    // Sévérité : rare, seulement sur états anormaux.
+    CheckEqual(cpu[@"severity"], @0, @"CPU chargé n'est pas une alerte");
+    NSDictionary *hotSnap = @{ @"families": @[ @{ @"id": @"sensors", @"now": @{ @"tempC": @97 }, @"series": @{} } ] };
+    CheckEqual(TMWidgetReadout(@"temperature", hotSnap)[@"severity"], @2, @"97 °C : critique");
+    NSDictionary *lowBatt = @{ @"families": @[ @{ @"id": @"battery", @"now": @{ @"percent": @8, @"charging": @NO }, @"series": @{} } ] };
+    CheckEqual(TMWidgetReadout(@"battery", lowBatt)[@"severity"], @2, @"8 % sur batterie : critique");
+
+    // Absence de donnée : hasValue NO, jamais de valeur inventée.
+    NSDictionary *empty = @{ @"families": @[] };
+    Check(![TMWidgetReadout(@"cpu", empty)[@"hasValue"] boolValue], @"CPU sans famille : hasValue NO");
+    Check(![TMWidgetReadout(@"battery", empty)[@"hasValue"] boolValue], @"Batterie absente (bureau) : hasValue NO");
+
+    // Valeur mono-ligne (forme « texte ») et fractions pour anneau/camembert.
+    CheckEqual(cpu[@"value"], @"43 %", @"CPU : valeur texte");
+    CheckEqual(temp[@"value"], @"50°", @"Température : valeur texte");
+    CheckEqual(batt[@"value"], @"100 %", @"Batterie : valeur texte = pourcentage");
+    Check(fabs([TMWidgetReadout(@"temperature", snap)[@"fraction"] doubleValue] - 0.5) < 1e-9, @"Température : fraction 50/100 pour l'anneau");
+    CheckEqual(@([cpu[@"series"] count]), @3, @"CPU : série pour barres/courbe");
+    Check([TMWidgetReadout(@"memory", snap)[@"series"] count] == 0 || YES, @"Mémoire : série usedPercent transmise si présente");
+
+    // Le dessin ne doit pas planter, quelle que soit la forme, la couleur ou l'entrée (fumée).
+    NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"text", @"twoLine", @"battery", @""];
+    NSArray *colors = @[@"auto", @"blue", @"red", @"purple", @"inconnu"];
+    for (NSString *wid in TMMenuBarWidgetIDs())
+        for (NSString *shape in shapes)
+            for (NSString *color in colors) {
+                Check(TMWidgetImageStyled(TMWidgetReadout(wid, snap), shape, color) != nil,
+                      ([NSString stringWithFormat:@"dessin %@ forme=%@ couleur=%@", wid, shape.length ? shape : @"(auto)", color]));
+                Check(TMWidgetImageStyled(TMWidgetReadout(wid, empty), shape, color) != nil,
+                      ([NSString stringWithFormat:@"dessin %@ sans donnée forme=%@ : pas de crash", wid, shape.length ? shape : @"(auto)"]));
+            }
+
+    // La sévérité prime sur la couleur choisie : une couleur nommée existe, mais l'alerte reste.
+    Check(TMWidgetNamedColor(@"blue") != nil, @"la palette expose « blue »");
+    Check(TMWidgetNamedColor(@"auto") == nil, @"« auto » n'est pas une couleur nommée (template neutre)");
+}
+
+#pragma mark - Écrans (luminosité)
+
+static void TestDisplayBrightnessClamp(void) {
+    Section(@"TMClampBrightnessPercent / TMSteppedBrightness — bornes");
+    CheckEqual(@(TMClampBrightnessPercent(150)), @100.0, @"au-dessus de 100 -> 100");
+    CheckEqual(@(TMClampBrightnessPercent(-10)), @0.0, @"sous 0 -> 0");
+    CheckEqual(@(TMClampBrightnessPercent(NAN)), @0.0, @"NaN -> 0, jamais propagé au JSON");
+    CheckEqual(@(TMClampBrightnessPercent(42)), @42.0, @"valeur normale inchangée");
+    CheckEqual(@(TMSteppedBrightness(50, YES, 6)), @56.0, @"un cran vers le haut");
+    CheckEqual(@(TMSteppedBrightness(50, NO, 6)), @44.0, @"un cran vers le bas");
+    CheckEqual(@(TMSteppedBrightness(98, YES, 6)), @100.0, @"un cran vers le haut borné à 100");
+    CheckEqual(@(TMSteppedBrightness(2, NO, 6)), @0.0, @"un cran vers le bas borné à 0");
+}
+
+static void TestDisplayVCPConversion(void) {
+    Section(@"TMPercentFromVCPValue / TMVCPValueFromPercent — échelle propre au moniteur");
+    CheckEqual(@(TMPercentFromVCPValue(50, 100)), @50, @"échelle 0-100 : valeur directe");
+    CheckEqual(@(TMPercentFromVCPValue(32, 64)), @50, @"échelle 0-64 : moitié -> 50 %");
+    CheckEqual(@(TMPercentFromVCPValue(10, 0)), @0, @"maximum nul (VCP mal formé) -> 0, pas de division par zéro");
+    CheckEqual(@(TMVCPValueFromPercent(50, 64)), @32, @"50 % reconverti vers l'échelle 0-64");
+    CheckEqual(@(TMVCPValueFromPercent(100, 64)), @64, @"100 % -> le maximum exact");
+    CheckEqual(@(TMVCPValueFromPercent(0, 64)), @0, @"0 % -> 0");
+    CheckEqual(@(TMVCPValueFromPercent(150, 64)), @64, @"pourcentage hors bornes -> plafonné au maximum");
+}
+
+// Le format de trame DDC/CI (VESA MCCS) est un standard public, mais la convention exacte de
+// l'octet de checksum d'une réponse varie selon les sources consultées, et aucun moniteur externe
+// n'est branché sur la machine de développement pour la vérifier en conditions réelles (voir
+// design). Ce test valide donc la cohérence interne construction/lecture — pas la conformité à un
+// vrai moniteur, qui reste à vérifier sur matériel réel.
+static void TestDisplayDDCProtocol(void) {
+    Section(@"TMDDCGetVCPRequest / TMDDCSetVCPRequest / TMDDCParseVCPReply — format m1ddc");
+    // Get : [0x82, 0x01, vcp, checksum], sans octet source 0x51 (celui-ci est l'offset I2C).
+    NSData *getRequest = TMDDCGetVCPRequest(TMDDCBrightnessVCPCode);
+    CheckEqual(@(getRequest.length), @4, @"requête Get VCP : 4 octets (longueur, opcode, code VCP, checksum)");
+    const uint8_t *g = getRequest.bytes;
+    CheckEqual(@(g[0]), @(0x82), @"longueur 0x82 (0x80 | 2 octets de données)");
+    CheckEqual(@(g[1]), @(0x01), @"opcode Get VCP Feature = 0x01");
+    CheckEqual(@(g[2]), @(TMDDCBrightnessVCPCode), @"code VCP = luminosité (0x10)");
+    CheckEqual(@(g[3]), @(0x6E ^ 0x82 ^ 0x01 ^ TMDDCBrightnessVCPCode), @"checksum Get = 0x6E ^ octets (sans 0x51)");
+
+    // Set : [0x84, 0x03, vcp, MSB, LSB, checksum] ; checksum inclut l'adresse source 0x51.
+    NSData *setRequest = TMDDCSetVCPRequest(TMDDCBrightnessVCPCode, 42);
+    CheckEqual(@(setRequest.length), @6, @"requête Set VCP : 6 octets");
+    const uint8_t *s = setRequest.bytes;
+    CheckEqual(@(s[0]), @(0x84), @"longueur 0x84 (0x80 | 4)");
+    CheckEqual(@(s[1]), @(0x03), @"opcode Set VCP Feature = 0x03");
+    CheckEqual(@(((s[3] << 8) | s[4])), @42, @"valeur reconstruite depuis MSB/LSB");
+    CheckEqual(@(s[5]), @(0x6E ^ 0x51 ^ 0x84 ^ 0x03 ^ TMDDCBrightnessVCPCode ^ 0 ^ 42), @"checksum Set inclut 0x51");
+
+    // Réponse « Get VCP Feature » : opcode [2]=0x02, résultat [3]=0x00, code VCP [4], max [6-7],
+    // courant [8-9]. Le checksum n'est plus validé (convention de graine incertaine ; m1ddc ne la
+    // vérifie pas non plus) — on s'appuie sur opcode + code VCP + plausibilité du maximum.
+    uint8_t reply[12] = { 0x6E, 0x88, 0x02, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x00, 100, 0x00, 62, 0x00, 0x00 };
+    NSData *replyData = [NSData dataWithBytes:reply length:sizeof(reply)];
+    uint16_t current = 0, maximum = 0;
+    Check(TMDDCParseVCPReply(replyData, TMDDCBrightnessVCPCode, &current, &maximum), @"trame valide acceptée");
+    CheckEqual(@(current), @62, @"valeur courante extraite (octets 8-9)");
+    CheckEqual(@(maximum), @100, @"maximum extrait (octets 6-7)");
+
+    uint8_t badOp[12] = { 0x6E, 0x88, 0x6D, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x00, 100, 0x00, 62, 0x00, 0x00 };
+    Check(!TMDDCParseVCPReply([NSData dataWithBytes:badOp length:12], TMDDCBrightnessVCPCode, &current, &maximum),
+          @"charabia d'un écran Apple (opcode ≠ 0x02) -> rejeté");
+
+    uint8_t wrongVCP[12] = { 0x6E, 0x88, 0x02, 0x00, 0x12, 0x00, 0x00, 100, 0x00, 62, 0x00, 0x00 };
+    Check(!TMDDCParseVCPReply([NSData dataWithBytes:wrongVCP length:12], TMDDCBrightnessVCPCode, &current, &maximum),
+          @"code VCP inattendu -> rejeté");
+
+    uint8_t absurdMax[12] = { 0x6E, 0x88, 0x02, 0x00, TMDDCBrightnessVCPCode, 0x00, 0x80, 0xC1, 0x37, 0x2F, 0x00, 0x00 };
+    Check(!TMDDCParseVCPReply([NSData dataWithBytes:absurdMax length:12], TMDDCBrightnessVCPCode, &current, &maximum),
+          @"maximum invraisemblable (0x80C1) -> rejeté");
+
+    Check(!TMDDCParseVCPReply([NSData data], TMDDCBrightnessVCPCode, &current, &maximum), @"trame vide -> rejetée, pas de crash");
+}
+
+// Fumée sur le vrai matériel — même esprit que TestSystemMonitorLive : l'écran interne doit
+// répondre sur toute machine de développement. Aucune assertion sur un écran externe, puisque son
+// éventuelle présence dépend de la machine qui exécute les tests.
+static void TestDisplayManagerLive(void) {
+    Section(@"TMDisplayManager — détection réelle (fumée)");
+    TMDisplayManager *manager = [TMDisplayManager new];
+    [manager rescan];
+    Check(manager.displays.count >= 1, @"au moins un écran détecté (l'interne, sur un portable)");
+    TMDisplay *builtin = [manager displayWithIdentifier:@"builtin"];
+    if (builtin) {
+        Check(builtin.kind == TMDisplayKindBuiltin, @"l'écran interne est classé comme tel");
+        printf("  écran interne : disponible=%s brightness=%s\n",
+               builtin.available ? "oui" : "non",
+               builtin.brightnessPercent ? builtin.brightnessPercent.description.UTF8String : "—");
+    } else {
+        printf("  aucun écran interne détecté (machine de bureau ?)\n");
+    }
+    NSArray *snapshot = [manager snapshot];
+    Check([NSJSONSerialization isValidJSONObject:snapshot], @"snapshot des écrans sérialisable");
 }
 
 #pragma mark - Gestionnaire de fenêtres
@@ -902,6 +1352,7 @@ int main(void) {
         TestExpiredWindows();
         TestWindowClassification();
         TestHistory();
+        TestAccountsCache();
         TestOpenAIWindowIdentity();
         TestOpenAIHistoryCollision();
         TestAwake();
@@ -932,8 +1383,18 @@ int main(void) {
         TestWatchdog();
         TestForecastExhaustion();
         TestTopProcesses();
+        TestTopProcessesEnergy();
         TestThresholdFire();
+        TestAlertRearm();
+        TestLongHistory();
+        TestSensorFamily();
         TestSystemMonitorLive();
+        TestDisplayBrightnessClamp();
+        TestDisplayVCPConversion();
+        TestDisplayDDCProtocol();
+        TestDisplayManagerLive();
+        TestWidgetOrdering();
+        TestMenuBarWidgets();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

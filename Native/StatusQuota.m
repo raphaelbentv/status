@@ -241,6 +241,43 @@ NSString *TMHistoryPath(void) {
     return [TMSupportDirectory() stringByAppendingPathComponent:@"quota-history.json"];
 }
 
+NSString *TMAccountsCachePath(void) {
+    return [TMSupportDirectory() stringByAppendingPathComponent:@"accounts-cache.json"];
+}
+
+// Ne conserve que ce qui est réellement sérialisable : un payload de compte peut porter, selon les
+// chemins, des valeurs non-JSON (NSNull passe, mais on se protège). En cas de doute, on n'écrit
+// rien plutôt qu'un fichier corrompu — le pire cas reste l'ancien comportement (démarrage vide).
+void TMSaveAccountsCache(NSDictionary *accounts) {
+    if (![accounts isKindOfClass:NSDictionary.class] || !accounts.count) return;
+    if (![NSJSONSerialization isValidJSONObject:accounts]) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:accounts options:0 error:nil];
+    if (data) [data writeToFile:TMAccountsCachePath() atomically:YES];
+}
+
+NSDictionary *TMLoadAccountsCache(void) {
+    NSData *data = [NSData dataWithContentsOfFile:TMAccountsCachePath()];
+    NSDictionary *cache = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [cache isKindOfClass:NSDictionary.class] ? cache : nil;
+}
+
+NSString *TMMetricsHistoryPath(void) {
+    return [TMSupportDirectory() stringByAppendingPathComponent:@"metrics-history.json"];
+}
+
+void TMSaveMetricsHistory(NSArray *rows) {
+    if (![rows isKindOfClass:NSArray.class]) return;
+    if (![NSJSONSerialization isValidJSONObject:rows]) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:rows options:0 error:nil];
+    if (data) [data writeToFile:TMMetricsHistoryPath() atomically:YES];
+}
+
+NSArray *TMLoadMetricsHistory(void) {
+    NSData *data = [NSData dataWithContentsOfFile:TMMetricsHistoryPath()];
+    NSArray *rows = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [rows isKindOfClass:NSArray.class] ? rows : @[];
+}
+
 const NSTimeInterval TMForecastMinimumSpan = 900;
 
 BOOL TMStaleAlertShouldFire(BOOL *wasStale, BOOL isStale) {

@@ -13,7 +13,10 @@
 #import "StatusWindowManager.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
+#import "StatusDisplays.h"
+#import "StatusMenuBarWidgets.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
+#import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -375,6 +378,11 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSDictionary *previousProcessSample;
 @property NSTimeInterval previousProcessAt;
 @property NSArray *topProcesses;
+// Historique long (24 h) : accumulé en mémoire, écrit sur disque par à-coups pour ne pas
+// solliciter le SSD chaque minute.
+@property NSArray *metricsLog;
+@property NSTimeInterval metricsLogLastAppend;
+@property NSTimeInterval metricsLogLastSave;
 @property BOOL processTickParity;
 // États d'hystérésis des alertes système — un booléen par seuil surveillé.
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
@@ -391,6 +399,13 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSInteger directFailures; // compteur du chien de garde (feature 3)
 @property id globalShortcutMonitor, localShortcutMonitor;
 @property TMWindowManager *windowManager;
+@property TMDisplayManager *displayManager;
+@property id brightnessGlobalMonitor, brightnessLocalMonitor;
+@property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
+@property NSPopover *widgetPopover;
+@property WKWebView *widgetWebView;
+@property BOOL widgetWebReady;
+@property (copy) NSString *currentWidgetId;
 @property NSPanel *pickerPanel;
 @property WKWebView *pickerWebView;
 @property NSArray<TMWindowCandidate *> *pickerCandidates;
@@ -447,7 +462,23 @@ static const CGFloat TMTitleBarHeight = 28;
     if (migrations[stored]) [defaults setObject:migrations[stored] forKey:@"menuBarMetric"];
     self.openAIAccount = TMDisconnectedOpenAIAccount(@"");
     self.claudeAccount = TMEmptyClaudeAccount();
+    // Réafficher les derniers volumes connus immédiatement, sans attendre le premier sondage : ils
+    // ont été persistés en continu à chaque mise à jour. Sans cela, le grand chiffre et la barre
+    // des menus restent à « — » plusieurs secondes après chaque redémarrage.
+    [self restoreCachedAccounts];
+    // Historique 24 h de la session précédente : il reprend là où il s'était arrêté. Les lignes
+    // trop vieilles s'élaguent au premier ajout, pas ici — inutile d'écrire au lancement.
+    self.metricsLog = TMLoadMetricsHistory();
+    // Démarrer le compteur maintenant plutôt qu'à zéro : sinon le tout premier tick journalise une
+    // ligne alors que CPU et réseau n'ont pas encore de delta (ils exigent deux échantillons) et
+    // sont donc absents. Une poignée de redémarrages suffirait à cribler la vue 24 h de trous.
+    self.metricsLogLastAppend = [NSDate date].timeIntervalSince1970;
     self.notifiedThresholds = [NSMutableDictionary dictionary];
+    // Avant tout appel possible à pushData (refreshCostsInBackground en pousse un dès le
+    // lancement) : `payload` lit self.displayManager sans filet, un nil ferait planter le
+    // literal @{...} plutôt que d'omettre la clé.
+    self.displayManager = [TMDisplayManager new];
+    [self.displayManager rescan];
     self.codexServer = [TMCodexAppServer new];
     __weak typeof(self) weakSelf = self;
     self.codexServer.notificationHandler = ^(NSString *method, NSDictionary *params) {
@@ -457,6 +488,7 @@ static const CGFloat TMTitleBarHeight = 28;
     [self buildStatusItem];
     [self scheduleRefresh];
     [self startSystemMonitor];
+    [self rebuildMenuBarWidgets];  // icônes système activées par l'utilisateur, à côté de la jauge quota
     [self refreshCostsInBackground];
     [[TMFxRate shared] refreshIfStale];  // taux de change USD→EUR, en fond, si le cache est périmé
     self.keyboardLock = [TMKeyboardLock new];
@@ -464,6 +496,8 @@ static const CGFloat TMTitleBarHeight = 28;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
     [self installGlobalShortcut];
     [self installWindowShortcuts];
+    [self installBrightnessKeyMonitor];
+    [self observeDisplayChanges];
     [self requestNotificationAuthorization];
     [self observeWakeNotifications];
     [self.window makeKeyAndOrderFront:nil];
@@ -483,7 +517,10 @@ static const CGFloat TMTitleBarHeight = 28;
     [self.keyboardLock forceUnlock];
     [self removeGlobalShortcut];
     [self removeWindowShortcuts];  // même logique : le tap mourrait aussi, mais soyons explicites
+    [self removeBrightnessKeyMonitor];
     [self.metricsTimer invalidate];
+    // Dernier vidage synchrone : sans lui, jusqu'à 5 min d'historique disparaîtraient à la fermeture.
+    if (self.metricsLog.count) TMSaveMetricsHistory(self.metricsLog);
     [self.codexServer stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
 }
@@ -505,6 +542,19 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (void)systemDidWake:(NSNotification *)notification {
     [self refresh:nil];  // automatic: if the endpoint was failing before sleep, keep honouring the backoff
+    [self rescanDisplays];  // un moniteur externe peut avoir été rebranché pendant la veille
+}
+
+// Rebranchement/débranchement d'un écran, ou réveil : les identifiants DDC/CoreDisplay précédents
+// ne sont plus valables tels quels, il faut réénumérer plutôt que rafraîchir en place.
+- (void)observeDisplayChanges {
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(rescanDisplays)
+                                                name:NSApplicationDidChangeScreenParametersNotification object:nil];
+}
+
+- (void)rescanDisplays {
+    [self.displayManager rescan];
+    [self pushData];
 }
 
 - (void)buildWindow {
@@ -575,6 +625,151 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusPopover.contentSize = frame.size;
     self.statusPopover.contentViewController = controller;
     [self updateStatusMenu];
+}
+
+#pragma mark - Widgets de la barre des menus (icônes système multiples)
+
+// L'ordre du réglage `menuBarWidgets` EST l'ordre d'affichage : c'est lui que les boutons
+// monter/descendre manipulent. On ne fait que filtrer les ids inconnus (réglage d'une version
+// ultérieure, ou fichier bricolé à la main) et les doublons.
+- (NSArray<NSString *> *)enabledWidgets {
+    NSArray *stored = [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"];
+    NSArray *catalogue = TMMenuBarWidgetIDs();
+    NSMutableArray *valid = [NSMutableArray array];
+    for (NSString *wid in stored)
+        if ([wid isKindOfClass:NSString.class] && [catalogue containsObject:wid] && ![valid containsObject:wid])
+            [valid addObject:wid];
+    return valid;
+}
+
+// Crée/détruit les NSStatusItem pour coller à la liste activée. Idempotent : appelé au lancement
+// et à chaque bascule de réglage.
+- (void)rebuildMenuBarWidgets {
+    if (!self.widgetItems) self.widgetItems = [NSMutableDictionary dictionary];
+    NSArray<NSString *> *enabled = [self enabledWidgets];
+
+    // Retirer les widgets désactivés.
+    for (NSString *wid in self.widgetItems.allKeys)
+        if (![enabled containsObject:wid]) {
+            [NSStatusBar.systemStatusBar removeStatusItem:self.widgetItems[wid]];
+            [self.widgetItems removeObjectForKey:wid];
+        }
+
+    // Ajouter les manquants. L'ordre d'affichage vient de la création : macOS insère chaque
+    // nouveau NSStatusItem à gauche des précédents, d'où le parcours à l'envers pour que le
+    // premier de la liste finisse le plus à gauche. Un simple ajout ne réordonne donc pas
+    // l'existant — c'est reorderMenuBarWidgets qui s'en charge en recréant tout.
+    for (NSString *wid in enabled.reverseObjectEnumerator) {
+        if (self.widgetItems[wid]) continue;
+        NSStatusItem *item = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
+        item.button.image = TMWidgetImage(TMWidgetReadout(wid, @{}));  // tiret en attendant le 1er tick
+        item.button.imagePosition = NSImageLeading;
+        item.button.target = self;
+        item.button.action = @selector(widgetClicked:);
+        item.button.identifier = wid;  // pour retrouver le widget au clic et au redessin
+        self.widgetItems[wid] = item;
+    }
+    [self updateMenuBarWidgetsFromMonitor];
+}
+
+// Réordonner impose de tout recréer : la position d'un NSStatusItem est fixée à sa création et
+// aucune API publique ne la déplace après coup. On détruit donc l'ensemble avant de laisser
+// rebuildMenuBarWidgets les recréer dans le bon ordre. Visible à l'écran (les icônes clignotent
+// brièvement), mais c'est le seul chemin disponible.
+- (void)reorderMenuBarWidgets {
+    for (NSStatusItem *item in self.widgetItems.allValues)
+        [NSStatusBar.systemStatusBar removeStatusItem:item];
+    [self.widgetItems removeAllObjects];
+    [self rebuildMenuBarWidgets];
+}
+
+// Chaque widget a son propre panneau d'info (façon iStat), distinct du popover quota : un WKWebView
+// léger (widget.html) qui affiche le détail focalisé de la métrique cliquée.
+- (void)ensureWidgetPopover {
+    if (self.widgetPopover) return;
+    NSRect frame = NSMakeRect(0, 0, 264, 220);
+    WKWebViewConfiguration *config = [WKWebViewConfiguration new];
+    [config.userContentController addScriptMessageHandler:self name:@"native"];
+    self.widgetWebView = [[WKWebView alloc] initWithFrame:frame configuration:config];
+    self.widgetWebView.navigationDelegate = self;
+    self.widgetWebView.underPageBackgroundColor = NSColor.clearColor;
+    NSURL *url = [NSBundle.mainBundle URLForResource:@"widget" withExtension:@"html"];
+    [self.widgetWebView loadFileURL:url allowingReadAccessToURL:url.URLByDeletingLastPathComponent];
+    NSViewController *controller = [NSViewController new];
+    controller.view = self.widgetWebView;
+    controller.preferredContentSize = frame.size;
+    self.widgetPopover = [NSPopover new];
+    self.widgetPopover.behavior = NSPopoverBehaviorTransient;
+    self.widgetPopover.contentSize = frame.size;
+    self.widgetPopover.contentViewController = controller;
+}
+
+- (NSDictionary *)widgetMetricsPayload {
+    NSMutableDictionary *payload = [[self.systemMonitor snapshot] mutableCopy];
+    payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
+                           @"panels": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{} };
+    payload[@"processes"] = self.topProcesses ?: @[];  // top consommateurs, pour les panneaux CPU/Mémoire
+    return payload;
+}
+
+// Pousse le contenu du widget courant (show = change de widget + données ; les ticks suivants ne
+// font qu'actualiser les données).
+- (void)pushWidgetMetrics {
+    if (!self.widgetWebReady || !self.currentWidgetId) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:[self widgetMetricsPayload] options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSString *script = [NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.show('%@', %@);", self.currentWidgetId, json];
+    [self.widgetWebView evaluateJavaScript:script completionHandler:nil];
+}
+
+- (void)widgetClicked:(NSButton *)sender {
+    NSString *wid = sender.identifier;
+    // Reclic sur le même widget déjà ouvert : on ferme (bascule).
+    if (self.widgetPopover.shown && [self.currentWidgetId isEqual:wid]) { [self.widgetPopover close]; return; }
+    [self ensureWidgetPopover];
+    self.currentWidgetId = wid;
+    [self pushWidgetMetrics];  // remplit avant l'affichage si le web est prêt
+    [self.widgetPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMinY];
+}
+
+// Redessine chaque widget depuis un snapshot moniteur. Les styles « bars »/« pie » posent la
+// valeur en titre système à côté de l'image ; « twoLine »/« battery » embarquent tout leur texte
+// dans l'image (titre vide).
+// Forme et couleur choisies par l'utilisateur pour un widget (réglage menuBarWidgetConfig), ou nil
+// (= forme naturelle / couleur auto).
+- (NSDictionary *)widgetStyleFor:(NSString *)wid {
+    NSDictionary *config = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"];
+    NSDictionary *one = [config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : nil;
+    return one;
+}
+
+- (void)updateMenuBarWidgets:(NSDictionary *)snapshot {
+    if (!self.widgetItems.count) return;
+    [self.widgetItems enumerateKeysAndObjectsUsingBlock:^(NSString *wid, NSStatusItem *item, BOOL *stop) {
+        NSDictionary *readout = TMWidgetReadout(wid, snapshot);
+        NSDictionary *style = [self widgetStyleFor:wid];
+        NSString *shape = [style[@"shape"] isKindOfClass:NSString.class] ? style[@"shape"] : nil;
+        NSString *color = [style[@"color"] isKindOfClass:NSString.class] ? style[@"color"] : nil;
+        item.button.image = TMWidgetImageStyled(readout, shape, color);
+        // Le titre système (valeur à côté) n'accompagne que les formes « graphe/jauge » ; les formes
+        // qui portent déjà leur texte (twoLine/battery/text) n'ont pas de titre séparé.
+        BOOL shapeCarriesText = [shape isEqual:@"text"] || [shape isEqual:@"twoLine"] || [shape isEqual:@"battery"]
+            || (!shape.length && ([readout[@"style"] isEqual:@"twoLine"] || [readout[@"style"] isEqual:@"battery"]));
+        NSString *title = shapeCarriesText ? @"" : readout[@"title"];
+        if ([title length]) {
+            item.button.attributedTitle = TMMenuBarTitle(title, (TMSeverity)[readout[@"severity"] integerValue]);
+            item.button.imagePosition = NSImageLeading;
+        } else {
+            item.button.attributedTitle = [[NSAttributedString alloc] initWithString:@""];
+            item.button.imagePosition = NSImageOnly;
+        }
+        item.button.image.accessibilityDescription = TMMenuBarWidgetLabel(wid);
+    }];
+}
+
+- (void)updateMenuBarWidgetsFromMonitor {
+    if (self.widgetItems.count && self.systemMonitor)
+        [self updateMenuBarWidgets:[self.systemMonitor snapshot]];
 }
 
 #pragma mark - Session claude.ai (WebView)
@@ -705,8 +900,9 @@ static const CGFloat TMTitleBarHeight = 28;
 // une tendance lisible dans 26 px.
 - (NSArray<NSNumber *> *)menuBarSeriesForMetric:(NSString *)metric {
     if ([metric hasPrefix:@"system:"]) {
-        NSString *fam = [metric isEqualToString:@"system:temp"] ? @"sensors" : @"cpu";
-        NSString *key = [metric isEqualToString:@"system:temp"] ? @"tempC" : @"total";
+        NSString *fam = @"cpu", *key = @"total";
+        if ([metric isEqualToString:@"system:temp"]) { fam = @"sensors"; key = @"tempC"; }
+        else if ([metric isEqualToString:@"system:battery"]) { fam = @"battery"; key = @"percent"; }
         for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) {
             if ([family[@"id"] isEqualToString:fam]) {
                 NSArray *series = family[@"series"][key];
@@ -775,9 +971,10 @@ static const CGFloat TMTitleBarHeight = 28;
         // Métriques système : mêmes valeurs que l'onglet Moniteur, rafraîchies par metricsTick.
         NSMutableDictionary *nowById = [NSMutableDictionary dictionary];
         for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) nowById[family[@"id"]] = family[@"now"];
-        NSNumber *value = [metric isEqualToString:@"system:temp"] ? nowById[@"sensors"][@"tempC"] : nowById[@"cpu"][@"total"];
+        NSNumber *value = nowById[@"cpu"][@"total"]; label = @"cpu";
+        if ([metric isEqualToString:@"system:temp"]) { value = nowById[@"sensors"][@"tempC"]; label = @"temp"; }
+        else if ([metric isEqualToString:@"system:battery"]) { value = nowById[@"battery"][@"percent"]; label = @"batt"; }
         hasValue = value != nil; shown = value.doubleValue;
-        label = [metric isEqualToString:@"system:temp"] ? @"temp" : @"cpu";
     } else {
         // « lowest » = la marge la plus faible, donc le pourcentage consommé le plus élevé.
         // La couleur suit la fenêtre gagnante : elle change avec elle, ce qui est précisément
@@ -882,8 +1079,14 @@ static const CGFloat TMTitleBarHeight = 28;
 }
 
 - (void)showStatusPopover {
-    [self.statusPopover showRelativeToRect:self.statusItem.button.bounds
-                                    ofView:self.statusItem.button preferredEdge:NSRectEdgeMinY];
+    [self showPopoverFromButton:self.statusItem.button];
+}
+
+// Le popover est partagé par toutes les icônes (jauge quota et widgets système) : on l'ancre sous
+// le bouton réellement cliqué, pas systématiquement sous la jauge.
+- (void)showPopoverFromButton:(NSButton *)button {
+    if (!button) button = self.statusItem.button;
+    [self.statusPopover showRelativeToRect:button.bounds ofView:button preferredEdge:NSRectEdgeMinY];
     [self refresh:nil];
 }
 
@@ -921,6 +1124,69 @@ static const CGFloat TMTitleBarHeight = 28;
 - (void)removeGlobalShortcut {
     if (self.globalShortcutMonitor) { [NSEvent removeMonitor:self.globalShortcutMonitor]; self.globalShortcutMonitor = nil; }
     if (self.localShortcutMonitor) { [NSEvent removeMonitor:self.localShortcutMonitor]; self.localShortcutMonitor = nil; }
+}
+
+#pragma mark - Luminosité des écrans
+
+// Un cran de touche F1/F2, appliqué à tous les écrans pilotables ensemble — la touche physique
+// règle l'ambiance générale du poste, contrairement aux curseurs de l'onglet Écrans/du popover
+// qui restent indépendants (voir design). Valeur alignée sur le pas habituel de macOS.
+static const double TMBrightnessKeyStepPercent = 6.0;
+
+- (BOOL)brightnessKeysEnabled {
+    return [NSUserDefaults.standardUserDefaults boolForKey:@"brightnessKeysEnabled"];
+}
+
+// NX_SUBTYPE_AUX_CONTROL_BUTTONS = 8. data1 empaquette (codeTouche << 16 | étatTouche << 8 | …) ;
+// 0x0A signale un appui (down), y compris en répétition. Même mécanisme que celui utilisé par la
+// plupart des utilitaires qui interceptent les touches média — non documenté par Apple, mais
+// stable depuis des années.
+- (void)handleSystemDefinedEvent:(NSEvent *)event {
+    if (event.subtype != 8) return;
+    NSInteger data1 = event.data1;
+    int keyCode = (int)((data1 & 0xFFFF0000) >> 16);
+    int keyState = (int)((data1 & 0x0000FF00) >> 8);
+    if (keyState != 0x0A) return;  // relâchement ou autre état : ignoré
+    BOOL increase;
+    if (keyCode == NX_KEYTYPE_BRIGHTNESS_UP) increase = YES;
+    else if (keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN) increase = NO;
+    else return;
+
+    // Externes : macOS ne les touche pas, on applique le pas nous-mêmes (immédiat, pour qu'une
+    // touche maintenue descende en douceur).
+    [self.displayManager stepExternalDisplaysByPercent:TMBrightnessKeyStepPercent increase:increase];
+
+    // Interne : c'est macOS qui le pilote (l'événement n'est pas consommé), et il applique le
+    // changement juste APRÈS cet événement. On relit donc après un court délai — sinon on lirait
+    // encore l'ancienne valeur — pour que le curseur reflète la réalité sans double-piloter.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf.displayManager syncBuiltinDisplaysFromHardware];
+        [weakSelf pushData];
+    });
+}
+
+// Jamais de moniteur local qui consomme l'événement (contrairement à ⌘⇧S) : le renvoyer inchangé
+// laisse macOS continuer à piloter l'écran interne et afficher son propre indicateur — Status
+// n'ajoute que le pilotage DDC/CI des externes à côté, sans rien casser du comportement existant.
+- (void)installBrightnessKeyMonitor {
+    [self removeBrightnessKeyMonitor];
+    if (![self brightnessKeysEnabled]) return;
+    __weak typeof(self) weakSelf = self;
+    self.brightnessGlobalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
+                                                                          handler:^(NSEvent *event) {
+        [weakSelf handleSystemDefinedEvent:event];
+    }];
+    self.brightnessLocalMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
+                                                                        handler:^NSEvent *(NSEvent *event) {
+        [weakSelf handleSystemDefinedEvent:event];
+        return event;
+    }];
+}
+
+- (void)removeBrightnessKeyMonitor {
+    if (self.brightnessGlobalMonitor) { [NSEvent removeMonitor:self.brightnessGlobalMonitor]; self.brightnessGlobalMonitor = nil; }
+    if (self.brightnessLocalMonitor) { [NSEvent removeMonitor:self.brightnessLocalMonitor]; self.brightnessLocalMonitor = nil; }
 }
 
 #pragma mark - Gestionnaire de fenêtres
@@ -1158,6 +1424,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         }];
         return;
     }
+    if (webView == self.widgetWebView) { self.widgetWebReady = YES; [self pushWidgetMetrics]; return; }
     if (webView == self.menuWebView) self.menuWebReady = YES;
     else self.webReady = YES;
     [self pushData];
@@ -1209,6 +1476,95 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"setMenuBarIconStyle"]) {
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconStyle"];
         [self updateStatusMenu];
+    }
+    if ([action isEqualToString:@"setBrightness"]) {
+        NSString *displayId = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        TMDisplay *display = displayId ? [self.displayManager displayWithIdentifier:displayId] : nil;
+        if (display) [display setBrightnessPercent:[body[@"value"] doubleValue]];
+        [self pushData];
+    }
+    if ([action isEqualToString:@"setMenuBarWidget"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        if (wid) {
+            NSMutableArray *widgets = [([NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[]) mutableCopy];
+            BOOL on = [body[@"on"] boolValue];
+            if (on && ![widgets containsObject:wid]) [widgets addObject:wid];
+            if (!on) [widgets removeObject:wid];
+            [NSUserDefaults.standardUserDefaults setObject:widgets forKey:@"menuBarWidgets"];
+            // Recréation complète plutôt qu'un simple ajout : un widget activé est ajouté en fin
+            // de liste, donc à droite — or macOS place tout nouvel item à gauche. Sans cela,
+            // l'ordre affiché divergerait de celui des Réglages.
+            [self reorderMenuBarWidgets];
+            [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"setMenuBarWidgetStyle"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        if (wid) {
+            NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{}) mutableCopy];
+            NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
+            if ([body[@"shape"] isKindOfClass:NSString.class]) one[@"shape"] = body[@"shape"];
+            if ([body[@"color"] isKindOfClass:NSString.class]) one[@"color"] = body[@"color"];
+            config[wid] = one;
+            [NSUserDefaults.standardUserDefaults setObject:config forKey:@"menuBarWidgetConfig"];
+            [self updateMenuBarWidgetsFromMonitor];  // redessine tout de suite avec le nouveau style
+            [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"moveMenuBarWidget"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        NSInteger delta = [body[@"delta"] integerValue];
+        if (wid && delta) {
+            NSArray *moved = TMArrayByMovingItem([self enabledWidgets], wid, delta);
+            [NSUserDefaults.standardUserDefaults setObject:moved forKey:@"menuBarWidgets"];
+            [self reorderMenuBarWidgets];
+            [self pushData];
+        }
+    }
+    // Contenu d'un panneau d'info : chaque section (top processus, répartition…) est activable
+    // indépendamment par widget. Absent = affiché (défaut). Stocké dans widgetPanelConfig.
+    if ([action isEqualToString:@"setWidgetPanelSection"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        NSString *section = [body[@"section"] isKindOfClass:NSString.class] ? body[@"section"] : nil;
+        if (wid && section) {
+            NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{}) mutableCopy];
+            NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
+            one[section] = @([body[@"on"] boolValue]);
+            config[wid] = one;
+            [NSUserDefaults.standardUserDefaults setObject:config forKey:@"widgetPanelConfig"];
+            [self pushWidgetMetrics];  // rafraîchit le panneau ouvert avec le nouveau contenu
+            [self pushData];
+        }
+    }
+    // Alerte système : activation et/ou seuil. Le seuil est borné pour rester utile — une alerte
+    // température à 5 °C ou un disque à 300 % ne préviendrait de rien.
+    if ([action isEqualToString:@"setAlert"]) {
+        NSString *key = [body[@"key"] isKindOfClass:NSString.class] ? body[@"key"] : nil;
+        if (key && TMAlertDefaults()[key]) {
+            NSMutableDictionary *alerts = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"alerts"] ?: @{}) mutableCopy];
+            double current = 0;
+            BOOL enabled = [self alertEnabled:key threshold:&current];
+            NSMutableDictionary *one = [@{ @"on": @(enabled), @"threshold": @(current) } mutableCopy];
+            if ([body[@"on"] isKindOfClass:NSNumber.class]) one[@"on"] = @([body[@"on"] boolValue]);
+            if ([body[@"threshold"] isKindOfClass:NSNumber.class]) {
+                double value = [body[@"threshold"] doubleValue];
+                double lower = [key isEqualToString:@"memory"] ? 2 : ([key isEqualToString:@"temp"] ? 50 : 50);
+                double upper = [key isEqualToString:@"memory"] ? 4 : ([key isEqualToString:@"temp"] ? 110 : 99);
+                one[@"threshold"] = @(MIN(upper, MAX(lower, round(value))));
+            }
+            alerts[key] = one;
+            [NSUserDefaults.standardUserDefaults setObject:alerts forKey:@"alerts"];
+            // Un seuil qui change remet l'hystérésis à zéro : sinon une alerte « déjà déclenchée »
+            // au-dessus de l'ancien seuil resterait muette sous le nouveau.
+            self.alertTempAbove = self.alertDiskAbove = self.alertRAMAbove = NO;
+            [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"toggleBrightnessKeys"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
+        [self installBrightnessKeyMonitor];
+        [self pushData];
     }
     if ([action isEqualToString:@"toggleWindowManager"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -1282,8 +1638,10 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"claude": self.claudeAccount ?: TMEmptyClaudeAccount()
         },
         @"history": history,
+        @"displays": [self.displayManager snapshot] ?: @[],
         @"costs": [self costPayload],
         @"forecasts": [self forecastsFromHistory:history],
+        @"metricsLog": self.metricsLog ?: @[],  // 24 h, une ligne/minute — cadence lente, pas dans pushMetrics
         @"prefs": @{
             @"launchAtLogin": @([self launchAtLoginEnabled]),
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
@@ -1293,6 +1651,11 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"windowManager": @([self windowManagerEnabled]),
+            @"brightnessKeys": @([self brightnessKeysEnabled]),
+            @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
+            @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},
+            @"widgetPanelConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
+            @"alerts": [self alertsPayload],
             @"windowGapBetween": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapBetween"]),
             @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
             @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),
@@ -1441,7 +1804,46 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     };
 }
 
+// Volumes courants persistés en continu (écriture atomique), pour survivre à un redémarrage ou un
+// arrêt brutal : la dernière écriture reflète toujours le dernier état affiché, rien à vider à la
+// fermeture. Le collage vit dans pushData, l'unique point traversé après chaque changement de compte.
+- (void)persistAccountsCache {
+    NSDictionary *openai = [self.openAIAccount isKindOfClass:NSDictionary.class] ? self.openAIAccount : nil;
+    NSDictionary *claude = [self.claudeAccount isKindOfClass:NSDictionary.class] ? self.claudeAccount : nil;
+    if (!openai && !claude) return;
+    TMSaveAccountsCache(@{ @"openai": openai ?: @{}, @"claude": claude ?: @{} });
+}
+
+// Remet un compte restauré dans un état sûr : fenêtres périmées écartées, fraîcheur recalculée
+// (des heures hors ligne = mesure figée), drapeaux transitoires remis à plat — le premier sondage
+// réévaluera tout. Une donnée restaurée n'est jamais « en direct ».
+- (NSDictionary *)sanitizedRestoredAccount:(id)raw now:(long long)now {
+    if (![raw isKindOfClass:NSDictionary.class] || ![(NSDictionary *)raw count]) return nil;
+    NSMutableDictionary *account = [raw mutableCopy];
+    NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
+    account[@"windows"] = TMDropExpiredWindows(windows);
+    long long capturedAt = TMInteger(account[@"capturedAt"]);
+    if (capturedAt > 0) account[@"stale"] = @(now - capturedAt > 1800);
+    account[@"liveSource"] = @NO;
+    account[@"actionRunning"] = @NO;
+    account[@"authChecking"] = @NO;
+    account[@"connecting"] = @NO;
+    account[@"error"] = @"";
+    return account;
+}
+
+- (void)restoreCachedAccounts {
+    NSDictionary *cache = TMLoadAccountsCache();
+    if (!cache) return;
+    long long now = (long long)NSDate.date.timeIntervalSince1970;
+    NSDictionary *claude = [self sanitizedRestoredAccount:cache[@"claude"] now:now];
+    NSDictionary *openai = [self sanitizedRestoredAccount:cache[@"openai"] now:now];
+    if (claude) self.claudeAccount = claude;
+    if (openai) self.openAIAccount = openai;
+}
+
 - (void)pushData {
+    [self persistAccountsCache];
     NSData *data = [NSJSONSerialization dataWithJSONObject:[self payload] options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (self.webReady) {
@@ -1479,44 +1881,105 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     self.metricsTimer.tolerance = [self metricsInterval] * 0.2;  // macOS groupe les réveils, l'œil ne verra rien
 }
 
-// Seuils volontairement hauts : ces alertes signalent un état anormal, pas une machine qui
-// travaille. L'écart seuil/réarmement évite la rafale quand la valeur oscille.
+// Valeurs par défaut des alertes système, volontairement hautes : elles signalent un état anormal,
+// pas une machine qui travaille. L'utilisateur peut les régler ou les couper (préférence `alerts`).
+static NSDictionary *TMAlertDefaults(void) {
+    return @{ @"temp": @90, @"disk": @90, @"memory": @4 };
+}
+
+// Réglage d'une alerte : activée ? et à quel seuil ? Absent = activée au seuil par défaut, pour que
+// les alertes marchent sans configuration préalable.
+- (BOOL)alertEnabled:(NSString *)key threshold:(double *)outThreshold {
+    NSDictionary *alerts = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"alerts"];
+    NSDictionary *one = [alerts[key] isKindOfClass:NSDictionary.class] ? alerts[key] : nil;
+    double fallback = [TMAlertDefaults()[key] doubleValue];
+    NSNumber *threshold = [one[@"threshold"] isKindOfClass:NSNumber.class] ? one[@"threshold"] : nil;
+    if (outThreshold) *outThreshold = threshold ? threshold.doubleValue : fallback;
+    NSNumber *on = [one[@"on"] isKindOfClass:NSNumber.class] ? one[@"on"] : nil;
+    return on ? on.boolValue : YES;
+}
+
+// État résolu des trois alertes (défauts compris) pour l'interface de réglages.
+- (NSDictionary *)alertsPayload {
+    NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+    for (NSString *key in TMAlertDefaults()) {
+        double threshold = 0;
+        BOOL enabled = [self alertEnabled:key threshold:&threshold];
+        payload[key] = @{ @"on": @(enabled), @"threshold": @(threshold) };
+    }
+    return payload;
+}
+
 - (void)checkSystemAlerts:(NSDictionary *)snapshot {
     NSMutableDictionary *byId = [NSMutableDictionary dictionary];
     for (NSDictionary *family in snapshot[@"families"]) byId[family[@"id"]] = family[@"now"];
 
+    // Pression mémoire : l'échelle noyau est 1/2/4 (normale/avertissement/critique), pas un
+    // pourcentage — le seuil réglable choisit donc le niveau déclencheur.
+    double threshold = 0;
     BOOL above = self.alertRAMAbove;
     NSNumber *pressure = byId[@"ram"][@"pressureLevel"];
-    if (pressure && TMThresholdShouldFire(&above, pressure.doubleValue, 4, 2))
+    if ([self alertEnabled:@"memory" threshold:&threshold] && pressure
+        && TMThresholdShouldFire(&above, pressure.doubleValue, threshold, threshold - 2))
         [self postNotificationTitle:@"Mémoire · pression critique"
                                body:@"macOS compresse et purge agressivement. Fermez quelques applications."];
     self.alertRAMAbove = above;
 
     above = self.alertTempAbove;
     NSNumber *temp = byId[@"sensors"][@"tempC"];
-    if (temp && TMThresholdShouldFire(&above, temp.doubleValue, 90, 82))
+    if ([self alertEnabled:@"temp" threshold:&threshold] && temp
+        && TMThresholdShouldFire(&above, temp.doubleValue, threshold, TMAlertRearmThreshold(threshold)))
         [self postNotificationTitle:@"Température élevée"
-                               body:[NSString stringWithFormat:@"Capteurs à %.0f °C en moyenne.", temp.doubleValue]];
+                               body:[NSString stringWithFormat:@"Point chaud du SoC à %.0f °C.", temp.doubleValue]];
     self.alertTempAbove = above;
 
     above = self.alertDiskAbove;
     NSNumber *diskUsed = byId[@"disk"][@"usedPercent"];
-    if (diskUsed && TMThresholdShouldFire(&above, diskUsed.doubleValue, 90, 85))
+    if ([self alertEnabled:@"disk" threshold:&threshold] && diskUsed
+        && TMThresholdShouldFire(&above, diskUsed.doubleValue, threshold, TMAlertRearmThreshold(threshold)))
         [self postNotificationTitle:@"Disque presque plein"
                                body:[NSString stringWithFormat:@"Volume de démarrage à %.0f %%.", diskUsed.doubleValue]];
     self.alertDiskAbove = above;
+}
+
+// Journalise une ligne par minute dans l'historique 24 h, et sauvegarde toutes les 5 minutes.
+// Tourne quelles que soient les surfaces ouvertes : c'est justement l'intérêt de pouvoir consulter
+// après coup ce qui s'est passé pendant qu'on ne regardait pas.
+- (void)appendLongHistory:(NSDictionary *)snapshot {
+    NSTimeInterval now = [NSDate date].timeIntervalSince1970;
+    if (self.metricsLogLastAppend && now - self.metricsLogLastAppend < TMLongHistoryInterval) return;
+    NSDictionary *row = TMLongHistoryRow(snapshot, now);
+    if (!row) return;
+    self.metricsLogLastAppend = now;
+    self.metricsLog = TMLongHistoryAppend(self.metricsLog, row, TMLongHistoryMaxAge,
+                                          (NSUInteger)(TMLongHistoryMaxAge / TMLongHistoryInterval) + 60);
+    if (now - self.metricsLogLastSave >= 300) {
+        self.metricsLogLastSave = now;
+        NSArray *rows = self.metricsLog;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ TMSaveMetricsHistory(rows); });
+    }
 }
 
 - (void)metricsTick {
     [self.systemMonitor sample];
     NSDictionary *snapshot = [self.systemMonitor snapshot];
     [self checkSystemAlerts:snapshot];  // les alertes veillent même toutes surfaces fermées
+    [self appendLongHistory:snapshot];  // idem : l'historique 24 h se remplit en arrière-plan
+    [self updateMenuBarWidgets:snapshot];  // icônes système : toujours à jour, même surfaces fermées
+    if (self.widgetPopover.isShown && self.widgetWebReady) {  // panneau d'info d'un widget ouvert
+        NSData *data = [NSJSONSerialization dataWithJSONObject:[self widgetMetricsPayload] options:0 error:nil];
+        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        [self.widgetWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.updateMetrics(%@);", json] completionHandler:nil];
+    }
 
     BOOL dashboardVisible = self.webReady && self.window.isVisible;
     BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
+    BOOL widgetVisible = self.widgetPopover.isShown && self.widgetWebReady;  // panneau d'info d'un widget
     BOOL menuBarWantsSystem = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] hasPrefix:@"system:"];
     if (menuBarWantsSystem) [self updateStatusMenu];
-    if (!dashboardVisible && !popoverVisible) { self.previousProcessSample = nil; return; }
+    // Le relevé des processus alimente aussi les panneaux CPU/Mémoire des widgets : on l'active dès
+    // qu'une surface qui en a besoin est visible.
+    if (!dashboardVisible && !popoverVisible && !widgetVisible) { self.previousProcessSample = nil; return; }
 
     // Le relevé des processus (~500 appels noyau) n'a lieu que surface visible ; le premier tick
     // après ouverture n'a donc pas de delta, comme le réseau au lancement.
@@ -1534,7 +1997,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
     if (processSample && self.previousProcessSample) {
         self.topProcesses = TMTopProcesses(self.previousProcessSample, processSample,
-                                           now - self.previousProcessAt, 5);
+                                           now - self.previousProcessAt, 8);
     }
     self.previousProcessSample = processSample;
     self.previousProcessAt = now;
@@ -1740,6 +2203,16 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         BOOL live = usageWindows.count > 0;
         NSArray *windows = live ? usageWindows : TMDropExpiredWindows(TMClaudeWindowsFromSnapshot(snapshot));
         long long capturedAt = live ? (long long)NSDate.date.timeIntervalSince1970 : TMInteger(snapshot[@"captured_at_epoch"]);
+        // Viscosité : quand le sondage ne rapporte aucune fenêtre (pas de source directe, snapshot
+        // status line absent ou vidé), garder les dernières fenêtres connues avec leur horodatage
+        // plutôt que de vider l'affichage. Une fenêtre réinitialisée réapparaît à bas pourcentage,
+        // pas à zéro fenêtre ; « aucune fenêtre » signale une lacune de collecte, pas une remise à
+        // zéro. Les fenêtres réellement périmées sont écartées ensuite.
+        if (windows.count == 0) {
+            NSArray *previous = [self.claudeAccount[@"windows"] isKindOfClass:NSArray.class] ? self.claudeAccount[@"windows"] : @[];
+            NSArray *kept = TMDropExpiredWindows(previous);
+            if (kept.count > 0) { windows = kept; capturedAt = TMInteger(self.claudeAccount[@"capturedAt"]); }
+        }
         NSTimeInterval age = capturedAt > 0 ? NSDate.date.timeIntervalSince1970 - capturedAt : 0;
 
         self.claudeAccount = @{

@@ -16,7 +16,7 @@
   .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:var(--radius);padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
   .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:11px;line-height:1}
-  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="monitor"]::before{content:"03"}.nav button[data-view="settings"]::before{content:"04"}
+  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="monitor"]::before{content:"03"}.nav button[data-view="displays"]::before{content:"04"}.nav button[data-view="settings"]::before{content:"05"}
   .nav button.active{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--blue);font-weight:700}
   .nav button.active::before{opacity:1;color:var(--blue)}
   .sidebar-spacer{flex:1}.sidebar-bottom{border-top:1px solid var(--hair);padding-top:10px}
@@ -89,6 +89,26 @@
   .setting-state{font-size:10px;color:var(--muted);white-space:nowrap}.setting-state.ok{color:var(--green)}
   .button.on{border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
   .segmented{display:flex;border:1px solid var(--hair-strong);border-radius:var(--radius);overflow:hidden;flex:none}
+  /* Chips de widgets : plusieurs boutons indépendants qui passent à la ligne (contrairement au
+     segmented, un choix unique). Chacun encadré, activable séparément. */
+  .seg-wrap{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:220px;justify-content:flex-end}
+  .seg-wrap .seg{border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 10px}
+  /* Configuration des widgets : une rangée par widget (toggle nom, forme, couleurs). */
+  .widget-config{display:flex;flex-direction:column;gap:8px}
+  .wc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .wc-toggle{border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 12px;min-width:96px;text-align:left;flex:none}
+  .wc-shapes{flex:none}.wc-shapes .seg{font-size:9.5px;padding:5px 8px}
+  .wc-move{display:flex;gap:0;border:1px solid var(--hair-strong);flex:none}
+  .wc-move .seg{padding:5px 8px;font-size:11px;line-height:1}
+  .wc-move .seg[disabled]{opacity:.28;cursor:default}
+  .wc-colors{display:flex;gap:4px;margin-left:auto;flex:none}
+  .wc-swatch{width:15px;height:15px;border-radius:50%;border:1px solid var(--hair-strong);cursor:pointer;padding:0}
+  .wc-swatch.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--blue)}
+  /* Sous-rangée : contenu du panneau d'info (sections activables). */
+  .wc-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-3px 0 3px 10px;padding-left:10px;border-left:2px solid var(--hair)}
+  .wc-sublabel{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none}
+  .wc-sub .seg{font-size:9.5px;padding:4px 8px}
+  .wc-sub .segmented{flex-wrap:wrap}
   .seg{border:0;background:transparent;color:var(--muted);padding:7px 11px;cursor:pointer;font:inherit;font-size:10px}
   .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
@@ -116,6 +136,22 @@
   .metric-legend i{display:inline-block;width:9px;height:2px;vertical-align:middle;margin-right:5px}
   .core-bars{display:flex;gap:2px;margin-top:9px;height:24px;align-items:flex-end}
   .core-bars i{flex:1;background:var(--chart-a);min-height:1px}
+  /* Schéma des cœurs, groupés par type. Les barres sont à largeur fixe ici : sinon les 4 cœurs
+     Efficience s'étireraient autant que les 10 Performance et le rapport visuel mentirait. */
+  .core-schematic{display:flex;gap:18px;margin-top:9px;flex-wrap:wrap}
+  .core-group-label{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:block;margin-bottom:3px}
+  .core-schematic .core-bars{margin-top:0}
+  .core-schematic .core-bars i{flex:none;width:7px}
+  .proc-head{display:grid;grid-template-columns:1fr 78px 56px 64px;gap:10px;padding-bottom:5px;font-size:9px;
+    text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .proc-head span:not(:first-child){text-align:right}
+  .proc-head .sorted{color:var(--blue);font-weight:700}
+  /* Rangée de tuiles-stats : les chiffres clés lisibles d'un coup d'œil, sans déplier. */
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(66px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);margin:11px 0 4px}
+  .stat-cell{background:var(--soft);padding:8px 10px}
+  .stat-cell b{display:block;font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.15}
+  .stat-cell span{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .stat-cell.warn b{color:var(--amber)}
   .metric-badge{font-size:10px;padding:2px 7px;border:1px solid var(--hair);color:var(--muted)}
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
@@ -150,6 +186,15 @@
   .metric-table th{color:var(--muted);font-weight:400;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
   .metric-table th:first-child,.metric-table td:first-child{text-align:left}
   .metric-table td:first-child{color:var(--muted)}
+  /* Vue 24 h : une bande par métrique, empilées pour comparer les moments d'un coup d'œil. */
+  .day-grid{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+  .day-card{border:1px solid var(--hair);background:var(--panel-bg);padding:10px 12px}
+  .day-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
+  .day-head strong{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text)}
+  .day-stats{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .day-stats b{color:var(--text);font-weight:700}
+  .day-chart{display:block;width:100%;height:56px}
+  .day-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums}
   .view-toggle{margin-left:auto;display:flex;gap:0;border:1px solid var(--hair-strong)}
   .view-toggle button{border:0;background:transparent;color:var(--muted);padding:5px 10px;cursor:pointer;font:inherit;font-size:9.5px}
   .view-toggle button.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
@@ -163,11 +208,27 @@
   .detail-rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
   .detail-row{display:flex;justify-content:space-between;align-items:baseline;font-size:11px}
   .proc-rows{display:flex;flex-direction:column;margin-top:6px}
-  .proc-row{display:grid;grid-template-columns:1fr 90px 70px;gap:10px;padding:5px 0;border-top:1px solid var(--hair);font-size:11.5px}
+  .proc-row{display:grid;grid-template-columns:1fr 78px 56px 64px;gap:10px;padding:5px 0;border-top:1px solid var(--hair);font-size:11.5px}
   .proc-row:first-child{border-top:0}
   .proc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .proc-mem{color:var(--muted);text-align:right}
+  .proc-mem,.proc-energy{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
   .proc-cpu{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  .proc-val.sorted{color:var(--blue);font-weight:700}
+  /* Écrans — luminosité. Cartes au même gabarit que le Moniteur, mais un curseur est une action,
+     pas une mesure : pas de graphique, pas de couleur de série. */
+  .display-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:20px}
+  .display-card{border:1px solid var(--hair);background:var(--soft);padding:16px 18px}
+  .display-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+  .display-name{font-size:12.5px;font-weight:700;color:var(--text)}
+  .display-badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border:1px solid var(--hair-strong);border-radius:var(--radius);padding:2px 7px}
+  .display-badge.builtin{color:var(--blue);border-color:var(--blue)}
+  .brightness-row{display:flex;align-items:center;gap:12px}
+  /* Curseur natif restylé pour rester dans la trame de l'app plutôt que le rendu système par défaut. */
+  .brightness-slider{flex:1;-webkit-appearance:none;appearance:none;height:14px;background:rgba(255,255,255,.03);border:1px solid var(--hair);cursor:pointer}
+  .brightness-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:20px;background:var(--blue);border:1px solid var(--hair-strong);cursor:pointer;box-shadow:var(--edge-glow,none)}
+  .brightness-slider:disabled{opacity:.4;cursor:default}
+  .brightness-value{width:44px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);flex:none}
+  .display-unavailable{color:var(--muted);font-size:10.5px;margin-top:2px}
 </style>
 </head>
 <body>
@@ -178,6 +239,7 @@
       <button class="active" data-view="overview">Status</button>
       <button data-view="connections">Connexions</button>
       <button data-view="monitor">Moniteur</button>
+      <button data-view="displays">Écrans</button>
       <button data-view="settings">Réglages</button>
     </nav>
     <div class="sidebar-spacer"></div>
@@ -189,6 +251,7 @@
     <section class="view active" id="overview"></section>
     <section class="view" id="connections"></section>
     <section class="view" id="monitor"></section>
+    <section class="view" id="displays"></section>
     <section class="view" id="settings"></section>
   </main>
 </div>
@@ -234,6 +297,66 @@ const THEMES=[
   {id:'holograme',label:'Holograme',blue:'#7CC8FF',purple:'#E29AFF'},
   {id:'ion',label:'Ion',blue:'#78E1FF',purple:'#B98CFF'}
 ];
+// Widgets système de la barre des menus (mêmes ids que TMMenuBarWidgetIDs côté natif).
+const WIDGETS=[['cpu','CPU'],['memory','Mémoire'],['gpu','GPU'],['network','Réseau'],['temperature','Température'],['battery','Batterie'],['disk','Disque']];
+// Formes valides par widget (défaut = 1re). Ids alignés sur TMWidgetImageStyled.
+const SHAPE_LABELS={bars:'barres',graph:'courbe',ring:'anneau',pie:'camembert',text:'texte',twoLine:'2 lignes',battery:'pile'};
+const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','text'],gpu:['bars','graph','ring','pie','text'],
+  memory:['pie','ring','bars','graph','text'],disk:['pie','ring','bars','graph','text'],
+  network:['twoLine','text'],temperature:['twoLine','ring','text'],battery:['battery','ring','twoLine','text']};
+// Palette (alignée sur TMWidgetNamedColor). « auto » = neutre adaptatif + alerte.
+const WIDGET_COLORS=[['auto','—','var(--muted)'],['blue','Bleu','#4C90FF'],['green','Vert','#4CD173'],
+  ['purple','Violet','#AD85FF'],['cyan','Cyan','#4CCCE6'],['orange','Orange','#FF9933'],
+  ['amber','Ambre','#FFBF40'],['red','Rouge','#FF615A'],['pink','Rose','#FF73B3'],['gray','Gris','#9EA9B8']];
+// Sections activables du panneau d'info de chaque widget (clés alignées sur `on(section)` de
+// widget.html). Absent d'un réglage = affiché (défaut). Le titre, la grande valeur et la courbe
+// principale restent toujours présents — seules ces sections optionnelles se règlent.
+const PANEL_SECTIONS={
+  cpu:[['cores','cœurs'],['split','user/sys'],['load','charge'],['processes','processus']],
+  memory:[['breakdown','répartition'],['stats','totaux'],['processes','processus']],
+  gpu:[['stages','étages']],
+  network:[['interfaces','interfaces'],['session','session']],
+  temperature:[['chart','historique'],['detail','par famille'],['fans','ventilateurs']],
+  battery:[['chart','historique'],['stats','indicateurs'],['details','détails']],
+  disk:[['chart','débits'],['volumes','volumes']]};
+// Alertes système réglables. La pression mémoire suit l'échelle noyau (2 = avertissement,
+// 4 = critique), pas un pourcentage : ses « seuils » sont donc deux niveaux nommés.
+const ALERTS=[
+  ['temp','Température',[75,85,90,95,100],v=>v+' °C'],
+  ['disk','Disque plein',[80,85,90,95],v=>v+' %'],
+  ['memory','Pression mémoire',[2,4],v=>v===4?'critique':'avertissement'],
+];
+function alertRows(p){
+  const cfg=p.alerts||{};
+  return ALERTS.map(([key,label,choices,fmt])=>{
+    const one=cfg[key]||{},on=one.on!==false,cur=one.threshold;
+    const toggle=`<button class="seg wc-toggle ${on?'on':''}" onclick="send('setAlert',{key:'${key}',on:${!on}})">${label}</button>`;
+    if(!on)return `<div class="wc-row">${toggle}</div>`;
+    const sel=`<span class="segmented wc-shapes">${choices.map(v=>`<button class="seg ${cur===v?'on':''}" onclick="send('setAlert',{key:'${key}',threshold:${v}})">${fmt(v)}</button>`).join('')}</span>`;
+    return `<div class="wc-row">${toggle}${sel}</div>`;
+  }).join('');
+}
+function widgetConfigRows(p){
+  const enabled=(p.menuBarWidgets||[]).filter(id=>WIDGETS.some(([w])=>w===id));
+  const config=p.menuBarWidgetConfig||{},panels=p.widgetPanelConfig||{};
+  // Les widgets activés d'abord, dans leur ordre d'affichage (celui de la barre des menus, de
+  // gauche à droite) ; les inactifs ensuite, dans l'ordre du catalogue.
+  const ordered=[...enabled.map(id=>WIDGETS.find(([w])=>w===id)),
+                 ...WIDGETS.filter(([w])=>!enabled.includes(w))];
+  return ordered.map(([id,label],index)=>{
+    const on=enabled.includes(id),cfg=config[id]||{},shapes=WIDGET_SHAPES[id]||['text'];
+    const shape=cfg.shape&&shapes.includes(cfg.shape)?cfg.shape:shapes[0],color=cfg.color||'auto';
+    const toggle=`<button class="seg wc-toggle ${on?'on':''}" onclick="send('setMenuBarWidget',{id:'${id}',on:${!on}})">${label}</button>`;
+    if(!on)return `<div class="wc-row">${toggle}</div>`;
+    const shapeSel=`<span class="segmented wc-shapes">${shapes.map(s=>`<button class="seg ${shape===s?'on':''}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',shape:'${s}'})">${SHAPE_LABELS[s]||s}</button>`).join('')}</span>`;
+    const colorSel=`<span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${color===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',color:'${c}'})"></button>`).join('')}</span>`;
+    const secs=PANEL_SECTIONS[id]||[],pcfg=panels[id]||{};
+    const secSel=secs.length?`<div class="wc-sub"><span class="wc-sublabel">Panneau</span><span class="segmented">${secs.map(([key,lab])=>{const sOn=pcfg[key]!==false;return `<button class="seg ${sOn?'on':''}" onclick="send('setWidgetPanelSection',{id:'${id}',section:'${key}',on:${!sOn}})">${lab}</button>`}).join('')}</span></div>`:'';
+    // Déplacement dans la barre des menus : ← vers la gauche, → vers la droite. Désactivés en butée.
+    const move=`<span class="wc-move"><button class="seg" ${index===0?'disabled':''} title="Vers la gauche" onclick="send('moveMenuBarWidget',{id:'${id}',delta:-1})">←</button><button class="seg" ${index===enabled.length-1?'disabled':''} title="Vers la droite" onclick="send('moveMenuBarWidget',{id:'${id}',delta:1})">→</button></span>`;
+    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}`;
+  }).join('');
+}
 let appData=null,currentView='overview';
 
 // Rebuilds one window's series from the rolling history file and draws it as an inline sparkline.
@@ -346,8 +469,9 @@ function overview(data){const accounts={openai:data.accounts?.openai,claude:data
 function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`,theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <div class="setting"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></div>
-  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}</div></div>
+  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Style de l\'icône</strong><small>Anneau (niveau instantané) ou courbe (tendance récente de la fenêtre épinglée).</small></div><div class="segmented">${['ring','spark'].map(v=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${v==='ring'?'Anneau':'Courbe'}</button>`).join('')}</div></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Widgets système dans la barre des menus</strong><small>Des icônes système à côté de la jauge quota, chacune indépendante — activez-les, choisissez leur forme, leur couleur, et les infos affichées dans leur panneau (ligne « Panneau »). Les flèches ← → règlent leur ordre dans la barre (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône pour son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></div>
   ${p.windowManager?`
   <div class="setting"><div class="setting-copy"><strong>Marge entre fenêtres</strong><small>Espace laissé entre deux fenêtres voisines. À 0 elles se touchent.</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapBetween||0)===v?'on':''}" onclick="send('setWindowGap',{which:'between',value:${v}})">${v}</button>`).join('')}</div></div>
@@ -355,18 +479,36 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Respecter la barre des menus et le Dock</strong><small>Désactivé, les fenêtres occupent l’écran physique entier et passent dessous.</small></div><button class="button ${p.windowReservedAreas?'on':''}" onclick="send('toggleWindowReservedAreas')">${p.windowReservedAreas?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Raccourcis</strong><small>Non modifiables pour l’instant.</small></div><div class="shortcut-table">${WINDOW_SHORTCUTS.map(([k,l])=>`<div class="shortcut-row"><kbd>${k}</kbd><span>${l}</span></div>`).join('')}</div></div>
   `:''}
+  <div class="setting"><div class="setting-copy"><strong>Piloter la luminosité au clavier</strong><small>F1/F2 ajustent aussi les écrans externes en DDC/CI, en plus de l’écran interne géré nativement par macOS. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.brightnessKeys&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les touches ne piloteront que l’écran interne.</strong>':''}</small></div><button class="button ${p.brightnessKeys?'on':''}" onclick="send('toggleBrightnessKeys')">${p.brightnessKeys?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Raccourci clavier global</strong><small>⌘⇧S ouvre et ferme le panneau depuis n’importe quelle application. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.globalShortcut&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : le raccourci ne répondra pas.</strong>':''}</small></div><button class="button ${p.globalShortcut?'on':''}" onclick="send('toggleGlobalShortcut')">${p.globalShortcut?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></div>
   <div class="setting"><div class="setting-copy"><strong>Coût équivalent API</strong><small>Calculé sur les logs de session terminal (Claude Code, Codex). L\'usage web n\'est pas journalisé et n\'est pas inclus. Tarifs relevés le ${data.costs?.asOf||'—'} ; Codex approximatif. Taux de change USD→EUR indicatif (BCE), relevé du ${data.costs?.fxAsOf||'—'}, rafraîchi automatiquement.</small></div><span class="setting-state">${data.costs?.scanning?'calcul en cours':'actif'}</span></div>
   <div class="setting"><div class="setting-copy"><strong>Exporter l\'historique</strong><small>Toute la consommation enregistrée, au format CSV (une ligne par instant et par fenêtre) — pour l\'analyser ailleurs.</small></div><button class="button" onclick="send('exportHistoryCSV')">Exporter…</button></div>
   <div class="setting"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Une notification à 80 % puis à 95 % de chaque fenêtre.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Alertes système</strong><small>Notification quand la machine sort de son régime normal. Chaque alerte s’active et se règle séparément ; elle ne se répète pas tant que la valeur n’est pas redescendue nettement sous le seuil.</small></div><div class="widget-config">${alertRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>
 </div>`}
 function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
 function claudePanel(account){if(!account)return '';const busy=account.actionRunning||account.authChecking;let subtitle='',actions='',content='';const windows=(account.windows||[]).map(w=>quotaCard(w,'claude',appData?.history)).join('');if(account.trackingConfigured){subtitle=`Suivi actif${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`;actions=`${!account.cliAvailable?`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`:!account.authenticated?`<button class="account-action primary" onclick="send('loginClaude')">Connecter</button>`:''}<button class="account-action" ${busy?'disabled':''} onclick="send('uninstallClaudeTracking')">Désactiver</button>`;content=windows||`<div class="quota-empty">Le suivi est prêt. Lancez Claude Code et envoyez un message pour recevoir les compteurs.<br><button class="account-action" onclick="send('openClaudeTerminal')">Ouvrir Claude Code</button></div>`}else if(!account.cliAvailable){subtitle='CLI non détectée';actions=`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`;content=`<div class="quota-empty">Installez Claude Code depuis la documentation officielle.</div>`}else if(!account.authenticated){subtitle='Claude Code détecté · non connecté';actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('loginClaude')">Connecter</button>`;content=`<div class="quota-empty">La connexion s’effectue dans Terminal. Status ne capture aucun secret.</div>`}else{subtitle=`Connecté${account.subscriptionType?` · ${esc(account.subscriptionType)}`:''}`;actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('installClaudeTracking')">Activer le suivi</button>`;content=`<div class="quota-empty">Activez le collecteur status line pour recevoir les fenêtres 5 h et 7 jours.</div>`}actions+=`<button class="account-action" onclick="send('configureClaudeFableCookie')" title="Quotas en direct + jauge Fable (avancé, non officiel)">${account.fableConfigured?'direct ✓':'direct'}</button>`;return `<div class="quota-block" style="--provider:var(--purple)"><div class="account-row"><div class="account-copy"><strong>Claude Code</strong><small>${subtitle}</small></div><div class="account-actions">${actions}</div></div><div class="quota-grid">${content}</div>${account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la status line ne s’exécute que pendant une session « claude » en Terminal. Activez « direct » pour une lecture live toutes les 5 min.</div>`:''}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
+// Écrans (feature luminosité). Un curseur par écran pilotable, indépendant des autres — pas de
+// mode « lié » (voir design). L'écriture n'a lieu qu'au relâchement (« change »), pas à chaque
+// frame du glisser (« input » mettrait à jour l'affichage local seulement, sans spammer le natif).
+function displayCard(display){
+  const badge=`<span class="display-badge ${display.kind==='builtin'?'builtin':''}">${display.kind==='builtin'?'interne':'externe'}</span>`;
+  if(!display.available){
+    return `<div class="display-card"><div class="display-head"><span class="display-name">${esc(display.name)}</span>${badge}</div><div class="display-unavailable">DDC/CI indisponible — ce moniteur ne répond pas au pilotage de luminosité.</div></div>`;
+  }
+  const value=display.brightness??0;
+  return `<div class="display-card"><div class="display-head"><span class="display-name">${esc(display.name)}</span>${badge}</div><div class="brightness-row"><input type="range" class="brightness-slider" min="0" max="100" value="${value}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${display.id}',value:Number(this.value)})"><span class="brightness-value">${value} %</span></div></div>`;
+}
+function displaysView(data){
+  const displays=data.displays||[];
+  const cards=displays.length?displays.map(displayCard).join(''):'<div class="quota-empty">Aucun écran détecté.</div>';
+  return `<div class="toolbar"><h1>Écrans</h1></div><div class="section-head"><div><h2>Luminosité</h2><p>Un curseur par écran détecté. Un moniteur externe qui ne répond pas au DDC/CI reste listé, sans curseur actionnable.</p></div></div><div class="display-grid">${cards}</div>`;
+}
 function connectionsView(data){return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Identifiants gérés par les outils officiels</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Status lit uniquement les compteurs autorisés et ne copie jamais vos jetons OAuth.</p></div></div><div class="connections"><article class="connection-panel"><h3>OpenAI</h3><p>Quotas ChatGPT via le serveur local Codex.</p>${quotaPanel(data.accounts?.openai)}</article><article class="connection-panel"><h3>Claude</h3><p>Quotas Claude via la status line officielle de Claude Code.</p>${claudePanel(data.accounts?.claude)}</article></div>`}
-function render(){if(!appData)return;document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
+function render(){if(!appData)return;document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#displays').innerHTML=displaysView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
 // ─── Moniteur système ───────────────────────────────────────────────────────
 // Flux séparé des quotas : le natif pousse un snapshot par seconde quand la fenêtre est visible.
 // Cette vue a son propre chemin de rendu — re-render() global à 1 Hz reconstruirait trois vues
@@ -404,19 +546,108 @@ const fmtUptime=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.f
 // ─ Vues détaillées (clic sur une carte) ─
 // L'état survit au re-render à 1 Hz, comme hoverState.
 const expanded=new Set();
-function detailCPU(cpu){const cores=Object.keys(cpu.series||{}).filter(k=>k.startsWith('core')).sort((a,b)=>+a.slice(4)-+b.slice(4));
+// « coreTypes » partage le préfixe « core » mais n'est pas un cœur : c'est la chaîne E/P décrivant
+// leur type. L'exclure partout, sinon +'Types'.slice(4) donne NaN et casse le tri.
+const coreKeys=source=>Object.keys(source||{}).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
+function detailCPU(cpu){const cores=coreKeys(cpu.series);
   return `<div class="detail-grid">${cores.map(c=>`<div class="detail-cell"><div class="detail-label">cœur ${c.slice(4)} · ${cpu.now[c]==null?'—':Math.round(cpu.now[c])+' %'}</div>${metricChart('cpu',[{key:c,color:'var(--chart-a)',label:c}],{percent:true})}</div>`).join('')}</div>`}
+// Schéma des cœurs : deux blocs étiquetés quand la machine distingue Performance et Efficience
+// (coreTypes fourni par le natif), une rangée uniforme sinon.
+function coreSchematic(cpu){
+  const bar=i=>{const v=cpu.now['core'+i];
+    return `<i style="height:${Math.max(4,v??0)}%" title="cœur ${i} · ${v==null?'—':Math.round(v)+' %'}"></i>`};
+  const types=cpu.now.coreTypes;
+  if(!types)return `<div class="core-bars" title="un trait par cœur">${coreKeys(cpu.now).map(k=>bar(+k.slice(4))).join('')}</div>`;
+  const perf=[],eff=[];
+  for(let i=0;i<types.length;i++)(types[i]==='E'?eff:perf).push(i);
+  const group=(label,idx)=>idx.length?`<div><span class="core-group-label">${label} · ${idx.length}</span><div class="core-bars">${idx.map(bar).join('')}</div></div>`:'';
+  return `<div class="core-schematic">${group('Performance',perf)}${group('Efficience',eff)}</div>`;
+}
+// GPU : le détail expose ce que le matériel donne en plus de la charge globale — les deux étages
+// (rendu, tuilage) et la mémoire réellement en service. Le GPU ne se ventile pas par cœur.
+function detailGPU(gpu){
+  const mem=gpu.now.memInUse!=null?`<div class="detail-rows"><div class="detail-row"><span class="detail-label">mémoire GPU en usage</span><span>${fmtSize(gpu.now.memInUse)}</span></div></div>`:'';
+  return metricChart('gpu',[{key:'renderer',color:'var(--chart-a)',label:'Renderer'},{key:'tiler',color:'var(--chart-b)',label:'Tiler'}],{percent:true})
+    +legend([['var(--chart-a)','Renderer'],['var(--chart-b)','Tiler']])+mem;
+}
+const fmtMinutes=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${String(mm).padStart(2,'0')}`:`${mm} min`};
+const fmtDecimal=v=>String(v).replace('.',',');
+// Le dépliage complète la rangée de stats (santé/cycles/watts/autonomie déjà en tête) : santé
+// détaillée en mAh, condition, chargeur, température, tension.
+function detailBattery(battery){
+  const n=battery.now;
+  const row=(label,value)=>`<div class="detail-row"><span class="detail-label">${label}</span><span>${value}</span></div>`;
+  const rows=[];
+  rows.push(row('condition',n.conditionOK?'normale':'à faire réviser'));
+  if(n.designCapacity!=null&&n.fullCapacity!=null)rows.push(row('capacité (pleine / conception)',`${n.fullCapacity} / ${n.designCapacity} mAh`));
+  if(n.adapterWatts!=null)rows.push(row('chargeur',n.adapterWatts+' W'));
+  if(n.temperatureC!=null)rows.push(row('température',Math.round(n.temperatureC)+' °C'));
+  if(n.voltageV!=null)rows.push(row('tension',fmtDecimal(n.voltageV)+' V'));
+  return `<div class="detail-rows">${rows.join('')}</div>`;
+}
 function detailNetwork(net){const ifaces=[...new Set(Object.keys(net.now).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
   return `<div class="detail-rows">${ifaces.map(name=>`<div class="detail-row"><span class="detail-label">${esc(name)}</span><span>↓ ${fmtBytes(net.now['rx:'+name])} · ↑ ${fmtBytes(net.now['tx:'+name])}</span></div>`).join('')||'<div class="metric-empty">Aucune interface active.</div>'}</div>`}
 function detailDisk(disk){const volumes=Object.keys(disk.now).filter(k=>k.startsWith('vol:')).sort();
   return `<div class="detail-rows">${volumes.map(key=>{const pct=Math.round(disk.now[key]);return `<div class="detail-row"><span class="detail-label">${esc(key.slice(4))}</span><span>${pct} %</span></div><div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${pct}%"></i></div>`}).join('')}</div>`}
-const DETAILS={cpu:detailCPU,network:detailNetwork,disk:detailDisk};
+const DETAILS={cpu:detailCPU,gpu:detailGPU,network:detailNetwork,disk:detailDisk,battery:detailBattery};
 
+// Le natif envoie l'union des plus gros consommateurs CPU, mémoire et énergie ; le tri se fait
+// ici, pour que basculer de dimension ne coûte pas un aller-retour. Le GPU par processus n'existe
+// pas sur macOS par une voie fiable — d'où CPU / mémoire / énergie et pas de GPU.
+// Puissance moyenne d'un process : petits chiffres, plus lisibles en mW sous 1 W.
+const fmtWatts=w=>w==null||w<0.0005?'—':w>=1?fmtDecimal(w.toFixed(1))+' W':Math.round(w*1000)+' mW';
+let procSort='cpu';
+function setProcSort(mode){procSort=mode;renderMonitor()}
 function processesCard(){
-  const processes=metricsData?.processes||[];
+  const processes=(metricsData?.processes||[]).slice();
   if(!processes.length)return '';
-  const rows=processes.map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem">${fmtSize(p.rssBytes)}</span><span class="proc-cpu">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span></div>`).join('');
-  return `<div class="metric-card metric-card-wide"><div class="metric-head"><h3>Processus les plus actifs</h3><span class="unit">CPU sur le dernier intervalle · un fil = 100 %</span></div><div class="proc-rows">${rows}</div></div>`;
+  const key={cpu:'cpuPercent',ram:'rssBytes',energy:'energyWatts'}[procSort];
+  processes.sort((a,b)=>(b[key]||0)-(a[key]||0));
+  const rows=processes.slice(0,8).map(p=>`<div class="proc-row"><span class="proc-name">${esc(p.name)}</span><span class="proc-mem proc-val ${procSort==='ram'?'sorted':''}">${fmtSize(p.rssBytes)}</span><span class="proc-cpu proc-val ${procSort==='cpu'?'sorted':''}">${p.cpuPercent<0.05?'—':p.cpuPercent.toFixed(1).replace('.',',')+' %'}</span><span class="proc-energy proc-val ${procSort==='energy'?'sorted':''}">${fmtWatts(p.energyWatts)}</span></div>`).join('');
+  const toggle=`<div class="view-toggle">${[['cpu','CPU'],['ram','mémoire'],['energy','énergie']].map(([v,l])=>`<button class="${procSort===v?'on':''}" onclick="setProcSort('${v}')">${l}</button>`).join('')}</div>`;
+  return `<div class="metric-card metric-card-wide"><div class="metric-head"><h3>Applications les plus gourmandes</h3>${toggle}</div>
+    <div class="proc-head"><span>processus</span><span class="${procSort==='ram'?'sorted':''}">mémoire</span><span class="${procSort==='cpu'?'sorted':''}">CPU</span><span class="${procSort==='energy'?'sorted':''}">énergie</span></div>
+    <div class="proc-rows">${rows}</div></div>`;
+}
+// Batterie : absente sur un Mac de bureau (le collecteur rend nil, la famille disparaît) — la
+// carte ne s'affiche alors pas du tout, comme toute famille sans source.
+function batteryCard(){
+  const battery=famGet('battery');if(!battery)return '';
+  const n=battery.now;
+  const state=n.charging?'en charge':n.externalConnected?(n.fullyCharged?'branché · plein':'branché'):'sur batterie';
+  // Rangée de stats toujours visible : les chiffres réclamés d'un coup d'œil, sans déplier.
+  const cell=(value,label,warn)=>`<div class="stat-cell${warn?' warn':''}"><b>${value}</b><span>${label}</span></div>`;
+  const stats=[];
+  if(n.healthPercent!=null)stats.push(cell(Math.round(n.healthPercent)+' %','santé',n.healthPercent<80));
+  if(n.cycleCount!=null)stats.push(cell(n.cycleCount,'cycles'));
+  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${fmtDecimal(Math.abs(n.powerWatts))} W`,n.powerWatts<0?'décharge':'charge'));
+  if(n.minutesRemaining!=null)stats.push(cell(fmtMinutes(n.minutesRemaining),n.charging?'avant plein':'autonomie'));
+  if(!n.conditionOK)stats.push(cell('à réviser','condition',true));
+  const statRow=stats.length?`<div class="stat-row">${stats.join('')}</div>`:'';
+  return metricCard('battery','Batterie',
+    `<span><span class="unit">${state}</span> <span class="metric-value">${n.percent==null?'—':Math.round(n.percent)+'<span class="unit">%</span>'}</span></span>`,
+    statRow+metricChart('battery',[{key:'percent',color:'var(--chart-a)',label:'charge'}],{percent:true}));
+}
+// Capteurs : température, état thermique (badge seulement quand ce n'est plus « normal », comme la
+// pression mémoire), et vitesse des ventilateurs. thermalState est toujours présent ; temp et
+// ventilateurs dépendent de la machine.
+const THERMAL_STATE=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']];
+function sensorsCard(){
+  const sensors=famGet('sensors');if(!sensors)return '';
+  const n=sensors.now;
+  const [tlabel,tclass]=THERMAL_STATE[n.thermalState]||['',''];
+  const badge=n.thermalState>0?`<span class="metric-badge ${tclass}">thermique ${tlabel}</span> `:'';
+  const temp=n.tempC!=null?`<span class="metric-value">${Math.round(n.tempC)}<span class="unit">°C</span></span>`:'<span class="metric-value" style="font-size:14px">—</span>';
+  const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
+  // Détail par famille de capteurs. Les noms matériels Apple Silicon sont opaques (« PMU tdie3 ») :
+  // impossible d'étiqueter honnêtement « CPU » ou « GPU », d'où « SoC » / « périphériques ».
+  const rows=[];
+  if(n.dieMaxC!=null)rows.push([`SoC · ${n.dieCount} capteurs`,`${Math.round(n.dieMaxC)} °C max · ${Math.round(n.dieAvgC)} °C moy.`]);
+  if(n.deviceMaxC!=null)rows.push([`périphériques · ${n.deviceCount}`,`${Math.round(n.deviceMaxC)} °C max · ${Math.round(n.deviceAvgC)} °C moy.`]);
+  if(fans.length)rows.push(['ventilateurs',fans.map(k=>Math.round(n[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')]);
+  const detailLines=rows.length?`<div class="detail-rows" style="margin-top:8px">${rows.map(([l,v])=>`<div class="detail-row"><span class="detail-label">${l}</span><span>${v}</span></div>`).join('')}</div>`:'';
+  const chart=n.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):'';
+  return metricCard('sensors','Capteurs',`<span>${badge}${temp}</span>`,chart+detailLines);
 }
 function systemCard(){
   const system=famGet('system');if(!system)return '';
@@ -436,28 +667,29 @@ function monitorView(){
   const cpu=famGet('cpu'),gpu=famGet('gpu'),ram=famGet('ram'),net=famGet('network'),disk=famGet('disk'),sensors=famGet('sensors');
   const pct=v=>v==null?'—':`${Math.round(v)}<span class="unit">%</span>`;
   const cards=[];
-  if(cpu){const cores=Object.keys(cpu.now).filter(k=>k.startsWith('core')).sort((a,b)=>+a.slice(4)-+b.slice(4));
-    cards.push(metricCard('cpu','CPU',`<span class="metric-value">${pct(cpu.now.total)}</span>`,
-      metricChart('cpu',[{key:'total',color:'var(--chart-a)',label:'CPU'}],{percent:true})
-      +`<div class="core-bars" title="un trait par cœur">${cores.map(c=>`<i style="height:${Math.max(4,cpu.now[c])}%"></i>`).join('')}</div>`));}
+  if(cpu)cards.push(metricCard('cpu','CPU',`<span class="metric-value">${pct(cpu.now.total)}</span>`,
+    metricChart('cpu',[{key:'total',color:'var(--chart-a)',label:'CPU'}],{percent:true})+coreSchematic(cpu)));
   if(gpu)cards.push(metricCard('gpu','GPU',`<span class="metric-value">${pct(gpu.now.usage)}</span>`,
     metricChart('gpu',[{key:'usage',color:'var(--chart-a)',label:'GPU'}],{percent:true})));
   if(ram){const [pressureLabel,pressureClass]=PRESSURE[ram.now.pressureLevel]||[];
     cards.push(metricCard('ram','Mémoire',`<span>${pressureLabel?`<span class="metric-badge ${pressureClass}">pression ${pressureLabel}</span> `:''}<span class="metric-value">${pct(ram.now.usedPercent)}</span></span>`,
       metricChart('ram',[{key:'usedPercent',color:'var(--chart-a)',label:'Occupée'}],{percent:true})));}
+  const batteryHTML=batteryCard();if(batteryHTML)cards.push(batteryHTML);
   if(net)cards.push(metricCard('network','Réseau',`<span class="metric-value" style="font-size:14px">↓ ${fmtBytes(net.now.rxBytesPerSec)} · ↑ ${fmtBytes(net.now.txBytesPerSec)}</span>`,
     metricChart('network',[{key:'rxBytesPerSec',color:'var(--chart-a)',label:'↓ réception'},{key:'txBytesPerSec',color:'var(--chart-b)',label:'↑ émission'}])
     +legend([['var(--chart-a)','↓ réception'],['var(--chart-b)','↑ émission']])));
   if(disk)cards.push(metricCard('disk','Disque',`<span><span class="metric-value" style="font-size:14px">R ${fmtBytes(disk.now.readBytesPerSec)} · W ${fmtBytes(disk.now.writeBytesPerSec)}</span> <span class="unit">· plein à ${disk.now.usedPercent==null?'—':Math.round(disk.now.usedPercent)+' %'}</span></span>`,
     metricChart('disk',[{key:'readBytesPerSec',color:'var(--chart-a)',label:'lecture'},{key:'writeBytesPerSec',color:'var(--chart-b)',label:'écriture'}])
     +legend([['var(--chart-a)','lecture'],['var(--chart-b)','écriture']])));
-  if(sensors){const battery=sensors.now.batteryPercent!=null?`<span class="unit">batterie ${Math.round(sensors.now.batteryPercent)} %${sensors.now.batteryCharging?' ⚡':''}</span> `:'';
-    cards.push(metricCard('sensors','Capteurs',`<span>${battery}<span class="metric-value">${sensors.now.tempC==null?'—':Math.round(sensors.now.tempC)+'<span class="unit">°C</span>'}</span></span>`,
-      sensors.now.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):''));}
+  // La batterie a sa propre carte : Capteurs porte la température, l'état thermique et les ventilateurs.
+  const sensorsHTML=sensorsCard();if(sensorsHTML)cards.push(sensorsHTML);
   const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
-  const toggle=`<div class="view-toggle"><button class="${monitorMode==='charts'?'on':''}" onclick="setMonitorMode('charts')">graphiques</button><button class="${monitorMode==='table'?'on':''}" onclick="setMonitorMode('table')">tableau</button></div>`;
-  const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">1 échantillon/${interval} s · fenêtre ${windowMin} min</span>${toggle}</div>`;
+  const modes=[['charts','graphiques'],['table','tableau'],['day','24 h']];
+  const toggle=`<div class="view-toggle">${modes.map(([m,l])=>`<button class="${monitorMode===m?'on':''}" onclick="setMonitorMode('${m}')">${l}</button>`).join('')}</div>`;
+  const meta=monitorMode==='day'?'1 point/min · 24 h glissantes':`1 échantillon/${interval} s · fenêtre ${windowMin} min`;
+  const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">${meta}</span>${toggle}</div>`;
   if(monitorMode==='table')return head+monitorTable();
+  if(monitorMode==='day')return head+monitorDay();
   return head+`<div class="metric-grid">${cards.join('')}${systemCard()}${processesCard()}</div>`;
 }
 // Les courbes sont muettes au clavier et au lecteur d'écran. Ce tableau dit la même chose en
@@ -469,10 +701,13 @@ const stats=values=>{
   return {now:values[values.length-1],min:Math.min(...values),max:Math.max(...values),avg:sum/values.length};
 };
 // Le format ne se déduit pas de l'unité : une charge de 2,4 arrondie à l'entier ne dit plus rien.
-const METRIC_LABELS={'cpu.total':['CPU','%','int'],'gpu.usage':['GPU','%','int'],'ram.usedPercent':['Mémoire','%','int'],
+const METRIC_LABELS={'cpu.total':['CPU','%','int'],'gpu.usage':['GPU','%','int'],
+  'gpu.renderer':['GPU rendu','%','int'],'gpu.tiler':['GPU tuilage','%','int'],
+  'ram.usedPercent':['Mémoire','%','int'],'battery.percent':['Batterie','%','int'],
   'network.rxBytesPerSec':['Réseau ↓','','bytes'],'network.txBytesPerSec':['Réseau ↑','','bytes'],
   'disk.readBytesPerSec':['Disque lecture','','bytes'],'disk.writeBytesPerSec':['Disque écriture','','bytes'],
-  'sensors.tempC':['Température','°C','int'],'system.load1':['Charge 1 min','','decimal']};
+  'sensors.tempC':['Température','°C','int'],'sensors.fan0':['Ventilateur 1','tr/min','int'],
+  'sensors.fan1':['Ventilateur 2','tr/min','int'],'system.load1':['Charge 1 min','','decimal']};
 function monitorTable(){
   const rows=[];
   for(const [path,[label,unit,kind]] of Object.entries(METRIC_LABELS)){
@@ -486,6 +721,47 @@ function monitorTable(){
   }
   if(!rows.length)return '<div class="metric-empty">Mesure en cours…</div>';
   return `<table class="metric-table"><thead><tr><th>Métrique</th><th>Actuel</th><th>Min</th><th>Max</th><th>Moyenne</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+// Vue 24 h : alimentée par l'historique long (une ligne par minute, persisté), pas par les anneaux
+// en mémoire. Les points sont horodatés, donc une coupure d'app laisse un trou réel dans la courbe
+// plutôt qu'un raccord silencieux — on trace en fonction du temps, pas de l'index.
+const DAY_METRICS=[
+  ['cpu','CPU','%',v=>Math.round(v)+' %'],
+  ['temp','Température','°C',v=>Math.round(v)+' °C'],
+  ['ram','Mémoire','%',v=>Math.round(v)+' %'],
+  ['gpu','GPU','%',v=>Math.round(v)+' %'],
+  ['batt','Batterie','%',v=>Math.round(v)+' %'],
+];
+function monitorDay(){
+  const log=(appData?.metricsLog||[]).filter(r=>r&&typeof r.t==='number');
+  if(log.length<2)return `<div class="metric-empty">L’historique 24 h se constitue — un point par minute. Revenez dans quelques minutes.</div>`;
+  const t0=log[0].t,t1=log[log.length-1].t,span=Math.max(1,t1-t0);
+  const spanH=span/3600;
+  const cards=DAY_METRICS.map(([key,label,unit,fmt])=>{
+    const pts=log.filter(r=>typeof r[key]==='number');
+    if(pts.length<2)return '';
+    const vals=pts.map(r=>r[key]);
+    const min=Math.min(...vals),max=Math.max(...vals),avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+    // Échelle Y : 0-100 pour les pourcentages, ajustée aux valeurs pour les températures.
+    const lo=unit==='%'?0:Math.floor(min-2),hi=unit==='%'?100:Math.ceil(max+2);
+    const W=560,H=90;
+    // Un écart de plus de 3 min entre deux points = trou (app fermée, veille) : on coupe le tracé.
+    let d='',open=false;
+    pts.forEach((r,i)=>{
+      const gap=i>0&&(r.t-pts[i-1].t)>180;
+      const x=((r.t-t0)/span*W).toFixed(1),y=(H-(r[key]-lo)/Math.max(1,hi-lo)*H).toFixed(1);
+      if(!open||gap){d+=`M${x},${y}`;open=true}else d+=`L${x},${y}`;
+    });
+    const peak=pts.reduce((a,b)=>b[key]>a[key]?b:a);
+    const peakAt=new Date(peak.t*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    return `<div class="day-card">
+      <div class="day-head"><strong>${label}</strong><span class="day-stats">max <b>${fmt(max)}</b> à ${peakAt} · moy. ${fmt(avg)} · min ${fmt(min)}</span></div>
+      <svg class="day-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--chart-a)" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg>
+    </div>`;
+  }).filter(Boolean);
+  if(!cards.length)return '<div class="metric-empty">Historique 24 h vide.</div>';
+  const axis=`<div class="day-axis"><span>${new Date(t0*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span><span>${spanH<1?Math.round(span/60)+' min':Math.round(spanH)+' h d’historique'}</span><span>${new Date(t1*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span></div>`;
+  return `<div class="day-grid">${cards.join('')}</div>${axis}`;
 }
 function setMonitorMode(mode){monitorMode=mode;renderMonitor()}
 function renderMonitor(){if(currentView!=='monitor')return;const section=document.querySelector('#monitor');if(section)section.innerHTML=monitorView()}
