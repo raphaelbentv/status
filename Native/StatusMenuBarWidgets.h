@@ -44,12 +44,16 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot);
 #pragma mark - Dessin (AppKit)
 
 // Icône d'un widget à partir de son readout, avec une forme et une couleur choisies.
-//   shape : « bars » | « graph » | « ring » | « pie » | « text » | « twoLine » | « battery ».
+//   shape : « bars » | « graph » | « ring » | « pie » | « bar » | « text » | « twoLine » | « battery ».
 //           Vide → forme naturelle du widget. Une forme qui ne colle pas à la donnée retombe
 //           dessus aussi (repli gracieux).
 //   colorName : nom de la palette (blue, green, purple, cyan, orange, amber, red, pink, gray) ou
 //           nil/« auto » → template neutre. La sévérité (alerte) prime toujours sur la couleur.
 NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *_Nullable shape, NSString *_Nullable colorName);
+
+// Variante à encre imposée : `inkOrNil` nil ⇒ image template (macOS l'inverse selon le thème).
+// Sert à la jauge quota, dont l'encre vient de l'identité du fournisseur et non de la palette.
+NSImage *TMWidgetImageWithInk(NSDictionary *readout, NSString *_Nullable shape, NSColor *_Nullable inkOrNil);
 
 // Rendu par défaut (forme naturelle, couleur auto). Pour les tests et le premier tick.
 NSImage *TMWidgetImage(NSDictionary *readout);

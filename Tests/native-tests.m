@@ -878,7 +878,7 @@ static void TestMenuBarWidgets(void) {
     Check([TMWidgetReadout(@"memory", snap)[@"series"] count] == 0 || YES, @"Mémoire : série usedPercent transmise si présente");
 
     // Le dessin ne doit pas planter, quelle que soit la forme, la couleur ou l'entrée (fumée).
-    NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"text", @"twoLine", @"battery", @""];
+    NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery", @""];
     NSArray *colors = @[@"auto", @"blue", @"red", @"purple", @"inconnu"];
     for (NSString *wid in TMMenuBarWidgetIDs())
         for (NSString *shape in shapes)
@@ -892,6 +892,19 @@ static void TestMenuBarWidgets(void) {
     // La sévérité prime sur la couleur choisie : une couleur nommée existe, mais l'alerte reste.
     Check(TMWidgetNamedColor(@"blue") != nil, @"la palette expose « blue »");
     Check(TMWidgetNamedColor(@"auto") == nil, @"« auto » n'est pas une couleur nommée (template neutre)");
+
+    // Encre imposée : la jauge quota dessine avec la couleur d'identité de son fournisseur, qui
+    // n'est pas un nom de palette. nil ⇒ image template, que macOS inverse selon le thème.
+    NSDictionary *quota = @{ @"style": @"ring", @"hasValue": @YES, @"fraction": @0.81, @"series": @[@70, @81],
+                             @"value": @"81 %", @"valueTemplate": @"100 %", @"template": @"",
+                             @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @0 };
+    for (NSString *shape in @[@"ring", @"bars", @"pie", @"bar", @"graph"]) {
+        NSImage *tinted = TMWidgetImageWithInk(quota, shape, TMWidgetNamedColor(@"purple"));
+        NSImage *neutral = TMWidgetImageWithInk(quota, shape, nil);
+        Check(tinted != nil && !tinted.isTemplate, ([NSString stringWithFormat:@"jauge %@ : encre imposée, pas de template", shape]));
+        Check(neutral != nil && neutral.isTemplate, ([NSString stringWithFormat:@"jauge %@ sans encre : template", shape]));
+        CheckEqual(@(tinted.size.width), @(neutral.size.width), ([NSString stringWithFormat:@"jauge %@ : la couleur ne change pas la largeur", shape]));
+    }
 }
 
 #pragma mark - Largeur réservée des icônes (pas de dérive dans la barre)

@@ -455,6 +455,8 @@ static const CGFloat TMTitleBarHeight = 28;
         // Claude semaine par défaut : c'est la limite qui contraint réellement le travail.
         @"menuBarMetric": @"claude:weekly",
         @"hoverPopover": @YES,
+        // « auto » : la jauge prend la couleur du fournisseur affiché. Voir updateStatusMenu.
+        @"menuBarIconColor": @"auto",
         // blueprint reste l'apparence historique : les utilisateurs existants ne voient aucun
         // changement tant qu'ils ne choisissent pas un autre thème dans Réglages.
         @"theme": @"blueprint"
@@ -1050,10 +1052,38 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     // varie, de un à trois chiffres. Le gabarit réserve donc la place de « 100 ».
     NSString *titleTemplate = [NSString stringWithFormat:@" %@100%@", prefix, suffix];
 
-    BOOL sparkStyle = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] isEqualToString:@"spark"];
-    self.statusItem.button.image = sparkStyle
-        ? TMSparklineIcon([self menuBarSeriesForMetric:metric], hasValue, severity, providerInk)
-        : TMGaugeIcon(shown / 100.0, hasValue, severity, providerInk);
+    // Forme et couleur de la jauge, au choix (Réglages › Barre des menus). « auto » garde la
+    // couleur d'identité du fournisseur affiché : c'est elle qui dit si le chiffre parle d'OpenAI
+    // ou de Claude. Une couleur choisie la remplace ; la sévérité prime toujours sur les deux,
+    // parce qu'à ce moment-là savoir *que* compte plus que savoir *qui*.
+    NSString *shape = [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring";
+    NSColor *chosenInk = TMWidgetNamedColor([NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"]);
+    NSColor *ink = (severity != TMSeverityNormal) ? TMSeverityColor(severity) : (chosenInk ?: providerInk);
+    if ([shape isEqualToString:@"none"]) {
+        // Le titre porte déjà la valeur en toutes lettres : une icône de plus n'ajoute rien, et
+        // c'est la seule façon de rendre la rangée aussi étroite que possible.
+        self.statusItem.button.image = nil;
+    } else if ([shape isEqualToString:@"spark"]) {
+        self.statusItem.button.image = TMSparklineIcon([self menuBarSeriesForMetric:metric], hasValue, severity, ink);
+    } else if ([shape isEqualToString:@"ring"]) {
+        self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, ink);
+    } else if ([@[@"bars", @"pie", @"bar"] containsObject:shape]) {
+        // Les autres formes viennent du moteur des widgets système : un seul jeu de dessins pour
+        // toute la barre, et la jauge quota hérite de chaque forme qu'on y ajoute.
+        NSDictionary *readout = @{
+            @"style": @"ring", @"hasValue": @(hasValue), @"fraction": @(shown / 100.0),
+            @"series": [self menuBarSeriesForMetric:metric] ?: @[],
+            @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(shown + 0.5), suffix] : @"—",
+            @"valueTemplate": [NSString stringWithFormat:@"100%@", suffix], @"template": @"",
+            @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @(severity),
+        };
+        self.statusItem.button.image = TMWidgetImageWithInk(readout, shape, ink);
+    } else {
+        // Forme inconnue (réglage d'une version ultérieure, fichier bricolé) : l'anneau plutôt
+        // qu'une icône vide ou le repli « deux lignes » du moteur widgets, qui n'a pas de sens ici.
+        self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, ink);
+    }
+    self.statusItem.button.imagePosition = self.statusItem.button.image ? NSImageLeading : NSNoImage;
     self.statusItem.button.image.accessibilityDescription = hasValue
         ? [NSString stringWithFormat:@"Quota %ld %% consommé", (long)(shown + 0.5)]
         : @"Quota indisponible";
@@ -1522,6 +1552,12 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"setMenuBarIconStyle"]) {
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconStyle"];
         [self updateStatusMenu];
+        [self pushData];
+    }
+    if ([action isEqualToString:@"setMenuBarIconColor"]) {
+        [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconColor"];
+        [self updateStatusMenu];
+        [self pushData];
     }
     if ([action isEqualToString:@"setBrightness"]) {
         NSString *displayId = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
@@ -1698,6 +1734,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"hoverPopover": @([self hoverPopoverEnabled]),
             @"metricsInterval": @([self metricsInterval]),
             @"menuBarIconStyle": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring",
+            @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"windowManager": @([self windowManagerEnabled]),

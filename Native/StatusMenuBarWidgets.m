@@ -351,6 +351,30 @@ static NSImage *TMDrawRing(double fraction, BOOL hasValue, NSColor *ink, BOOL is
     return image;
 }
 
+// Jauge horizontale : une piste et son remplissage. La forme la plus littérale pour « combien
+// il reste », et la seule qui se lise sans convention (l'anneau demande de savoir qu'il part de
+// midi, le camembert qu'il tourne dans le sens horaire).
+static NSImage *TMDrawBar(double fraction, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
+    const CGFloat w = 22, h = 18, barH = 8;
+    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
+    [image lockFocus];
+    NSRect track = NSMakeRect(0.5, (h - barH) / 2, w - 1, barH);
+    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5];
+    outline.lineWidth = 1;
+    [[ink colorWithAlphaComponent:isTemplate ? 0.45 : 0.5] setStroke];
+    [outline stroke];
+    if (!hasValue) { TMDrawDash(ink, NSMidX(track), NSMidY(track)); }
+    else if (fraction > 0) {
+        NSRect fill = NSInsetRect(track, 1.6, 1.6);
+        fill.size.width *= MIN(MAX(fraction, 0), 1);
+        [ink setFill];
+        [[NSBezierPath bezierPathWithRect:fill] fill];
+    }
+    [image unlockFocus];
+    image.template = isTemplate;
+    return image;
+}
+
 // Courbe (ligne) de la série récente, échelle fixe 0-100 + point terminal — comme la sparkline.
 static NSImage *TMDrawGraph(NSArray<NSNumber *> *series, NSColor *ink, BOOL isTemplate) {
     const CGFloat w = 26, h = 18, pad = 2;
@@ -397,6 +421,14 @@ static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink
 NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *shape, NSString *colorName) {
     BOOL isTemplate = YES;
     NSColor *ink = TMResolveWidgetInk(colorName, [readout[@"severity"] integerValue], &isTemplate);
+    return TMWidgetImageWithInk(readout, shape, isTemplate ? nil : ink);
+}
+
+// Même dessin, encre déjà résolue : la jauge quota choisit la sienne autrement (identité du
+// fournisseur affiché, qui n'est pas un nom de palette), et n'a pas à repasser par la table.
+NSImage *TMWidgetImageWithInk(NSDictionary *readout, NSString *shape, NSColor *inkOrNil) {
+    BOOL isTemplate = inkOrNil == nil;
+    NSColor *ink = inkOrNil ?: NSColor.blackColor;
     BOOL hasValue = [readout[@"hasValue"] boolValue];
     if (!shape.length) shape = readout[@"style"];
 
@@ -408,6 +440,8 @@ NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *shape, NSString *c
         return TMDrawRing([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
     if ([shape isEqual:@"pie"])
         return TMDrawPie([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
+    if ([shape isEqual:@"bar"])
+        return TMDrawBar([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
     NSString *textTemplate = readout[@"template"], *valueTemplate = readout[@"valueTemplate"];
     if ([shape isEqual:@"text"])
         return TMDrawText(hasValue ? readout[@"value"] : @"—", valueTemplate, ink, isTemplate);
