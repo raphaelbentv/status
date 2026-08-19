@@ -88,10 +88,25 @@ static NSString *TMPct(NSNumber *value) {
     return value ? [NSString stringWithFormat:@"%.0f %%", round(value.doubleValue)] : @"—";
 }
 
+// Gabarits de largeur : le texte le plus large que ce widget puisse afficher. Ils fixent la
+// largeur de l'icône une fois pour toutes, indépendamment de la mesure du moment — c'est ce qui
+// empêche la rangée de glisser quand « 8 o/s » devient « 999 Mo/s ». Volontairement du texte
+// réel plutôt qu'un nombre de caractères : seule une mesure typographique dit la vraie largeur.
+static NSDictionary *TMWidgetTemplates(NSString *widgetId) {
+    // template = bloc deux lignes dessiné ; valueTemplate = valeur seule (titre système, forme texte).
+    if ([widgetId isEqual:@"network"])     return @{ @"template": @"↓ 999 Mo/s", @"valueTemplate": @"↓ 999 Mo/s" };
+    if ([widgetId isEqual:@"temperature"]) return @{ @"template": @"100 W", @"valueTemplate": @"100°" };
+    if ([widgetId isEqual:@"battery"])     return @{ @"template": @"10 h 00", @"valueTemplate": @"100 %" };
+    return @{ @"template": @"100 %", @"valueTemplate": @"100 %" };  // cpu, gpu, memory, disk
+}
+
 NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
+    NSDictionary *templates = TMWidgetTemplates(widgetId);
     NSMutableDictionary *r = [@{ @"style": @"pie", @"hasValue": @NO, @"title": @"", @"value": @"",
                                  @"primary": @"", @"secondary": @"", @"fraction": @0,
                                  @"series": @[], @"charging": @NO,
+                                 @"template": templates[@"template"],
+                                 @"valueTemplate": templates[@"valueTemplate"],
                                  @"severity": @(TMWidgetSeverity(widgetId, snapshot)) } mutableCopy];
 
     if ([widgetId isEqual:@"cpu"] || [widgetId isEqual:@"gpu"]) {
@@ -195,16 +210,19 @@ static void TMDrawDash(NSColor *ink, CGFloat cx, CGFloat cy) {
     [dash stroke];
 }
 
-// Deux lignes de texte monospace empilées, image ajustée à la ligne la plus large.
-static NSImage *TMDrawTwoLine(NSString *top, NSString *bottom, NSColor *ink, BOOL isTemplate) {
+// Deux lignes de texte monospace empilées. La largeur est celle du gabarit du widget (pire cas),
+// jamais celle du texte courant : sinon l'icône respire à chaque mesure et pousse ses voisines.
+// Le texte est calé à droite dans cette largeur, ce qui aligne les unités d'une ligne à l'autre.
+static NSImage *TMDrawTwoLine(NSString *top, NSString *bottom, NSString *widthTemplate, NSColor *ink, BOOL isTemplate) {
     NSFont *font = [NSFont monospacedDigitSystemFontOfSize:8.5 weight:NSFontWeightMedium];
     NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: ink };
     NSSize topSize = [top sizeWithAttributes:attrs], botSize = [bottom sizeWithAttributes:attrs];
-    CGFloat w = ceil(MAX(topSize.width, botSize.width)) + 2, h = 18;
+    CGFloat reserved = widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0;
+    CGFloat w = ceil(MAX(MAX(topSize.width, botSize.width), reserved)) + 2, h = 18;
     NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(MAX(w, 12), h)];
     [image lockFocus];
-    [top drawAtPoint:NSMakePoint(1, h - topSize.height - 0.5) withAttributes:attrs];
-    [bottom drawAtPoint:NSMakePoint(1, 0.5) withAttributes:attrs];
+    [top drawAtPoint:NSMakePoint(w - 1 - topSize.width, h - topSize.height - 0.5) withAttributes:attrs];
+    [bottom drawAtPoint:NSMakePoint(w - 1 - botSize.width, 0.5) withAttributes:attrs];
     [image unlockFocus];
     image.template = isTemplate;
     return image;
@@ -258,11 +276,12 @@ static NSImage *TMDrawPie(double fraction, BOOL hasValue, NSColor *ink, BOOL isT
 
 // Pile de batterie horizontale + deux lignes de texte (état / pourcentage), éclair si en charge.
 static NSImage *TMDrawBattery(double fraction, BOOL charging, BOOL hasValue, NSString *top, NSString *bottom,
-                              NSColor *ink, BOOL isTemplate) {
+                              NSString *widthTemplate, NSColor *ink, BOOL isTemplate) {
     const CGFloat cellW = 17, cellH = 9, nub = 1.6, h = 18;
     NSFont *font = [NSFont monospacedDigitSystemFontOfSize:8 weight:NSFontWeightMedium];
     NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: ink };
-    CGFloat textW = ceil(MAX([top sizeWithAttributes:attrs].width, [bottom sizeWithAttributes:attrs].width));
+    CGFloat reserved = widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0;
+    CGFloat textW = ceil(MAX(MAX([top sizeWithAttributes:attrs].width, [bottom sizeWithAttributes:attrs].width), reserved));
     CGFloat w = cellW + nub + (textW > 0 ? textW + 4 : 0) + 1;
     NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
     [image lockFocus];
@@ -300,9 +319,9 @@ static NSImage *TMDrawBattery(double fraction, BOOL charging, BOOL hasValue, NSS
         [ctx restoreGraphicsState];
     }
     if (textW > 0) {
-        CGFloat tx = cellW + nub + 4;
-        [top drawAtPoint:NSMakePoint(tx, h - [top sizeWithAttributes:attrs].height) withAttributes:attrs];
-        [bottom drawAtPoint:NSMakePoint(tx, 0) withAttributes:attrs];
+        CGFloat right = cellW + nub + 4 + textW;  // bord droit du bloc texte, fixe
+        [top drawAtPoint:NSMakePoint(right - [top sizeWithAttributes:attrs].width, h - [top sizeWithAttributes:attrs].height) withAttributes:attrs];
+        [bottom drawAtPoint:NSMakePoint(right - [bottom sizeWithAttributes:attrs].width, 0) withAttributes:attrs];
     }
     [image unlockFocus];
     image.template = isTemplate;
@@ -357,16 +376,17 @@ static NSImage *TMDrawGraph(NSArray<NSNumber *> *series, NSColor *ink, BOOL isTe
     return image;
 }
 
-// Texte seul : la valeur en gros (« 43 % », « 50° »), image ajustée à sa largeur.
-static NSImage *TMDrawText(NSString *text, NSColor *ink, BOOL isTemplate) {
+// Texte seul : la valeur en gros (« 43 % », « 50° »), à la largeur réservée du widget.
+static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink, BOOL isTemplate) {
     if (!text.length) text = @"—";
     NSFont *font = [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium];
     NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: ink };
     NSSize size = [text sizeWithAttributes:attrs];
-    CGFloat w = ceil(size.width) + 2, h = 18;
+    CGFloat reserved = widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0;
+    CGFloat w = ceil(MAX(size.width, reserved)) + 2, h = 18;
     NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(MAX(w, 12), h)];
     [image lockFocus];
-    [text drawAtPoint:NSMakePoint(1, (h - size.height) / 2) withAttributes:attrs];
+    [text drawAtPoint:NSMakePoint(w - 1 - size.width, (h - size.height) / 2) withAttributes:attrs];
     [image unlockFocus];
     image.template = isTemplate;
     return image;
@@ -388,14 +408,29 @@ NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *shape, NSString *c
         return TMDrawRing([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
     if ([shape isEqual:@"pie"])
         return TMDrawPie([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
+    NSString *textTemplate = readout[@"template"], *valueTemplate = readout[@"valueTemplate"];
     if ([shape isEqual:@"text"])
-        return TMDrawText(hasValue ? readout[@"value"] : @"—", ink, isTemplate);
+        return TMDrawText(hasValue ? readout[@"value"] : @"—", valueTemplate, ink, isTemplate);
     if ([shape isEqual:@"battery"])
         return TMDrawBattery([readout[@"fraction"] doubleValue], [readout[@"charging"] boolValue], hasValue,
-                             readout[@"primary"], readout[@"secondary"], ink, isTemplate);
+                             readout[@"primary"], readout[@"secondary"], textTemplate, ink, isTemplate);
     // twoLine (défaut réseau/température/batterie-texte)
-    if (!hasValue) return TMDrawTwoLine(@"—", @"", ink, isTemplate);
-    return TMDrawTwoLine(readout[@"primary"], readout[@"secondary"], ink, isTemplate);
+    if (!hasValue) return TMDrawTwoLine(@"—", @"", textTemplate, ink, isTemplate);
+    return TMDrawTwoLine(readout[@"primary"], readout[@"secondary"], textTemplate, ink, isTemplate);
+}
+
+// Crénage plutôt que bourrage d'espaces : la chaîne reste exactement le texte lisible (VoiceOver,
+// copie), et le complément de largeur se pose après le dernier caractère. Un espace inséré aurait
+// été une largeur fixe imposée par la police, jamais la valeur exacte manquante.
+NSAttributedString *TMTitleWithReservedWidth(NSString *text, NSString *widthTemplate,
+                                             NSDictionary<NSAttributedStringKey, id> *attributes) {
+    NSMutableAttributedString *title = [[NSMutableAttributedString alloc] initWithString:text ?: @"" attributes:attributes];
+    if (!widthTemplate.length || !text.length) return title;
+    CGFloat have = [text sizeWithAttributes:attributes].width;
+    CGFloat want = [widthTemplate sizeWithAttributes:attributes].width;
+    if (want - have > 0.01)
+        [title addAttribute:NSKernAttributeName value:@(want - have) range:NSMakeRange(text.length - 1, 1)];
+    return title;
 }
 
 // Rendu par défaut : forme naturelle, couleur auto. Sert aux tests et au premier tick.

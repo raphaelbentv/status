@@ -36,6 +36,8 @@ NSArray<NSString *> *TMArrayByMovingItem(NSArray<NSString *> *list, NSString *it
 //   fraction  : 0..1 pour camembert/pile
 //   series    : tableau 0..100 pour histogramme (du plus ancien au plus récent)
 //   charging  : batterie en charge (widget battery)
+//   template      : gabarit du bloc texte dessiné (twoLine/battery) — pire cas de largeur
+//   valueTemplate : gabarit de la valeur seule (titre système, forme « texte »)
 // Retourne toujours un dictionnaire ; hasValue=NO si la famille source manque.
 NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot);
 
@@ -51,6 +53,13 @@ NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *_Nullable shape, N
 
 // Rendu par défaut (forme naturelle, couleur auto). Pour les tests et le premier tick.
 NSImage *TMWidgetImage(NSDictionary *readout);
+
+// Titre système occupant au minimum la largeur de `widthTemplate`, sans altérer le texte : le
+// complément est un crénage posé après le dernier caractère. Un NSStatusItem dont le titre
+// rétrécit (« 100 % » → « 9 % ») décale toutes les icônes voisines à chaque tick, et le panneau
+// ouvert cesse de pointer sur la sienne. Un texte plus large que le gabarit est rendu tel quel.
+NSAttributedString *TMTitleWithReservedWidth(NSString *text, NSString *_Nullable widthTemplate,
+                                             NSDictionary<NSAttributedStringKey, id> *attributes);
 
 // Couleur nommée de la palette, ou nil si « auto »/inconnu (pour l'aperçu éventuel côté natif).
 NSColor *_Nullable TMWidgetNamedColor(NSString *name);

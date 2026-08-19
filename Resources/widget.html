@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="themes.css">
 <style>
-  *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:11.5px/1.4 var(--font)}
-  .panel{padding:11px 13px;width:236px}
+  /* Hauteur libre, pas 100 % : c'est le contenu qui décide, et sa mesure est poussée au natif
+     qui redimensionne le popover (voir syncPanelHeight). `overflow-y:auto` ne sert que de filet
+     pour un panneau plus haut que l'écran — le natif borne déjà la hauteur demandée. */
+  *{box-sizing:border-box}html,body{margin:0;width:100%;min-height:100%;overflow-x:hidden;overflow-y:auto;background:var(--bg);color:var(--text);font:11.5px/1.4 var(--font)}
+  .panel{padding:11px 13px;width:100%}
   .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--hair-strong);padding-bottom:8px;margin-bottom:10px}
   .head h1{margin:0;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--blue);font-weight:700}
   .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1;text-align:right}
@@ -63,6 +66,7 @@
 <body>
 <div class="panel" id="panel"><div class="empty">…</div></div>
 <script>
+const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 let widgetId=null,metrics=null;
 const famGet=id=>metrics?.families?.find(f=>f.id===id);
 const sysNow=()=>famGet('system')?.now||{};
@@ -88,7 +92,9 @@ function chart(list,{percent=true}={}){
   const drawn=list.filter(s=>s.values&&s.values.length>1);
   if(!drawn.length)return '';
   const w=210,h=34,len=Math.max(...drawn.map(s=>s.values.length));
-  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values));
+  // Échelle auto (débits, températures) : 12 % d'air au-dessus de la crête. Calée pile sur le
+  // maximum, la courbe collait au bord haut du cadre et se lisait comme saturée en permanence.
+  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values))*1.12;
   const paths=drawn.map(s=>{const off=len-s.values.length;
     const d=s.values.map((v,j)=>`${j?'L':'M'}${((off+j)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
     const c=s.color||'var(--chart-a)';
@@ -271,13 +277,29 @@ function renderDisk(){
 }
 function empty(title){return head(title,'')+`<div class="empty">Mesure en cours…</div>`}
 const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};
+// Le panneau se dimensionne sur son contenu : sections activables, nombre d'interfaces réseau ou
+// de volumes, liste de processus… d'un widget à l'autre la hauteur va du simple au triple. Une
+// taille figée côté natif coupait net les panneaux longs. On mesure donc après chaque rendu et on
+// pousse la hauteur ; le natif borne et ne redimensionne que sur changement réel.
+let pushedHeight=0;
+function syncPanelHeight(){
+  const el=document.querySelector('#panel');
+  if(!el)return;
+  const h=Math.ceil(el.getBoundingClientRect().height);
+  if(!h||Math.abs(h-pushedHeight)<1)return;
+  pushedHeight=h;
+  send('resizeWidgetPanel',{id:widgetId,height:h});
+}
 function render(){
   if(metrics?.prefs?.theme)document.documentElement.dataset.theme=metrics.prefs.theme;
   const r=RENDERERS[widgetId];
   document.querySelector('#panel').innerHTML=r?r():`<div class="empty">—</div>`;
+  // Après le calcul de mise en page, sinon on mesure la hauteur d'avant.
+  if(typeof requestAnimationFrame==='function')requestAnimationFrame(syncPanelHeight);else syncPanelHeight();
 }
 window.StatusWidget={
-  show(id,data){widgetId=id;metrics=data;render()},
+  // Changement de widget : la hauteur précédente n'a plus de sens, on force une remesure.
+  show(id,data){if(id!==widgetId)pushedHeight=0;widgetId=id;metrics=data;render()},
   updateMetrics(data){metrics=data;render()}
 };
 </script>

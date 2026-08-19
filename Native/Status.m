@@ -209,14 +209,17 @@ static NSImage *TMSparklineIcon(NSArray<NSNumber *> *series, BOOL hasValue, TMSe
 }
 
 // Chiffres tabulaires : l'élément ne doit pas frétiller latéralement quand la valeur change.
-static NSAttributedString *TMMenuBarTitle(NSString *text, TMSeverity severity) {
+// `widthTemplate` : le texte le plus large que ce titre puisse prendre (« 100 % » quand la valeur
+// du moment est « 9 % »). Sans lui, l'élément rétrécit à chaque tick et décale toute la rangée
+// d'icônes — y compris celle sous laquelle un panneau vient d'être ancré.
+static NSAttributedString *TMMenuBarTitle(NSString *text, NSString *widthTemplate, TMSeverity severity) {
     NSMutableDictionary *attributes = [@{
         NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium]
     } mutableCopy];
     // En régime normal, laisser macOS choisir la couleur du texte (thème, survol, contraste réduit).
     // On ne l'impose qu'en alerte, pour l'accorder à l'anneau.
     if (severity != TMSeverityNormal) attributes[NSForegroundColorAttributeName] = TMSeverityColor(severity);
-    return [[NSAttributedString alloc] initWithString:text attributes:attributes];
+    return TMTitleWithReservedWidth(text, widthTemplate, attributes);
 }
 
 typedef void (^TMProcessJSONCompletion)(NSDictionary *json, int terminationStatus, NSError *error);
@@ -406,6 +409,7 @@ static const CGFloat TMTitleBarHeight = 28;
 @property WKWebView *widgetWebView;
 @property BOOL widgetWebReady;
 @property (copy) NSString *currentWidgetId;
+@property NSMutableDictionary<NSString *, NSNumber *> *widgetPanelHeights;  // widgetId → hauteur mesurée
 @property NSPanel *pickerPanel;
 @property WKWebView *pickerWebView;
 @property NSArray<TMWindowCandidate *> *pickerCandidates;
@@ -474,6 +478,7 @@ static const CGFloat TMTitleBarHeight = 28;
     // sont donc absents. Une poignée de redémarrages suffirait à cribler la vue 24 h de trous.
     self.metricsLogLastAppend = [NSDate date].timeIntervalSince1970;
     self.notifiedThresholds = [NSMutableDictionary dictionary];
+    self.widgetPanelHeights = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelHeights"] ?: @{}) mutableCopy];
     // Avant tout appel possible à pushData (refreshCostsInBackground en pousse un dès le
     // lancement) : `payload` lit self.displayManager sans filet, un nil ferait planter le
     // literal @{...} plutôt que d'omettre la clé.
@@ -685,9 +690,13 @@ static const CGFloat TMTitleBarHeight = 28;
 
 // Chaque widget a son propre panneau d'info (façon iStat), distinct du popover quota : un WKWebView
 // léger (widget.html) qui affiche le détail focalisé de la métrique cliquée.
+// Largeur du panneau d'info : fixe (le contenu est calibré dessus), contrairement à la hauteur.
+static const CGFloat TMWidgetPanelWidth = 264;
+static const CGFloat TMWidgetPanelDefaultHeight = 220;
+
 - (void)ensureWidgetPopover {
     if (self.widgetPopover) return;
-    NSRect frame = NSMakeRect(0, 0, 264, 220);
+    NSRect frame = NSMakeRect(0, 0, TMWidgetPanelWidth, TMWidgetPanelDefaultHeight);
     WKWebViewConfiguration *config = [WKWebViewConfiguration new];
     [config.userContentController addScriptMessageHandler:self name:@"native"];
     self.widgetWebView = [[WKWebView alloc] initWithFrame:frame configuration:config];
@@ -700,8 +709,32 @@ static const CGFloat TMTitleBarHeight = 28;
     controller.preferredContentSize = frame.size;
     self.widgetPopover = [NSPopover new];
     self.widgetPopover.behavior = NSPopoverBehaviorTransient;
+    // Sans cela, chaque ajustement de hauteur (changement de widget, section qui apparaît) se
+    // joue en animation : le panneau se déplie sous le curseur au lieu de s'afficher fait.
+    self.widgetPopover.animates = NO;
     self.widgetPopover.contentSize = frame.size;
     self.widgetPopover.contentViewController = controller;
+}
+
+// Hauteur du panneau = hauteur réelle de son contenu, mesurée par la page et poussée ici. Une
+// taille fixe tronquait net les panneaux longs (CPU s'arrêtait au milieu de « charge », la liste
+// des processus n'apparaissait jamais) tout en laissant du vide sous les courts.
+- (void)applyWidgetPanelHeight:(CGFloat)height forWidget:(NSString *)wid {
+    if (height < 80) return;  // mesure aberrante (page pas encore rendue) : on garde l'existante
+    CGFloat maxHeight = MAX(240, NSScreen.mainScreen.visibleFrame.size.height - 40);
+    height = ceil(MIN(height, maxHeight));
+    if (wid) {
+        self.widgetPanelHeights[wid] = @(height);
+        // Persistées : au relancement, le premier affichage de chaque panneau part déjà de la
+        // bonne taille au lieu de s'ouvrir puis de se redimensionner sous le curseur.
+        [NSUserDefaults.standardUserDefaults setObject:self.widgetPanelHeights forKey:@"widgetPanelHeights"];
+    }
+    if (!self.widgetPopover || fabs(self.widgetPopover.contentSize.height - height) < 1) return;
+    NSSize size = NSMakeSize(TMWidgetPanelWidth, height);
+    // Les deux, et dans cet ordre : NSPopover se cale sur la taille préférée de son
+    // contentViewController dès qu'elle est renseignée, et ignore alors contentSize seul.
+    self.widgetPopover.contentViewController.preferredContentSize = size;
+    self.widgetPopover.contentSize = size;
 }
 
 - (NSDictionary *)widgetMetricsPayload {
@@ -728,6 +761,14 @@ static const CGFloat TMTitleBarHeight = 28;
     if (self.widgetPopover.shown && [self.currentWidgetId isEqual:wid]) { [self.widgetPopover close]; return; }
     [self ensureWidgetPopover];
     self.currentWidgetId = wid;
+    // Hauteur déjà mesurée pour ce widget : la poser avant l'affichage évite le saut du premier
+    // frame, le temps que la page remesure et confirme.
+    NSNumber *known = self.widgetPanelHeights[wid];
+    if (known) {
+        NSSize size = NSMakeSize(TMWidgetPanelWidth, known.doubleValue);
+        self.widgetPopover.contentViewController.preferredContentSize = size;
+        self.widgetPopover.contentSize = size;
+    }
     [self pushWidgetMetrics];  // remplit avant l'affichage si le web est prêt
     [self.widgetPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMinY];
 }
@@ -757,7 +798,8 @@ static const CGFloat TMTitleBarHeight = 28;
             || (!shape.length && ([readout[@"style"] isEqual:@"twoLine"] || [readout[@"style"] isEqual:@"battery"]));
         NSString *title = shapeCarriesText ? @"" : readout[@"title"];
         if ([title length]) {
-            item.button.attributedTitle = TMMenuBarTitle(title, (TMSeverity)[readout[@"severity"] integerValue]);
+            item.button.attributedTitle = TMMenuBarTitle(title, readout[@"valueTemplate"],
+                                                         (TMSeverity)[readout[@"severity"] integerValue]);
             item.button.imagePosition = NSImageLeading;
         } else {
             item.button.attributedTitle = [[NSAttributedString alloc] initWithString:@""];
@@ -1000,9 +1042,13 @@ static const CGFloat TMTitleBarHeight = 28;
     TMSeverity severity = (hasValue && isQuotaMetric) ? TMSeverityForPercent(shown) : TMSeverityNormal;
     if (!hasValue) providerInk = nil;  // le tiret « pas de donnée » n'identifie personne
     NSString *suffix = [metric isEqualToString:@"system:temp"] ? @"°" : @"%";
+    NSString *prefix = label ? [label stringByAppendingString:@" "] : @"";
     NSString *title = hasValue
-        ? [NSString stringWithFormat:@" %@%ld%@", label ? [label stringByAppendingString:@" "] : @"", (long)(shown + 0.5), suffix]
+        ? [NSString stringWithFormat:@" %@%ld%@", prefix, (long)(shown + 0.5), suffix]
         : @" --";
+    // Le libellé ne bouge pas d'un tick à l'autre (c'est un choix de réglage) ; seul le nombre
+    // varie, de un à trois chiffres. Le gabarit réserve donc la place de « 100 ».
+    NSString *titleTemplate = [NSString stringWithFormat:@" %@100%@", prefix, suffix];
 
     BOOL sparkStyle = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] isEqualToString:@"spark"];
     self.statusItem.button.image = sparkStyle
@@ -1011,7 +1057,7 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusItem.button.image.accessibilityDescription = hasValue
         ? [NSString stringWithFormat:@"Quota %ld %% consommé", (long)(shown + 0.5)]
         : @"Quota indisponible";
-    self.statusItem.button.attributedTitle = TMMenuBarTitle(title, severity);
+    self.statusItem.button.attributedTitle = TMMenuBarTitle(title, titleTemplate, severity);
 }
 
 #pragma mark - Aperçu au survol
@@ -1482,6 +1528,10 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         TMDisplay *display = displayId ? [self.displayManager displayWithIdentifier:displayId] : nil;
         if (display) [display setBrightnessPercent:[body[@"value"] doubleValue]];
         [self pushData];
+    }
+    if ([action isEqualToString:@"resizeWidgetPanel"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : self.currentWidgetId;
+        [self applyWidgetPanelHeight:[body[@"height"] doubleValue] forWidget:wid];
     }
     if ([action isEqualToString:@"setMenuBarWidget"]) {
         NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;

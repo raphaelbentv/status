@@ -894,6 +894,64 @@ static void TestMenuBarWidgets(void) {
     Check(TMWidgetNamedColor(@"auto") == nil, @"« auto » n'est pas une couleur nommée (template neutre)");
 }
 
+#pragma mark - Largeur réservée des icônes (pas de dérive dans la barre)
+
+// Une icône dont la largeur suit son texte fait glisser toute la rangée à chaque tick : les
+// voisines bougent, et le panneau qu'on vient d'ouvrir ne pointe plus sur l'icône cliquée.
+// Chaque forme portant du texte doit donc réserver la largeur de son pire cas.
+static NSDictionary *TMSnapshotWith(NSString *familyId, NSDictionary *now) {
+    return @{ @"families": @[ @{ @"id": familyId, @"now": now, @"series": @{} } ] };
+}
+
+static CGFloat TMImageWidth(NSString *wid, NSDictionary *snapshot, NSString *shape) {
+    return TMWidgetImageStyled(TMWidgetReadout(wid, snapshot), shape, nil).size.width;
+}
+
+static void TestWidgetStableWidth(void) {
+    Section(@"Largeur d'icône réservée — la rangée ne glisse pas");
+
+    // Réseau : de « ↓ 8 o/s » à « ↓ 999 Mo/s », deux fois plus de caractères.
+    NSDictionary *slow = TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @8, @"txBytesPerSec": @8 });
+    NSDictionary *fast = TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @1048000000, @"txBytesPerSec": @1048000000 });
+    CheckEqual(@(TMImageWidth(@"network", slow, @"")), @(TMImageWidth(@"network", fast, @"")),
+               @"Réseau : même largeur à 8 o/s et à 999 Mo/s");
+
+    // Batterie : « Plein » / « 10 h 00 » / « 5 min », plus le pourcentage à un ou trois chiffres.
+    NSDictionary *full = TMSnapshotWith(@"battery", @{ @"percent": @100, @"fullyCharged": @YES });
+    NSDictionary *low = TMSnapshotWith(@"battery", @{ @"percent": @7, @"minutesRemaining": @620 });
+    CheckEqual(@(TMImageWidth(@"battery", full, @"")), @(TMImageWidth(@"battery", low, @"")),
+               @"Batterie : même largeur pleine et à 7 % / 10 h 20");
+
+    // Température : « 5° / 3 W » contre « 100° / 120 W ».
+    NSDictionary *cool = @{ @"families": @[ @{ @"id": @"sensors", @"now": @{ @"tempC": @5 }, @"series": @{} },
+                                            @{ @"id": @"battery", @"now": @{ @"powerWatts": @-3 }, @"series": @{} } ] };
+    NSDictionary *hot = @{ @"families": @[ @{ @"id": @"sensors", @"now": @{ @"tempC": @100 }, @"series": @{} },
+                                           @{ @"id": @"battery", @"now": @{ @"powerWatts": @-120 }, @"series": @{} } ] };
+    CheckEqual(@(TMImageWidth(@"temperature", cool, @"")), @(TMImageWidth(@"temperature", hot, @"")),
+               @"Température : même largeur à 5 ° et à 100 °");
+
+    // Forme « texte » : « 4 % » contre « 100 % ».
+    NSDictionary *idle = TMSnapshotWith(@"cpu", @{ @"total": @4 });
+    NSDictionary *busy = TMSnapshotWith(@"cpu", @{ @"total": @100 });
+    CheckEqual(@(TMImageWidth(@"cpu", idle, @"text")), @(TMImageWidth(@"cpu", busy, @"text")),
+               @"CPU en texte : même largeur à 4 % et à 100 %");
+
+    // Une source muette ne doit pas non plus rétrécir l'icône : le tiret occupe la même place.
+    CheckEqual(@(TMImageWidth(@"network", @{ @"families": @[] }, @"")), @(TMImageWidth(@"network", fast, @"")),
+               @"Réseau sans donnée : la largeur reste réservée");
+
+    // Titre système (formes barres/camembert) : « 4 % » doit occuper la largeur de « 100 % ».
+    NSDictionary *attrs = @{ NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium] };
+    CGFloat wide = [TMTitleWithReservedWidth(@"100 %", @"100 %", attrs) size].width;
+    CGFloat narrow = [TMTitleWithReservedWidth(@"4 %", @"100 %", attrs) size].width;
+    Check(fabs(wide - narrow) < 0.5, @"Titre : « 4 % » réserve la largeur de « 100 % »");
+    // Un texte plus large que le gabarit n'est jamais rogné.
+    Check([TMTitleWithReservedWidth(@"1000 %", @"100 %", attrs) size].width >= wide,
+          @"Titre plus large que le gabarit : conservé tel quel");
+    CheckEqual([TMTitleWithReservedWidth(@"4 %", @"100 %", attrs) string], @"4 %",
+               @"Titre : le texte lisible reste intact (pas de bourrage de caractères)");
+}
+
 #pragma mark - Écrans (luminosité)
 
 static void TestDisplayBrightnessClamp(void) {
@@ -1395,6 +1453,7 @@ int main(void) {
         TestDisplayManagerLive();
         TestWidgetOrdering();
         TestMenuBarWidgets();
+        TestWidgetStableWidth();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

@@ -105,6 +105,28 @@ checkEqual(menubar('used')({ usedPercent: -5 }), 0, 'borné en bas : jamais de n
 checkEqual(menubar('used')({ usedPercent: 130 }), 100, 'borné en haut');
 checkEqual(menubar('used')(null), null, 'fenêtre absente : null, distinct de 0');
 
+// ── Alignement des deux colonnes du popover (menubar.html) ──────────────────
+// Claude porte des sous-jauges (5 h, Fable) qu'OpenAI n'a pas. En empilant librement, la note de
+// fraîcheur et le coût des deux fournisseurs se retrouvaient décalés de plus de cent pixels : on
+// ne pouvait plus comparer une ligne à celle d'en face. Chaque donnée occupe donc une rangée
+// nommée de la même grille, et une case sans donnée reste vide plutôt que d'absorber la suivante.
+section('provider — les deux colonnes partagent les mêmes rangées');
+const rowsOf = html => [...html.matchAll(/class="cell (c\d) (r\d)/g)].map(m => m[2]);
+const colsOf = html => [...new Set([...html.matchAll(/class="cell (c\d) /g)].map(m => m[1]))];
+const openaiHTML = menubar('provider')('openai', 'OpenAI', { connected: true, windows: [
+  { windowId: 'seven_day', usedPercent: 42, resetsAt: Date.now() / 1000 + 90000 } ] });
+const claudeHTML = menubar('provider')('claude', 'Claude', { authenticated: true, windows: [
+  { windowId: 'seven_day', usedPercent: 81, resetsAt: Date.now() / 1000 + 90000 },
+  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 } ] });
+checkEqual(rowsOf(openaiHTML), rowsOf(claudeHTML),
+  'mêmes rangées des deux côtés, sous-jauges ou non');
+checkEqual(colsOf(openaiHTML), ['c1'], 'OpenAI occupe la première colonne');
+checkEqual(colsOf(claudeHTML), ['c2'], 'Claude occupe la seconde');
+check(/class="cell c2 r5[^"]*"[^>]*>\s*<div class="subgauge"/.test(claudeHTML),
+  'la sous-jauge 5 h vit dans la rangée qui lui est réservée');
+check(/class="cell c1 r5[^"]*"[^>]*>\s*<\/div>/.test(openaiHTML),
+  'côté OpenAI la même rangée existe, vide — elle ne remonte pas la suite');
+
 // ── Coût par modèle (dashboard) ─────────────────────────────────────────────
 section('fmtTokens — volumes de tokens, toujours en millions');
 checkEqual(dashboard('fmtTokens')(186207), '0.2 M', 'sous le million : arrondi au dixième de million');
@@ -216,6 +238,33 @@ const gMem = widget('renderMemory()');
 check(!/Résidente/.test(gMem), 'Mémoire : répartition masquée quand désactivée');
 check(/Processus · mémoire/.test(gMem), 'Mémoire : section processus conservée (non désactivée)');
 widget('metrics = ' + JSON.stringify(wsnap)); widget('widgetId = null');  // restaure
+
+// ── Hauteur du panneau (widget.html) ────────────────────────────────────────
+// Le popover natif est dimensionné par cette mesure : si elle cesse de partir, les panneaux longs
+// se retrouvent tronqués — le défaut que ce mécanisme corrige.
+section('widget.html — hauteur mesurée poussée au natif');
+widget('window.__sent = []');
+widget('window.webkit = {messageHandlers:{native:{postMessage:m=>window.__sent.push(m)}}}');
+widget('let __h = 412; document.querySelector = () => ({getBoundingClientRect:()=>({height:__h})}); window.__setH = v => { __h = v }');
+widget('widgetId = "cpu"');
+widget('syncPanelHeight()');
+checkEqual(widget('window.__sent'), [{ action: 'resizeWidgetPanel', id: 'cpu', height: 412 }],
+  'la hauteur mesurée part avec l’identifiant du widget');
+widget('syncPanelHeight()');
+checkEqual(widget('window.__sent.length'), 1, 'hauteur inchangée : aucun message inutile');
+widget('window.__setH(268)'); widget('syncPanelHeight()');
+checkEqual(widget('window.__sent.length'), 2, 'hauteur changée : nouveau message');
+checkEqual(widget('window.__sent[1].height'), 268, 'la nouvelle hauteur est celle mesurée');
+// Panneau pas encore rendu : ne rien envoyer plutôt qu'une hauteur nulle qui écraserait le popover.
+widget('window.__setH(0)'); widget('syncPanelHeight()');
+checkEqual(widget('window.__sent.length'), 2, 'hauteur nulle : rien n’est poussé');
+
+// Échelle auto : la crête ne doit pas toucher le bord haut, sinon la courbe se lit comme saturée.
+section('widget.html — échelle des courbes sans pourcentage');
+const autoScale = widget('chart([{values:[10,50],color:"var(--chart-a)"}],{percent:false})');
+check(!/,0\.0/.test(autoScale), 'échelle auto : la crête garde de l’air au-dessus');
+const pctScale = widget('chart([{values:[0,100],color:"var(--chart-a)"}])');
+check(/,0\.0/.test(pctScale), 'échelle 0-100 : 100 % touche bien le haut du cadre');
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);
