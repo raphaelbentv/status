@@ -408,6 +408,9 @@ static const CGFloat TMTitleBarHeight = 28;
 // widgetId → signature du dernier rendu poussé (TMWidgetRenderSignature). Réassigner l'image d'un
 // NSStatusItem redéclenche un dessin WindowServer : à 1 Hz, on ne le fait que si les pixels changent.
 @property NSMutableDictionary<NSString *, NSDictionary *> *widgetSignatures;
+// Même mécanisme pour la jauge principale : metricsTick appelle updateStatusMenu chaque seconde
+// quand une métrique système y est épinglée.
+@property NSDictionary *statusMenuSignature;
 @property NSPopover *widgetPopover;
 @property WKWebView *widgetWebView;
 @property BOOL widgetWebReady;
@@ -1068,12 +1071,27 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     NSString *shape = [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring";
     NSColor *chosenInk = TMWidgetNamedColor([NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"]);
     NSColor *ink = (severity != TMSeverityNormal) ? TMSeverityColor(severity) : (chosenInk ?: providerInk);
+
+    // Même garde-fou que updateMenuBarWidgets : réassigner l'image redéclenche un dessin
+    // WindowServer, et metricsTick passe ici chaque seconde dès qu'une métrique système est
+    // épinglée. La série n'est lue que pour les formes qui la dessinent — pour les quotas, elle
+    // vient de l'historique sur disque, autant ne pas le relire pour rien.
+    NSArray *series = [@[@"spark", @"bars"] containsObject:shape]
+        ? ([self menuBarSeriesForMetric:metric] ?: @[]) : @[];
+    NSDictionary *signature = TMWidgetRenderSignature(@{
+        @"metric": metric, @"title": title, @"titleTemplate": titleTemplate,
+        @"hasValue": @(hasValue), @"fraction": @(shown / 100.0), @"severity": @(severity),
+        @"ink": ink.description ?: @"", @"series": series,
+    }, shape, nil);
+    if ([self.statusMenuSignature isEqual:signature]) return;  // mêmes pixels : rien à redessiner
+    self.statusMenuSignature = signature;
+
     if ([shape isEqualToString:@"none"]) {
         // Le titre porte déjà la valeur en toutes lettres : une icône de plus n'ajoute rien, et
         // c'est la seule façon de rendre la rangée aussi étroite que possible.
         self.statusItem.button.image = nil;
     } else if ([shape isEqualToString:@"spark"]) {
-        self.statusItem.button.image = TMSparklineIcon([self menuBarSeriesForMetric:metric], hasValue, severity, ink);
+        self.statusItem.button.image = TMSparklineIcon(series, hasValue, severity, ink);
     } else if ([shape isEqualToString:@"ring"]) {
         self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, ink);
     } else if ([@[@"bars", @"pie", @"bar"] containsObject:shape]) {
@@ -1081,7 +1099,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         // toute la barre, et la jauge quota hérite de chaque forme qu'on y ajoute.
         NSDictionary *readout = @{
             @"style": @"ring", @"hasValue": @(hasValue), @"fraction": @(shown / 100.0),
-            @"series": [self menuBarSeriesForMetric:metric] ?: @[],
+            @"series": series,
             @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(shown + 0.5), suffix] : @"—",
             @"valueTemplate": [NSString stringWithFormat:@"100%@", suffix], @"template": @"",
             @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @(severity),

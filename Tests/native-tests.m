@@ -969,6 +969,13 @@ static void TestWidgetRenderSignature(void) {
                @"anneau : la série qui glisse ne change pas la signature");
     Check(![TMWidgetRenderSignature(cpu, @"graph", nil) isEqual:TMWidgetRenderSignature(shifted, @"graph", nil)],
           @"courbe : la série fait partie du dessin");
+    // La jauge principale (Status.m) réutilise la même signature pour sauter ses redessins ; sa
+    // forme « spark » dessine la série comme « graph », et doit donc la garder dans la signature —
+    // sinon la sparkline gèlerait dès que la valeur affichée cesse de bouger.
+    Check(![TMWidgetRenderSignature(cpu, @"spark", nil) isEqual:TMWidgetRenderSignature(shifted, @"spark", nil)],
+          @"spark : la série fait partie du dessin");
+    CheckEqual(TMWidgetRenderSignature(cpu, @"spark", nil), TMWidgetRenderSignature(cpu, @"spark", nil),
+               @"spark : mêmes entrées → signatures égales");
     // Forme vide → repli sur le style naturel du readout (bars pour le CPU), qui utilise la série.
     Check(![TMWidgetRenderSignature(cpu, nil, nil) isEqual:TMWidgetRenderSignature(shifted, nil, nil)],
           @"forme auto (bars pour le CPU) : la série compte");

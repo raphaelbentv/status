@@ -421,10 +421,11 @@ static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink
 NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *shape, NSString *colorName) {
     // Même résolution de forme que TMWidgetImageWithInk : vide → style naturel du readout.
     NSString *resolved = shape.length ? shape : ([readout[@"style"] isKindOfClass:NSString.class] ? readout[@"style"] : @"");
-    // Seuls histogramme et courbe dessinent la série ; pour les autres formes, l'écarter de la
-    // signature est tout l'intérêt — elle glisse à chaque tick alors que les pixels, eux, ne
-    // bougent que quand une valeur affichée change.
-    BOOL usesSeries = [resolved isEqual:@"bars"] || [resolved isEqual:@"graph"];
+    // Seules les formes qui dessinent la série la gardent dans la signature (histogramme, courbe,
+    // et la sparkline de la jauge principale) ; pour les autres, l'écarter est tout l'intérêt —
+    // elle glisse à chaque tick alors que les pixels, eux, ne bougent que quand une valeur
+    // affichée change.
+    BOOL usesSeries = [resolved isEqual:@"bars"] || [resolved isEqual:@"graph"] || [resolved isEqual:@"spark"];
     NSMutableDictionary *signature = [readout mutableCopy] ?: [NSMutableDictionary dictionary];
     if (!usesSeries) [signature removeObjectForKey:@"series"];
     signature[@"shape"] = resolved;
