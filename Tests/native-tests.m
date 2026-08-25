@@ -577,6 +577,61 @@ static void TestQuotaNotificationDecisions(void) {
     NSDictionary *first = TMQuotaNotificationDecisions(nil, pairs(rolled), @[], YES, 1100000);
     CheckEqual(@([first[@"events"] count]), @0, @"première observation : jamais de reset (pas de référence)");
 
+    // Reset par effondrement : OpenAI recharge parfois un compteur en plein milieu de semaine,
+    // sans toujours faire avancer resetsAt. La chute du pourcentage est alors le seul signal.
+    NSDictionary *beforeCollapse = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 40, 1000000, 10080)]]],
+                                                                levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(beforeCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 2, 1000000, 10080)]]],
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @1, @"40 % → 2 %, même resetsAt : reset détecté");
+    CheckEqual([r[@"events"] firstObject][@"kind"], @"reset", @"de type reset");
+    NSDictionary *afterCollapse = r[@"state"];
+    r = TMQuotaNotificationDecisions(afterCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 2, 1000000, 10080)]]],
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"même effondrement revu : silence");
+    // Oscillation entre deux sources (l'une figée haute, l'autre en direct basse) : une seule
+    // notification par période, pas une à chaque bascule.
+    NSDictionary *osc = TMQuotaNotificationDecisions(afterCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 40, 1000000, 10080)]]],
+                                                     levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(osc, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 2, 1000000, 10080)]]],
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"oscillation dans la même période : pas de rafale");
+    // Une baisse ordinaire n'est pas un reset.
+    r = TMQuotaNotificationDecisions(beforeCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 20, 1000000, 10080)]]],
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"40 % → 20 % : simple baisse, pas de notification");
+    NSDictionary *lowStart = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 10, 1000000, 10080)]]],
+                                                          levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(lowStart, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 2, 1000000, 10080)]]],
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"10 % → 2 % : trop peu entamée pour signifier un reset");
+    // L'effondrement ne s'applique qu'aux fenêtres hebdo, comme le reste.
+    r = TMQuotaNotificationDecisions(@{ @"used:Claude:five_hour": @40 },
+                                     pairs(TMWin(@"five_hour", @"5 h", 2, 1000000, 300)), levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"effondrement d'une fenêtre 5 h : silence");
+    // resetsAt glissant (observé sur OpenAI : la date dérive au fil de l'activité, +37 h entre
+    // deux relevés, sans qu'aucun compteur ne se recharge). Sans corroboration par une baisse de
+    // consommation, chaque relevé notifierait un faux reset.
+    NSDictionary *drift = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 30, 1000000, 10080)]]],
+                                                       levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(drift, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 31, 1140000, 10080)]]],
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"resetsAt qui dérive, consommation stable : pas de notification");
+    // Un vrai roulement corrobore : la date avance ET la consommation retombe.
+    r = TMQuotaNotificationDecisions(drift, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 4, 1600000, 10080)]]],
+                                     levels, YES, 1100000);
+    CheckEqual(@([r[@"events"] count]), @1, @"date qui avance + consommation retombée : reset notifié");
+    // Après un effondrement déjà signalé, une période close sur une semaine restée légère est un
+    // non-événement (rien ne contraignait) ; elle se re-signale dès que la semaine a compté.
+    r = TMQuotaNotificationDecisions(afterCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 2, 1600000, 10080)]]],
+                                     levels, YES, 1100000);
+    CheckEqual(@([r[@"events"] count]), @0, @"semaine restée à 2 % qui tourne : non-événement");
+    NSDictionary *heavyAgain = TMQuotaNotificationDecisions(afterCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 60, 1000000, 10080)]]],
+                                                            levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(heavyAgain, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 3, 1600000, 10080)]]],
+                                     levels, YES, 1100000);
+    CheckEqual(@([r[@"events"] count]), @1, @"nouvelle période après une semaine chargée : notifiée");
+
     // Seuils coupés (liste vide) : aucune notification de seuil.
     r = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 96, 1000000, 10080)), @[], YES, now);
     CheckEqual(@([r[@"events"] count]), @0, @"levels vide : pas de seuils");

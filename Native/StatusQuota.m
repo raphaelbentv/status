@@ -472,15 +472,37 @@ NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
             }
 
             // Réinitialisations : hebdo seulement — les fenêtres session tournent plusieurs fois
-            // par jour. Un pourcentage encore haut à l'arrivée de la nouvelle période signale des
-            // données mêlées (deux sources) : l'état avance, la notification se tait.
+            // par jour. Deux signaux, car les fournisseurs ne préviennent pas de la même façon :
+            //   — resetsAt qui avance : le roulement ordinaire, en fin de période ou anticipé ;
+            //   — le pourcentage qui s'effondre (≥ 25 % → ≤ 5 %) à resetsAt inchangé : OpenAI
+            //     recharge parfois un compteur en plein milieu de semaine sans toucher à la date.
+            // Un pourcentage encore haut à l'arrivée d'une nouvelle période signale des données
+            // mêlées (deux sources) : l'état avance, la notification se tait. Et une seule
+            // notification par période (clé rstfired) : deux sources qui oscillent — l'une figée
+            // haute, l'autre en direct basse — ne doivent pas mitrailler.
             if (TMWindowIsWeekly(window)) {
                 NSString *resetKey = [NSString stringWithFormat:@"reset:%@:%@", provider, identifier];
+                NSString *usedKey = [NSString stringWithFormat:@"used:%@:%@", provider, identifier];
+                NSString *firedKey = [NSString stringWithFormat:@"rstfired:%@:%@", provider, identifier];
                 long long known = [next[resetKey] longLongValue];
-                if (weeklyResets && known > 0 && resetsAt > known && used < 50)
+                NSNumber *previousUsed = [next[usedKey] isKindOfClass:NSNumber.class] ? next[usedKey] : nil;
+                // Le roulement exige une baisse corroborante : la fenêtre hebdo d'OpenAI est
+                // GLISSANTE — resetsAt dérive au fil de l'activité (+37 h observées entre deux
+                // relevés) sans qu'aucun compteur ne se recharge. La date qui avance seule ne
+                // prouve donc rien ; un compteur qui retombe, si. Corollaire assumé : une semaine
+                // restée légère (< 20 points consommés) tourne sans notification — rien ne
+                // contraignait, il n'y a rien à annoncer.
+                BOOL rolled = known > 0 && resetsAt > known && used < 50
+                    && previousUsed && previousUsed.doubleValue - used >= 20;
+                BOOL collapsed = previousUsed && previousUsed.doubleValue >= 25 && used <= 5;
+                BOOL alreadyFired = [next[firedKey] longLongValue] == resetsAt;
+                if (weeklyResets && (rolled || collapsed) && !alreadyFired) {
+                    next[firedKey] = @(resetsAt);
                     [events addObject:@{ @"kind": @"reset", @"provider": provider, @"label": label,
                                          @"usedPercent": @(used), @"resetsAt": @(resetsAt) }];
+                }
                 if (resetsAt > known) next[resetKey] = @(resetsAt);
+                next[usedKey] = @(used);
             }
         }
     }

@@ -45,9 +45,14 @@ BOOL TMWindowIsWeekly(NSDictionary *window);
 //   levels : seuils croissants de % consommé (ex. @[@80, @95]) ; un franchissement notifie le plus
 //            haut niveau atteint, une seule fois par niveau et par période — la clé inclut
 //            resetsAt, une nouvelle période réarme donc tout. Vide = seuils coupés.
-//   weeklyResets : notifier quand une fenêtre HEBDO tourne (resetsAt avance et la nouvelle fenêtre
-//            est peu entamée — un pourcentage encore haut signale des données mêlées, pas un
-//            reset). Les fenêtres session (5 h) ne notifient jamais : il y en a plusieurs par jour.
+//   weeklyResets : notifier quand une fenêtre HEBDO tourne. Deux signaux, tous deux corroborés
+//            par une baisse du compteur — la fenêtre OpenAI est glissante, sa date dérive au fil
+//            de l'activité sans que rien ne se recharge, la date seule ne prouve donc rien :
+//            resetsAt qui avance avec une consommation retombée d'au moins 20 points, ou
+//            l'effondrement du pourcentage (≥ 25 % → ≤ 5 %) à date inchangée (recharge OpenAI en
+//            plein milieu de semaine). Une seule notification par période, même si deux sources
+//            oscillent ; une semaine restée légère tourne sans bruit (rien ne contraignait). Les
+//            fenêtres session (5 h) ne notifient jamais : il y en a plusieurs par jour.
 //   now    : epoch (s), pour purger du nouvel état les clés de périodes passées.
 // Retourne { events: [ { kind: "threshold"|"reset", provider, label, level, usedPercent,
 //            resetsAt } ], state: nouvel état }, events dans l'ordre des fenêtres fournies.
