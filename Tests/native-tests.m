@@ -639,6 +639,13 @@ static void TestSystemMonitorLive(void) {
         return nil;
     };
 
+    // Capteurs : le client HID est persistant (créé au 1er tick, réutilisé ensuite) — les deux
+    // sample ci-dessus exercent donc le chemin « cache ». Si la machine expose des capteurs,
+    // tempC doit survivre au second passage avec une valeur plausible.
+    NSNumber *tempC = familyNow(@"sensors")[@"tempC"];
+    if (tempC) Check(tempC.doubleValue > 10 && tempC.doubleValue < 120,
+                     @"tempC plausible au 2e tick (client HID réutilisé)");
+
     // coreTypes : sur Apple Silicon, chaîne E/P de longueur = nombre de cœurs. Omis sur une
     // machine sans distinction P/E — on ne teste alors que sa cohérence si présent.
     NSDictionary *cpuNow = familyNow(@"cpu");
@@ -787,6 +794,42 @@ static void TestSensorFamily(void) {
     Check([TMSensorFamilyForName(@"battery tdie") isEqualToString:@"battery"], @"batterie prioritaire sur die");
 }
 
+static void TestSensorAggregates(void) {
+    Section(@"TMSensorTempAggregates — agrégation des capteurs thermiques");
+    NSArray *readings = @[
+        @{ @"name": @"PMU tdie1", @"celsius": @44.4 },
+        @{ @"name": @"PMU tdie2", @"celsius": @48.6 },
+        @{ @"name": @"PMU tdev1", @"celsius": @35.2 },
+        @{ @"name": @"gas gauge battery", @"celsius": @31.0 },
+    ];
+    NSDictionary *agg = TMSensorTempAggregates(readings);
+    CheckEqual(agg[@"tempC"], @49, @"tempC = max des dies, arrondi");
+    CheckEqual(agg[@"dieMaxC"], @49, @"dieMaxC arrondi");
+    CheckEqual(agg[@"dieAvgC"], @47, @"dieAvgC : moyenne des dies (46,5 → 47)");
+    CheckEqual(agg[@"dieCount"], @2, @"deux dies comptés");
+    CheckEqual(agg[@"deviceMaxC"], @35, @"deviceMaxC arrondi");
+    CheckEqual(agg[@"deviceCount"], @1, @"un périphérique compté");
+    Check(agg[@"deviceCount"] && [agg[@"deviceCount"] integerValue] == 1,
+          @"la batterie ne compte ni comme die ni comme périphérique");
+
+    // Sans die identifiable : moyenne de toutes les lectures plausibles, classées ou non.
+    NSArray *unknown = @[ @{ @"name": @"mystery", @"celsius": @40 }, @{ @"celsius": @20 } ];
+    NSDictionary *aggUnknown = TMSensorTempAggregates(unknown);
+    CheckEqual(aggUnknown[@"tempC"], @30, @"sans die : moyenne de tout");
+    Check(aggUnknown[@"dieCount"] == nil, @"sans die : pas d'agrégats die");
+
+    // Filtre de plausibilité : les capteurs fantômes rendent 0 ou des valeurs folles.
+    NSArray *ghosts = @[ @{ @"name": @"PMU tdie1", @"celsius": @0 },
+                         @{ @"name": @"PMU tdie2", @"celsius": @150 },
+                         @{ @"name": @"PMU tdie3", @"celsius": @10 } ];
+    Check(TMSensorTempAggregates(ghosts) == nil, @"fantômes seuls (0 / 150 / 10 °C) : nil");
+    Check(TMSensorTempAggregates(@[]) == nil, @"aucune lecture : nil");
+
+    // Batterie seule : plausible, donc tempC retombe sur la moyenne de tout.
+    CheckEqual(TMSensorTempAggregates(@[ @{ @"name": @"gas gauge battery", @"celsius": @31.0 } ])[@"tempC"],
+               @31, @"batterie seule : tempC = moyenne générale");
+}
+
 #pragma mark - Widgets de la barre des menus
 
 // Snapshot moniteur synthétique : familles avec `now` et `series`, comme en production.
@@ -905,6 +948,42 @@ static void TestMenuBarWidgets(void) {
         Check(neutral != nil && neutral.isTemplate, ([NSString stringWithFormat:@"jauge %@ sans encre : template", shape]));
         CheckEqual(@(tinted.size.width), @(neutral.size.width), ([NSString stringWithFormat:@"jauge %@ : la couleur ne change pas la largeur", shape]));
     }
+}
+
+// La signature de rendu permet de sauter les redessins identiques (le tick tourne à 1 Hz : sans
+// elle, chaque NSStatusItem serait régénéré et réassigné chaque seconde, valeur inchangée ou non).
+static void TestWidgetRenderSignature(void) {
+    Section(@"TMWidgetRenderSignature — sauter les redessins identiques");
+    NSDictionary *snap = TMFakeSnapshot();
+    NSDictionary *cpu = TMWidgetReadout(@"cpu", snap);
+
+    Check(TMWidgetRenderSignature(cpu, @"ring", @"blue") != nil, @"signature non nulle");
+    CheckEqual(TMWidgetRenderSignature(cpu, @"ring", @"blue"), TMWidgetRenderSignature(cpu, @"ring", @"blue"),
+               @"mêmes entrées → signatures égales");
+
+    // La série glisse à chaque tick. Une forme sans série (anneau) ne doit pas en dépendre —
+    // c'est tout l'intérêt : valeur stable ⇒ pas de redessin.
+    NSMutableDictionary *shifted = [cpu mutableCopy];
+    shifted[@"series"] = @[@1, @2, @99];
+    CheckEqual(TMWidgetRenderSignature(cpu, @"ring", @"blue"), TMWidgetRenderSignature(shifted, @"ring", @"blue"),
+               @"anneau : la série qui glisse ne change pas la signature");
+    Check(![TMWidgetRenderSignature(cpu, @"graph", nil) isEqual:TMWidgetRenderSignature(shifted, @"graph", nil)],
+          @"courbe : la série fait partie du dessin");
+    // Forme vide → repli sur le style naturel du readout (bars pour le CPU), qui utilise la série.
+    Check(![TMWidgetRenderSignature(cpu, nil, nil) isEqual:TMWidgetRenderSignature(shifted, nil, nil)],
+          @"forme auto (bars pour le CPU) : la série compte");
+
+    // Tout ce qui change les pixels ou le titre doit changer la signature.
+    NSMutableDictionary *warmer = [cpu mutableCopy];
+    warmer[@"title"] = @"88 %";
+    Check(![TMWidgetRenderSignature(cpu, @"ring", @"blue") isEqual:TMWidgetRenderSignature(warmer, @"ring", @"blue")],
+          @"titre différent → signature différente");
+    Check(![TMWidgetRenderSignature(cpu, @"ring", @"blue") isEqual:TMWidgetRenderSignature(cpu, @"pie", @"blue")],
+          @"forme différente → signature différente");
+    Check(![TMWidgetRenderSignature(cpu, @"ring", @"blue") isEqual:TMWidgetRenderSignature(cpu, @"ring", @"red")],
+          @"couleur différente → signature différente");
+    CheckEqual(TMWidgetRenderSignature(cpu, nil, nil), TMWidgetRenderSignature(cpu, nil, nil),
+               @"forme et couleur absentes : stable, pas de crash");
 }
 
 #pragma mark - Largeur réservée des icônes (pas de dérive dans la barre)
@@ -1459,6 +1538,7 @@ int main(void) {
         TestAlertRearm();
         TestLongHistory();
         TestSensorFamily();
+        TestSensorAggregates();
         TestSystemMonitorLive();
         TestDisplayBrightnessClamp();
         TestDisplayVCPConversion();
@@ -1466,6 +1546,7 @@ int main(void) {
         TestDisplayManagerLive();
         TestWidgetOrdering();
         TestMenuBarWidgets();
+        TestWidgetRenderSignature();
         TestWidgetStableWidth();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",

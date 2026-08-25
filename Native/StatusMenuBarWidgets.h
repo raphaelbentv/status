@@ -26,6 +26,14 @@ NSString *TMMenuBarWidgetLabel(NSString *widgetId);
 // déplacement sortirait des bornes — un bouton en butée ne doit rien casser.
 NSArray<NSString *> *TMArrayByMovingItem(NSArray<NSString *> *list, NSString *item, NSInteger delta);
 
+// Signature du rendu d'un widget : deux ticks produisant la même signature dessineraient les mêmes
+// pixels et le même titre — l'appelant peut alors sauter la régénération de l'image et la
+// réassignation au NSStatusItem (chaque réassignation redéclenche un dessin WindowServer). Les
+// formes à série (bars/graph) incluent la série — elle glisse à chaque tick, c'est leur raison
+// d'être ; les autres l'ignorent, car leur dessin n'en dépend pas.
+NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *_Nullable shape,
+                                      NSString *_Nullable colorName);
+
 // Lecture d'un widget depuis un snapshot moniteur ({ families: [ { id, now, series } ] }).
 // Retourne un dictionnaire sérialisable :
 //   style     : « bars » | « pie » | « battery » | « twoLine »

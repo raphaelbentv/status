@@ -405,6 +405,9 @@ static const CGFloat TMTitleBarHeight = 28;
 @property TMDisplayManager *displayManager;
 @property id brightnessGlobalMonitor, brightnessLocalMonitor;
 @property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
+// widgetId → signature du dernier rendu poussé (TMWidgetRenderSignature). Réassigner l'image d'un
+// NSStatusItem redéclenche un dessin WindowServer : à 1 Hz, on ne le fait que si les pixels changent.
+@property NSMutableDictionary<NSString *, NSDictionary *> *widgetSignatures;
 @property NSPopover *widgetPopover;
 @property WKWebView *widgetWebView;
 @property BOOL widgetWebReady;
@@ -660,6 +663,7 @@ static const CGFloat TMTitleBarHeight = 28;
         if (![enabled containsObject:wid]) {
             [NSStatusBar.systemStatusBar removeStatusItem:self.widgetItems[wid]];
             [self.widgetItems removeObjectForKey:wid];
+            [self.widgetSignatures removeObjectForKey:wid];
         }
 
     // Ajouter les manquants. L'ordre d'affichage vient de la création : macOS insère chaque
@@ -675,6 +679,7 @@ static const CGFloat TMTitleBarHeight = 28;
         item.button.action = @selector(widgetClicked:);
         item.button.identifier = wid;  // pour retrouver le widget au clic et au redessin
         self.widgetItems[wid] = item;
+        [self.widgetSignatures removeObjectForKey:wid];  // item neuf (tiret) : forcer le 1er rendu
     }
     [self updateMenuBarWidgetsFromMonitor];
 }
@@ -788,11 +793,15 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 
 - (void)updateMenuBarWidgets:(NSDictionary *)snapshot {
     if (!self.widgetItems.count) return;
+    if (!self.widgetSignatures) self.widgetSignatures = [NSMutableDictionary dictionary];
     [self.widgetItems enumerateKeysAndObjectsUsingBlock:^(NSString *wid, NSStatusItem *item, BOOL *stop) {
         NSDictionary *readout = TMWidgetReadout(wid, snapshot);
         NSDictionary *style = [self widgetStyleFor:wid];
         NSString *shape = [style[@"shape"] isKindOfClass:NSString.class] ? style[@"shape"] : nil;
         NSString *color = [style[@"color"] isKindOfClass:NSString.class] ? style[@"color"] : nil;
+        NSDictionary *signature = TMWidgetRenderSignature(readout, shape, color);
+        if ([self.widgetSignatures[wid] isEqual:signature]) return;  // mêmes pixels : rien à redessiner
+        self.widgetSignatures[wid] = signature;
         item.button.image = TMWidgetImageStyled(readout, shape, color);
         // Le titre système (valeur à côté) n'accompagne que les formes « graphe/jauge » ; les formes
         // qui portent déjà leur texte (twoLine/battery/text) n'ont pas de titre séparé.

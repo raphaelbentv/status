@@ -656,6 +656,84 @@ static double TMSMCReadNumber(const char *key) {
     return NAN;
 }
 
+NSDictionary<NSString *, NSNumber *> *TMSensorTempAggregates(NSArray<NSDictionary *> *readings) {
+    double dieSum = 0, dieMax = 0, deviceSum = 0, deviceMax = 0, anySum = 0;
+    NSUInteger dieCount = 0, deviceCount = 0, anyCount = 0;
+    for (NSDictionary *reading in readings) {
+        NSNumber *num = [reading[@"celsius"] isKindOfClass:NSNumber.class] ? reading[@"celsius"] : nil;
+        if (!num) continue;
+        double celsius = num.doubleValue;
+        // Filtre de plausibilité : les capteurs fantômes rendent 0 ou des valeurs folles.
+        if (!(celsius > 10 && celsius < 120)) continue;
+        anySum += celsius; anyCount++;
+        NSString *name = [reading[@"name"] isKindOfClass:NSString.class] ? reading[@"name"] : nil;
+        NSString *familyName = TMSensorFamilyForName(name);
+        if ([familyName isEqualToString:@"die"]) {
+            dieSum += celsius; dieCount++; dieMax = MAX(dieMax, celsius);
+        } else if ([familyName isEqualToString:@"device"]) {
+            deviceSum += celsius; deviceCount++; deviceMax = MAX(deviceMax, celsius);
+        }
+    }
+    if (!anyCount) return nil;
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    if (dieCount) {
+        values[@"dieMaxC"] = @(round(dieMax));
+        values[@"dieAvgC"] = @(round(dieSum / dieCount));
+        values[@"dieCount"] = @(dieCount);
+    }
+    if (deviceCount) {
+        values[@"deviceMaxC"] = @(round(deviceMax));
+        values[@"deviceAvgC"] = @(round(deviceSum / deviceCount));
+        values[@"deviceCount"] = @(deviceCount);
+    }
+    values[@"tempC"] = dieCount ? @(round(dieMax)) : @(round(anySum / anyCount));
+    return values;
+}
+
+// Lectures thermiques brutes via HID : [{ name, celsius }]. Le client, la liste des services et
+// leurs noms (« Product ») sont créés une fois puis conservés : les capteurs d'une machine ne
+// changent pas en cours de route, et tout recréer à chaque tick — client, matching, copie des
+// services, relecture du nom de chaque capteur — coûtait une rafale d'aller-retours mach vers le
+// démon HID chaque seconde, le premier poste CPU du moniteur. Ne reste par tick que la lecture de
+// l'événement température de chaque service. Appelé du seul thread du timer (main).
+static NSArray<NSDictionary *> * _Nullable TMSensorReadings(void) {
+    static TMHIDClientRef client;
+    static CFArrayRef services;
+    static NSArray<NSString *> *names;  // nom par service, aligné sur `services`
+    if (!services) {
+        if (!client) {
+            client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+            if (!client) return nil;
+            // PrimaryUsagePage 0xff00 (AppleVendor), PrimaryUsage 5 : les capteurs thermiques.
+            NSDictionary *matching = @{ @"PrimaryUsagePage": @(0xff00), @"PrimaryUsage": @5 };
+            IOHIDEventSystemClientSetMatching(client, (__bridge CFDictionaryRef)matching);
+        }
+        services = IOHIDEventSystemClientCopyServices(client);
+        if (!services) return nil;  // réessayé au tick suivant
+        NSMutableArray *collected = [NSMutableArray array];
+        for (CFIndex i = 0; i < CFArrayGetCount(services); i++) {
+            TMHIDServiceRef service = (TMHIDServiceRef)CFArrayGetValueAtIndex(services, i);
+            CFTypeRef nameRef = IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
+            NSString *name = (nameRef && CFGetTypeID(nameRef) == CFStringGetTypeID())
+                           ? [(__bridge NSString *)nameRef copy] : @"";
+            if (nameRef) CFRelease(nameRef);
+            [collected addObject:name];
+        }
+        names = collected;
+    }
+    NSMutableArray *readings = [NSMutableArray array];
+    for (CFIndex i = 0; i < CFArrayGetCount(services); i++) {
+        TMHIDServiceRef service = (TMHIDServiceRef)CFArrayGetValueAtIndex(services, i);
+        TMHIDEventRef event = IOHIDServiceClientCopyEvent(service, TMHIDEventTypeTemperature, 0, 0);
+        if (!event) continue;  // capteur muet ce tick (arrive après une sortie de veille)
+        double celsius = IOHIDEventGetFloatValue(event, TMHIDEventFieldTemperature);
+        CFRelease(event);
+        [readings addObject:@{ @"name": (NSUInteger)i < names.count ? names[i] : @"",
+                               @"celsius": @(celsius) }];
+    }
+    return readings;
+}
+
 static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
     NSMutableDictionary *values = [NSMutableDictionary dictionary];
 
@@ -676,58 +754,12 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
         }
     }
 
-    // Températures — capteurs HID regroupés par famille. PrimaryUsagePage 0xff00 (AppleVendor),
-    // PrimaryUsage 5 : les capteurs thermiques. Une moyenne de TOUT serait trompeuse : elle mêle la
-    // cellule de batterie (~31 °C) aux dies du SoC (~44 °C) et masque le point chaud, qui est
-    // précisément la valeur qui gouverne le bridage. On agrège donc par famille (voir
-    // TMSensorFamilyForName) et `tempC` devient le maximum des dies.
-    TMHIDClientRef client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
-    if (client) {
-        NSDictionary *matching = @{ @"PrimaryUsagePage": @(0xff00), @"PrimaryUsage": @5 };
-        IOHIDEventSystemClientSetMatching(client, (__bridge CFDictionaryRef)matching);
-        CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
-        if (services) {
-            double dieSum = 0, dieMax = 0, deviceSum = 0, deviceMax = 0, anySum = 0;
-            NSUInteger dieCount = 0, deviceCount = 0, anyCount = 0;
-            for (CFIndex i = 0; i < CFArrayGetCount(services); i++) {
-                TMHIDServiceRef service = (TMHIDServiceRef)CFArrayGetValueAtIndex(services, i);
-                TMHIDEventRef event = IOHIDServiceClientCopyEvent(service, TMHIDEventTypeTemperature, 0, 0);
-                if (!event) continue;
-                double celsius = IOHIDEventGetFloatValue(event, TMHIDEventFieldTemperature);
-                CFRelease(event);
-                // Filtre de plausibilité : les capteurs fantômes rendent 0 ou des valeurs folles.
-                if (!(celsius > 10 && celsius < 120)) continue;
-                anySum += celsius; anyCount++;
-                CFTypeRef nameRef = IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
-                NSString *name = (nameRef && CFGetTypeID(nameRef) == CFStringGetTypeID())
-                               ? (__bridge NSString *)nameRef : nil;
-                NSString *familyName = TMSensorFamilyForName(name);
-                if (nameRef) CFRelease(nameRef);
-                if ([familyName isEqualToString:@"die"]) {
-                    dieSum += celsius; dieCount++; dieMax = MAX(dieMax, celsius);
-                } else if ([familyName isEqualToString:@"device"]) {
-                    deviceSum += celsius; deviceCount++; deviceMax = MAX(deviceMax, celsius);
-                }
-            }
-            CFRelease(services);
-            if (dieCount) {
-                values[@"dieMaxC"] = @(round(dieMax));
-                values[@"dieAvgC"] = @(round(dieSum / dieCount));
-                values[@"dieCount"] = @(dieCount);
-            }
-            if (deviceCount) {
-                values[@"deviceMaxC"] = @(round(deviceMax));
-                values[@"deviceAvgC"] = @(round(deviceSum / deviceCount));
-                values[@"deviceCount"] = @(deviceCount);
-            }
-            // Point chaud : le die si on a su l'identifier, sinon la moyenne de tout (machines dont
-            // les noms de capteurs ne correspondent à aucun motif connu — mieux vaut l'ancienne
-            // approximation que pas de température du tout).
-            if (dieCount) values[@"tempC"] = @(round(dieMax));
-            else if (anyCount) values[@"tempC"] = @(round(anySum / anyCount));
-        }
-        CFRelease(client);
-    }
+    // Températures — capteurs HID regroupés par famille. Une moyenne de TOUT serait trompeuse :
+    // elle mêle la cellule de batterie (~31 °C) aux dies du SoC (~44 °C) et masque le point chaud,
+    // qui est précisément la valeur qui gouverne le bridage — d'où l'agrégation par famille de
+    // TMSensorTempAggregates (tempC = maximum des dies).
+    NSDictionary *aggregates = TMSensorTempAggregates(TMSensorReadings() ?: @[]);
+    if (aggregates) [values addEntriesFromDictionary:aggregates];
 
     return values.count ? values : nil;
 }

@@ -73,6 +73,13 @@ double TMAlertRearmThreshold(double threshold);
 // Insensible à la casse. Le nom Intel courant (TC0P/PECI) tombe aussi dans « die ».
 NSString * _Nullable TMSensorFamilyForName(NSString * _Nullable name);
 
+// Agrégats thermiques d'un relevé de capteurs : [{ name: NSString (optionnel), celsius: NSNumber }]
+// → { tempC, dieMaxC, dieAvgC, dieCount, deviceMaxC, deviceAvgC, deviceCount }, valeurs arrondies.
+// Les lectures implausibles (≤ 10 °C ou ≥ 120 °C : capteurs fantômes) sont écartées. `tempC` est
+// le max des dies — le point chaud qui gouverne le bridage — ou, faute de die identifiable, la
+// moyenne de toutes les lectures plausibles. nil si aucune lecture plausible.
+NSDictionary<NSString *, NSNumber *> * _Nullable TMSensorTempAggregates(NSArray<NSDictionary *> *readings);
+
 #pragma mark - Moniteur
 
 // Un collecteur échantillonne une famille de métriques : dictionnaire clé → NSNumber, ou nil si

@@ -418,6 +418,20 @@ static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink
 
 // Dessin selon la forme choisie. Une forme qui ne peut pas représenter la donnée retombe sur la
 // forme naturelle du widget (readout[@"style"]).
+NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *shape, NSString *colorName) {
+    // Même résolution de forme que TMWidgetImageWithInk : vide → style naturel du readout.
+    NSString *resolved = shape.length ? shape : ([readout[@"style"] isKindOfClass:NSString.class] ? readout[@"style"] : @"");
+    // Seuls histogramme et courbe dessinent la série ; pour les autres formes, l'écarter de la
+    // signature est tout l'intérêt — elle glisse à chaque tick alors que les pixels, eux, ne
+    // bougent que quand une valeur affichée change.
+    BOOL usesSeries = [resolved isEqual:@"bars"] || [resolved isEqual:@"graph"];
+    NSMutableDictionary *signature = [readout mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (!usesSeries) [signature removeObjectForKey:@"series"];
+    signature[@"shape"] = resolved;
+    signature[@"color"] = colorName ?: @"";
+    return signature;
+}
+
 NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *shape, NSString *colorName) {
     BOOL isTemplate = YES;
     NSColor *ink = TMResolveWidgetInk(colorName, [readout[@"severity"] integerValue], &isTemplate);
