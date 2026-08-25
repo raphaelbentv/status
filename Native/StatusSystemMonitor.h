@@ -122,6 +122,12 @@ NSArray<NSDictionary *> *TMLongHistoryAppend(NSArray<NSDictionary *> * _Nullable
 // `timestamp`. nil si le snapshot n'en contient aucune (rien à journaliser).
 NSDictionary * _Nullable TMLongHistoryRow(NSDictionary *snapshot, NSTimeInterval timestamp);
 
+// Payload métriques allégé pour un tick incrémental : mêmes familles, `now` seul — les séries
+// glissent côté client (mergeMetricsDelta des surfaces web) ; le natif n'envoie le payload complet
+// qu'à l'ouverture d'une surface. Les autres clés (processes, intervalSeconds…) sont conservées,
+// et @"delta": @YES marque le payload. Pur : l'entrée n'est pas modifiée.
+NSDictionary *TMMetricsDeltaPayload(NSDictionary *payload);
+
 // Relevé instantané des processus via libproc, au format attendu par TMTopProcesses.
 // nil si la liste des pids est illisible. Coûte quelques centaines d'appels noyau : à n'appeler
 // que quand une surface est visible.

@@ -238,7 +238,28 @@ function renderMetrics(data){
   if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">temp</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
   document.querySelector('#metrics').innerHTML=tiles.join('');
 }
-window.StatusMenu={update(data){lastData=data;renderMenu(data)},updateMetrics(data){renderMetrics(data)}};
+// Tick incrémental : même mécanique que dashboard.html — le natif n'envoie les séries qu'à
+// l'ouverture, ensuite `now` seul et la série glisse ici (plafond 300, comme l'anneau natif).
+const METRICS_RING=300;
+let lastMetrics=null;
+function mergeMetricsDelta(state,payload){
+  if(!payload?.delta)return payload;
+  if(!state)return null;
+  const families=(payload.families||[]).map(d=>{
+    const prev=(state.families||[]).find(f=>f.id===d.id);
+    const series={...(prev?.series||{})};
+    for(const[k,v]of Object.entries(d.now||{})){
+      if(typeof v!=='number')continue;
+      const grown=(series[k]||[]).concat(v);
+      series[k]=grown.length>METRICS_RING?grown.slice(grown.length-METRICS_RING):grown;
+    }
+    return{...d,series};
+  });
+  const merged={...state,...payload,families};
+  delete merged.delta;
+  return merged;
+}
+window.StatusMenu={update(data){lastData=data;renderMenu(data)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
 // Keep the "dans X min" countdowns honest between polls.
 setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
 </script>

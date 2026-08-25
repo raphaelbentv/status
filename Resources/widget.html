@@ -297,10 +297,30 @@ function render(){
   // Après le calcul de mise en page, sinon on mesure la hauteur d'avant.
   if(typeof requestAnimationFrame==='function')requestAnimationFrame(syncPanelHeight);else syncPanelHeight();
 }
+// Tick incrémental : même mécanique que dashboard.html — le natif n'envoie les séries qu'à
+// l'ouverture, ensuite `now` seul et la série glisse ici (plafond 300, comme l'anneau natif).
+const METRICS_RING=300;
+function mergeMetricsDelta(state,payload){
+  if(!payload?.delta)return payload;
+  if(!state)return null;
+  const families=(payload.families||[]).map(d=>{
+    const prev=(state.families||[]).find(f=>f.id===d.id);
+    const series={...(prev?.series||{})};
+    for(const[k,v]of Object.entries(d.now||{})){
+      if(typeof v!=='number')continue;
+      const grown=(series[k]||[]).concat(v);
+      series[k]=grown.length>METRICS_RING?grown.slice(grown.length-METRICS_RING):grown;
+    }
+    return{...d,series};
+  });
+  const merged={...state,...payload,families};
+  delete merged.delta;
+  return merged;
+}
 window.StatusWidget={
   // Changement de widget : la hauteur précédente n'a plus de sens, on force une remesure.
-  show(id,data){if(id!==widgetId)pushedHeight=0;widgetId=id;metrics=data;render()},
-  updateMetrics(data){metrics=data;render()}
+  show(id,data){if(id!==widgetId)pushedHeight=0;widgetId=id;metrics=mergeMetricsDelta(metrics,data)||metrics;render()},
+  updateMetrics(data){const m=mergeMetricsDelta(metrics,data);if(m){metrics=m;render()}}
 };
 </script>
 </body>

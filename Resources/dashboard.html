@@ -332,6 +332,8 @@ const PANEL_SECTIONS={
 // Alertes système réglables. La pression mémoire suit l'échelle noyau (2 = avertissement,
 // 4 = critique), pas un pourcentage : ses « seuils » sont donc deux niveaux nommés.
 const ALERTS=[
+  ['quota','Quota entamé',[70,75,80,85,90],v=>v+' %'],
+  ['quotaReset','Réinitialisation hebdo',[],null],
   ['temp','Température',[75,85,90,95,100],v=>v+' °C'],
   ['disk','Disque plein',[80,85,90,95],v=>v+' %'],
   ['memory','Pression mémoire',[2,4],v=>v===4?'critique':'avertissement'],
@@ -341,7 +343,8 @@ function alertRows(p){
   return ALERTS.map(([key,label,choices,fmt])=>{
     const one=cfg[key]||{},on=one.on!==false,cur=one.threshold;
     const toggle=`<button class="seg wc-toggle ${on?'on':''}" onclick="send('setAlert',{key:'${key}',on:${!on}})">${label}</button>`;
-    if(!on)return `<div class="wc-row">${toggle}</div>`;
+    // Sans seuils à choisir (événement pur, comme la réinitialisation hebdo) : interrupteur seul.
+    if(!on||!choices.length)return `<div class="wc-row">${toggle}</div>`;
     const sel=`<span class="segmented wc-shapes">${choices.map(v=>`<button class="seg ${cur===v?'on':''}" onclick="send('setAlert',{key:'${key}',threshold:${v}})">${fmt(v)}</button>`).join('')}</span>`;
     return `<div class="wc-row">${toggle}${sel}</div>`;
   }).join('');
@@ -497,7 +500,7 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting"><div class="setting-copy"><strong>Coût équivalent API</strong><small>Calculé sur les logs de session terminal (Claude Code, Codex). L\'usage web n\'est pas journalisé et n\'est pas inclus. Tarifs relevés le ${data.costs?.asOf||'—'} ; Codex approximatif. Taux de change USD→EUR indicatif (BCE), relevé du ${data.costs?.fxAsOf||'—'}, rafraîchi automatiquement.</small></div><span class="setting-state">${data.costs?.scanning?'calcul en cours':'actif'}</span></div>
   <div class="setting"><div class="setting-copy"><strong>Exporter l\'historique</strong><small>Toute la consommation enregistrée, au format CSV (une ligne par instant et par fenêtre) — pour l\'analyser ailleurs.</small></div><button class="button" onclick="send('exportHistoryCSV')">Exporter…</button></div>
   <div class="setting"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Une notification à 80 % puis à 95 % de chaque fenêtre.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></div>
-  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Alertes système</strong><small>Notification quand la machine sort de son régime normal. Chaque alerte s’active et se règle séparément ; elle ne se répète pas tant que la valeur n’est pas redescendue nettement sous le seuil.</small></div><div class="widget-config">${alertRows(p)}</div></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Alertes</strong><small>Notifications : quota qui se remplit (puis rappel à 95 %), semaine qui repart de zéro, et machine hors de son régime normal. Chaque alerte s’active et se règle séparément ; aucune ne se répète tant que la situation n’a pas nettement changé.</small></div><div class="widget-config">${alertRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>
 </div>`}
 function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
@@ -795,7 +798,29 @@ document.querySelector('#monitor').addEventListener('click',event=>{
   expanded.has(family)?expanded.delete(family):expanded.add(family);
   renderMonitor();
 });
-window.StatusApp={update(data){appData=data;render()},updateMetrics(data){metricsData=data;renderMonitor()}};
+// Tick incrémental : le natif n'envoie les séries qu'à l'ouverture ; ensuite chaque tick n'apporte
+// que `now` et la série glisse ici, avec la sémantique de l'anneau natif (plafond 300, valeurs non
+// numériques écartées, famille absente du delta sortie du snapshot). Delta sans base : ignoré, le
+// natif renvoie un payload complet dès que la surface se rouvre.
+const METRICS_RING=300;
+function mergeMetricsDelta(state,payload){
+  if(!payload?.delta)return payload;
+  if(!state)return null;
+  const families=(payload.families||[]).map(d=>{
+    const prev=(state.families||[]).find(f=>f.id===d.id);
+    const series={...(prev?.series||{})};
+    for(const[k,v]of Object.entries(d.now||{})){
+      if(typeof v!=='number')continue;
+      const grown=(series[k]||[]).concat(v);
+      series[k]=grown.length>METRICS_RING?grown.slice(grown.length-METRICS_RING):grown;
+    }
+    return{...d,series};
+  });
+  const merged={...state,...payload,families};
+  delete merged.delta;
+  return merged;
+}
+window.StatusApp={update(data){appData=data;render()},updateMetrics(data){const m=mergeMetricsDelta(metricsData,data);if(m){metricsData=m;renderMonitor()}}};
 // Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
 // encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.
 document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>{

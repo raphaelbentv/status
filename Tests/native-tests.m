@@ -506,6 +506,88 @@ static void TestForecastExhaustion(void) {
     Check(TMForecastExhaustion(withGaps, @"k", now + 100 * hour, &at), @"entrées sans la clé : ignorées, pas fatales");
 }
 
+// Fenêtre normalisée pour les tests de notifications quota.
+static NSDictionary *TMWin(NSString *wid, NSString *label, double used, long long resetsAt, long long minutes) {
+    return @{ @"windowId": wid, @"label": label, @"usedPercent": @(used),
+              @"remainingPercent": @(100 - used), @"resetsAt": @(resetsAt), @"durationMinutes": @(minutes) };
+}
+
+static void TestQuotaNotificationDecisions(void) {
+    Section(@"TMQuotaNotificationDecisions — seuils et réinitialisations hebdo");
+    NSArray *levels = @[@80, @95];
+    NSTimeInterval now = 500000;
+    NSArray *(^pairs)(NSDictionary *) = ^NSArray *(NSDictionary *window) {
+        return @[@[@"Claude", @[window]]];
+    };
+
+    // Franchissement du premier seuil, une seule fois.
+    NSDictionary *weekly = TMWin(@"seven_day", @"Semaine", 84.6, 1000000, 10080);
+    NSDictionary *r = TMQuotaNotificationDecisions(nil, pairs(weekly), levels, YES, now);
+    NSArray *events = r[@"events"];
+    CheckEqual(@(events.count), @1, @"84,6 % : un événement");
+    CheckEqual(events.firstObject[@"kind"], @"threshold", @"de type seuil");
+    CheckEqual(events.firstObject[@"level"], @80, @"au niveau 80");
+    CheckEqual(events.firstObject[@"provider"], @"Claude", @"fournisseur transmis");
+    CheckEqual(events.firstObject[@"label"], @"Semaine", @"libellé transmis");
+    NSDictionary *state = r[@"state"];
+    r = TMQuotaNotificationDecisions(state, pairs(weekly), levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"même observation : plus rien");
+
+    // Montée au second seuil.
+    r = TMQuotaNotificationDecisions(r[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 96, 1000000, 10080)),
+                                     levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @1, @"96 % : un événement de plus");
+    CheckEqual([r[@"events"] firstObject][@"level"], @95, @"au niveau 95");
+
+    // Saut direct au-dessus des deux seuils : une seule notification, au plus haut niveau.
+    NSDictionary *direct = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 96, 1000000, 10080)),
+                                                        levels, YES, now);
+    CheckEqual(@([direct[@"events"] count]), @1, @"0 → 96 % : un seul événement");
+    CheckEqual([direct[@"events"] firstObject][@"level"], @95, @"le plus haut niveau atteint");
+
+    // Nouvelle période : reset notifié (hebdo, peu entamée), seuils réarmés, vieilles clés purgées.
+    NSDictionary *rolled = TMWin(@"seven_day", @"Semaine", 3, 1600000, 10080);
+    r = TMQuotaNotificationDecisions(r[@"state"], pairs(rolled), levels, YES, 1100000);
+    events = r[@"events"];
+    CheckEqual(@(events.count), @1, @"période tournée : un événement");
+    CheckEqual(events.firstObject[@"kind"], @"reset", @"de type reset");
+    CheckEqual(events.firstObject[@"resetsAt"], @1600000, @"porte la nouvelle heure de reset");
+    Check([r[@"state"][@"reset:Claude:seven_day"] isEqual:@1600000], @"l'état suit le nouveau reset");
+    for (NSString *key in r[@"state"])
+        Check(![key hasSuffix:@"@1000000"], @"clé de seuil de la période passée purgée");
+    r = TMQuotaNotificationDecisions(r[@"state"], pairs(rolled), levels, YES, 1100000);
+    CheckEqual(@([r[@"events"] count]), @0, @"reset déjà notifié : silence");
+    // Et les seuils repartent de zéro sur la nouvelle période.
+    r = TMQuotaNotificationDecisions(r[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 85, 1600000, 10080)),
+                                     levels, YES, 1100000);
+    CheckEqual([r[@"events"] firstObject][@"level"], @80, @"seuil réarmé par la nouvelle période");
+
+    // Garde-fous du reset.
+    NSDictionary *base = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 10, 1000000, 10080)),
+                                                      levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(base, pairs(TMWin(@"seven_day", @"Semaine", 60, 1600000, 10080)), levels, YES, 1100000);
+    CheckEqual(@([r[@"events"] count]), @0, @"reset avec 60 % consommé : données mêlées, pas de notification");
+    Check([r[@"state"][@"reset:Claude:seven_day"] isEqual:@1600000], @"mais l'état avance quand même");
+    // Référence forgée : même avec un resetsAt connu qui avance, une fenêtre session reste muette.
+    r = TMQuotaNotificationDecisions(@{ @"reset:Claude:five_hour": @1000000 },
+                                     pairs(TMWin(@"five_hour", @"5 h", 3, 1600000, 300)), levels, YES, 1100000);
+    CheckEqual(@([r[@"events"] count]), @0, @"fenêtre 5 h qui tourne : jamais de notification de reset");
+    r = TMQuotaNotificationDecisions(base, pairs(TMWin(@"seven_day", @"Semaine", 3, 1600000, 10080)), levels, NO, 1100000);
+    CheckEqual(@([r[@"events"] count]), @0, @"réinitialisations coupées : silence");
+    NSDictionary *first = TMQuotaNotificationDecisions(nil, pairs(rolled), @[], YES, 1100000);
+    CheckEqual(@([first[@"events"] count]), @0, @"première observation : jamais de reset (pas de référence)");
+
+    // Seuils coupés (liste vide) : aucune notification de seuil.
+    r = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 96, 1000000, 10080)), @[], YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"levels vide : pas de seuils");
+
+    // Fenêtre sans resetsAt : ignorée sans crash ; état sérialisable en plist/JSON.
+    NSDictionary *broken = @{ @"windowId": @"x", @"label": @"X", @"usedPercent": @99 };
+    r = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[broken]]], levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"fenêtre sans reset : ignorée");
+    Check([NSJSONSerialization isValidJSONObject:r[@"state"] ?: @{}], @"état sérialisable");
+}
+
 static NSDictionary *TMProc(NSString *name, uint64_t cpuNs, uint64_t rss) {
     return @{ @"name": name, @"cpuTimeNs": @(cpuNs), @"rssBytes": @(rss) };
 }
@@ -614,6 +696,29 @@ static void TestAlertRearm(void) {
     Check(!TMThresholdShouldFire(&above, 72, t, r), @"72 > réarmement (69) : reste armé");
     TMThresholdShouldFire(&above, 60, t, r);
     Check(!above, @"60 < réarmement : désarmé");
+}
+
+static void TestMetricsDeltaPayload(void) {
+    Section(@"TMMetricsDeltaPayload — tick incrémental sans les séries");
+    NSDictionary *payload = @{
+        @"families": @[ @{ @"id": @"cpu", @"now": @{ @"total": @43, @"coreTypes": @"EEPP" },
+                           @"series": @{ @"total": @[@40, @41, @43] } },
+                        @{ @"id": @"ram", @"now": @{ @"usedPercent": @68 },
+                           @"series": @{ @"usedPercent": @[@67, @68] } } ],
+        @"processes": @[ @{ @"name": @"X", @"cpuPercent": @12 } ],
+        @"intervalSeconds": @1,
+    };
+    NSDictionary *delta = TMMetricsDeltaPayload(payload);
+    CheckEqual(delta[@"delta"], @YES, @"marqué comme incrémental");
+    NSArray *families = delta[@"families"];
+    CheckEqual(@(families.count), @2, @"mêmes familles");
+    CheckEqual(families.firstObject[@"id"], @"cpu", @"id conservé");
+    CheckEqual(families.firstObject[@"now"][@"total"], @43, @"now conservé");
+    Check(families.firstObject[@"series"] == nil, @"séries retirées : elles glissent côté client");
+    CheckEqual(delta[@"processes"], payload[@"processes"], @"processus conservés");
+    CheckEqual(delta[@"intervalSeconds"], @1, @"intervalle conservé");
+    Check(payload[@"families"][0][@"series"] != nil, @"l'entrée n'est pas modifiée (pur)");
+    Check([NSJSONSerialization isValidJSONObject:delta], @"delta sérialisable");
 }
 
 // Fumée sur les collecteurs réels — même esprit que TestAwake : on interroge la vraie machine,
@@ -1539,6 +1644,8 @@ int main(void) {
         TestStaleAlert();
         TestWatchdog();
         TestForecastExhaustion();
+        TestQuotaNotificationDecisions();
+        TestMetricsDeltaPayload();
         TestTopProcesses();
         TestTopProcessesEnergy();
         TestThresholdFire();

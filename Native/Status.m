@@ -436,7 +436,10 @@ static const CGFloat TMTitleBarHeight = 28;
 @property BOOL popoverOpenedByHover;        // un popover ouvert au clic ne doit pas se fermer tout seul
 @property NSInteger consecutiveErrors;      // backoff: grows on failed polls, resets on success
 @property NSDate *nextAllowedRefresh;       // backoff: automatic polls are skipped until this time
-@property NSMutableDictionary *notifiedThresholds;  // "windowId@resetsAt" -> highest % already alerted
+// Une surface « amorcée » a déjà reçu un payload métriques complet (séries incluses) ; les ticks
+// suivants n'envoient qu'un delta (TMMetricsDeltaPayload) et la série glisse côté web. L'amorçage
+// retombe quand la surface se ferme ou que sa webview se recharge.
+@property BOOL dashboardMetricsPrimed, popoverMetricsPrimed, widgetMetricsPrimed;
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
 @end
@@ -485,7 +488,6 @@ static const CGFloat TMTitleBarHeight = 28;
     // ligne alors que CPU et réseau n'ont pas encore de delta (ils exigent deux échantillons) et
     // sont donc absents. Une poignée de redémarrages suffirait à cribler la vue 24 h de trous.
     self.metricsLogLastAppend = [NSDate date].timeIntervalSince1970;
-    self.notifiedThresholds = [NSMutableDictionary dictionary];
     self.widgetPanelHeights = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelHeights"] ?: @{}) mutableCopy];
     // Avant tout appel possible à pushData (refreshCostsInBackground en pousse un dès le
     // lancement) : `payload` lit self.displayManager sans filet, un nil ferait planter le
@@ -763,6 +765,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     NSString *script = [NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.show('%@', %@);", self.currentWidgetId, json];
     [self.widgetWebView evaluateJavaScript:script completionHandler:nil];
+    self.widgetMetricsPrimed = YES;  // payload complet envoyé : les ticks peuvent passer au delta
 }
 
 - (void)widgetClicked:(NSButton *)sender {
@@ -1527,9 +1530,10 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         }];
         return;
     }
+    // Une webview qui (re)charge repart sans état : le prochain payload métriques doit être complet.
     if (webView == self.widgetWebView) { self.widgetWebReady = YES; [self pushWidgetMetrics]; return; }
-    if (webView == self.menuWebView) self.menuWebReady = YES;
-    else self.webReady = YES;
+    if (webView == self.menuWebView) { self.menuWebReady = YES; self.popoverMetricsPrimed = NO; }
+    else { self.webReady = YES; self.dashboardMetricsPrimed = NO; }
     [self pushData];
 }
 
@@ -1805,25 +1809,6 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     return forecasts;
 }
 
-// Une fenêtre qui se recharge est une bonne nouvelle actionnable — on peut se remettre au travail.
-// Détection par le couple (identifiant, resetsAt) : quand l'heure de reset avance, la fenêtre a
-// tourné. Le dictionnaire est celui des seuils, déjà purgé des fenêtres périmées.
-- (void)notifyWindowResets:(NSArray *)windows provider:(NSString *)provider {
-    for (NSDictionary *window in windows) {
-        NSString *identifier = window[@"windowId"] ?: window[@"label"];
-        if (!identifier) continue;
-        NSString *key = [NSString stringWithFormat:@"reset:%@:%@", provider, identifier];
-        double resetsAt = TMNumber(window[@"resetsAt"]);
-        double known = [self.notifiedThresholds[key] doubleValue];
-        if (known > 0 && resetsAt > known && TMNumber(window[@"usedPercent"]) < 50) {
-            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · %@ réinitialisée",
-                                         provider, window[@"label"] ?: identifier]
-                                   body:@"La fenêtre est repartie à zéro."];
-        }
-        if (resetsAt > known) self.notifiedThresholds[key] = @(resetsAt);
-    }
-}
-
 // Cookie de session claude.ai, mémorisé. Un seul accès au Trousseau par lancement, au lieu d'un
 // par rafraîchissement.
 - (NSString *)usageCookie {
@@ -1995,10 +1980,13 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     self.metricsTimer.tolerance = [self metricsInterval] * 0.2;  // macOS groupe les réveils, l'œil ne verra rien
 }
 
-// Valeurs par défaut des alertes système, volontairement hautes : elles signalent un état anormal,
-// pas une machine qui travaille. L'utilisateur peut les régler ou les couper (préférence `alerts`).
+// Valeurs par défaut des alertes. Les alertes système sont volontairement hautes : elles signalent
+// un état anormal, pas une machine qui travaille. Les alertes quota (seuil « entamé » réglable,
+// rappel fixe à 95 %, réinitialisation hebdo) sont le cœur du produit : actives d'office.
+// `quotaReset` est un événement sans seuil — son 0 n'est qu'un remplissage de structure.
+// L'utilisateur règle ou coupe chaque alerte séparément (préférence `alerts`).
 static NSDictionary *TMAlertDefaults(void) {
-    return @{ @"temp": @90, @"disk": @90, @"memory": @4 };
+    return @{ @"temp": @90, @"disk": @90, @"memory": @4, @"quota": @80, @"quotaReset": @0 };
 }
 
 // Réglage d'une alerte : activée ? et à quel seuil ? Absent = activée au seuil par défaut, pour que
@@ -2081,14 +2069,19 @@ static NSDictionary *TMAlertDefaults(void) {
     [self appendLongHistory:snapshot];  // idem : l'historique 24 h se remplit en arrière-plan
     [self updateMenuBarWidgets:snapshot];  // icônes système : toujours à jour, même surfaces fermées
     if (self.widgetPopover.isShown && self.widgetWebReady) {  // panneau d'info d'un widget ouvert
-        NSData *data = [NSJSONSerialization dataWithJSONObject:[self widgetMetricsPayload] options:0 error:nil];
+        NSDictionary *widgetPayload = [self widgetMetricsPayload];
+        if (self.widgetMetricsPrimed) widgetPayload = TMMetricsDeltaPayload(widgetPayload);
+        self.widgetMetricsPrimed = YES;
+        NSData *data = [NSJSONSerialization dataWithJSONObject:widgetPayload options:0 error:nil];
         NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         [self.widgetWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.updateMetrics(%@);", json] completionHandler:nil];
-    }
+    } else self.widgetMetricsPrimed = NO;
 
     BOOL dashboardVisible = self.webReady && self.window.isVisible;
     BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
     BOOL widgetVisible = self.widgetPopover.isShown && self.widgetWebReady;  // panneau d'info d'un widget
+    if (!dashboardVisible) self.dashboardMetricsPrimed = NO;  // fermée : le prochain envoi réamorce
+    if (!popoverVisible) self.popoverMetricsPrimed = NO;
     BOOL menuBarWantsSystem = [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] hasPrefix:@"system:"];
     if (menuBarWantsSystem) [self updateStatusMenu];
     // Le relevé des processus alimente aussi les panneaux CPU/Mémoire des widgets : on l'active dès
@@ -2123,13 +2116,27 @@ static NSDictionary *TMAlertDefaults(void) {
 }
 
 - (void)pushMetrics:(NSDictionary *)payload dashboard:(BOOL)dashboard popover:(BOOL)popover {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
-    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    // Après l'amorçage (payload complet, séries incluses), chaque tick n'envoie qu'un delta :
+    // sérialiser 6 × 300 points par seconde pour des séries que le client sait faire glisser
+    // lui-même était le principal poste CPU d'une surface ouverte.
+    NSString *(^encode)(NSDictionary *) = ^NSString *(NSDictionary *dict) {
+        NSData *data = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+        return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    };
+    NSString *fullJSON = nil, *deltaJSON = nil;  // encodés au besoin, partagés entre surfaces
     if (dashboard) {
+        NSString *json = self.dashboardMetricsPrimed
+            ? (deltaJSON = deltaJSON ?: encode(TMMetricsDeltaPayload(payload)))
+            : (fullJSON = fullJSON ?: encode(payload));
+        self.dashboardMetricsPrimed = YES;
         NSString *script = [NSString stringWithFormat:@"window.StatusApp && window.StatusApp.updateMetrics && window.StatusApp.updateMetrics(%@);", json];
         [self.webView evaluateJavaScript:script completionHandler:nil];
     }
     if (popover) {
+        NSString *json = self.popoverMetricsPrimed
+            ? (deltaJSON = deltaJSON ?: encode(TMMetricsDeltaPayload(payload)))
+            : (fullJSON = fullJSON ?: encode(payload));
+        self.popoverMetricsPrimed = YES;
         NSString *script = [NSString stringWithFormat:@"window.StatusMenu && window.StatusMenu.updateMetrics && window.StatusMenu.updateMetrics(%@);", json];
         [self.menuWebView evaluateJavaScript:script completionHandler:nil];
     }
@@ -2574,38 +2581,39 @@ static NSDictionary *TMAlertDefaults(void) {
 - (void)recordHistoryAndNotify {
     long long now = (long long)NSDate.date.timeIntervalSince1970;
     TMAppendHistory([self claudeWindowsForHistory], [self openAIWindowsForHistory], now);
-    [self checkThresholdsForWindows:[self claudeWindowsForHistory] provider:@"Claude"];
-    [self checkThresholdsForWindows:[self openAIWindowsForHistory] provider:@"OpenAI"];
-    [self notifyWindowResets:[self claudeWindowsForHistory] provider:@"Claude"];
-    [self notifyWindowResets:[self openAIWindowsForHistory] provider:@"OpenAI"];
+    [self notifyQuotaChanges];
 }
 
-// Fires a notification the first time a window crosses 80% and again at 95%, keyed by the window's
-// reset instant so a fresh period re-arms both thresholds. Never notifies twice for the same level.
-- (void)checkThresholdsForWindows:(NSArray *)windows provider:(NSString *)provider {
-    if (!self.notificationsAuthorized) return;
-    for (NSDictionary *w in windows) {
-        double used = TMNumber(w[@"usedPercent"]);
-        NSString *wid = w[@"windowId"];
-        long long resetsAt = TMInteger(w[@"resetsAt"]);
-        if (!wid || resetsAt <= 0) continue;
-        NSString *key = [NSString stringWithFormat:@"%@:%@@%lld", provider, wid, resetsAt];
-        NSInteger already = [self.notifiedThresholds[key] integerValue];
-        NSInteger reached = used >= 95 ? 95 : (used >= 80 ? 80 : 0);
-        if (reached > already) {
-            self.notifiedThresholds[key] = @(reached);
-            NSString *label = [w[@"label"] isKindOfClass:NSString.class] ? w[@"label"] : wid;
-            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · %@ à %ld %%", provider, label, (long)reached]
-                                   body:reached >= 95 ? @"Limite presque atteinte." : @"Quota bien entamé."];
-        }
-    }
-    // Prune keys for reset periods now in the past so the dictionary can't grow unbounded.
-    long long now = (long long)NSDate.date.timeIntervalSince1970;
-    NSArray *keys = self.notifiedThresholds.allKeys;
-    for (NSString *key in keys) {
-        NSRange at = [key rangeOfString:@"@" options:NSBackwardsSearch];
-        if (at.location != NSNotFound && [key substringFromIndex:at.location + 1].longLongValue <= now) {
-            [self.notifiedThresholds removeObjectForKey:key];
+// Seuils quota (clé « quota » des alertes, réglable ; rappel fixe à 95 %) et réinitialisations
+// hebdomadaires (clé « quotaReset »). La décision est pure — TMQuotaNotificationDecisions — et son
+// état persiste dans les préférences : un reset hebdo n'arrive qu'une fois par semaine, le rater
+// parce que l'app a redémarré entre les deux observations le ferait passer inaperçu.
+- (void)notifyQuotaChanges {
+    double threshold = 0;
+    NSArray<NSNumber *> *levels = @[];
+    if ([self alertEnabled:@"quota" threshold:&threshold])
+        levels = threshold < 95 ? @[@(threshold), @95] : @[@(threshold)];
+    BOOL weeklyResets = [self alertEnabled:@"quotaReset" threshold:NULL];
+    NSArray *pairs = @[@[@"Claude", [self claudeWindowsForHistory]],
+                       @[@"OpenAI", [self openAIWindowsForHistory]]];
+    NSDictionary *result = TMQuotaNotificationDecisions(
+        [NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"],
+        pairs, levels, weeklyResets, NSDate.date.timeIntervalSince1970);
+    [NSUserDefaults.standardUserDefaults setObject:result[@"state"] forKey:@"quotaNotificationState"];
+    if (!self.notificationsAuthorized) return;  // l'état avance quand même : pas de rafale à l'autorisation
+    for (NSDictionary *event in result[@"events"]) {
+        if ([event[@"kind"] isEqualToString:@"reset"]) {
+            NSDateFormatter *fmt = [NSDateFormatter new];
+            fmt.dateStyle = NSDateFormatterMediumStyle;
+            fmt.timeStyle = NSDateFormatterShortStyle;
+            fmt.doesRelativeDateFormatting = YES;
+            NSString *until = [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:TMNumber(event[@"resetsAt"])]];
+            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · quota hebdomadaire réinitialisé", event[@"provider"]]
+                                   body:[NSString stringWithFormat:@"Compteur reparti de zéro — nouvelle fenêtre jusqu'au %@.", until]];
+        } else {
+            NSInteger level = [event[@"level"] integerValue];
+            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · %@ à %ld %%", event[@"provider"], event[@"label"], (long)level]
+                                   body:level >= 95 ? @"Limite presque atteinte." : @"Quota bien entamé."];
         }
     }
 }

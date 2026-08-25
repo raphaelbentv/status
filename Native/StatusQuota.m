@@ -430,6 +430,63 @@ NSArray<NSHTTPCookie *> *TMCookiesFromHeader(NSString *header) {
     return cookies;
 }
 
+NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
+                                           NSArray<NSNumber *> *levels, BOOL weeklyResets,
+                                           NSTimeInterval now) {
+    NSMutableDictionary *next = [state mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableArray *events = [NSMutableArray array];
+
+    // Purge : chaque clé de seuil porte l'heure de reset de sa période ; une période passée ne
+    // reviendra pas, sa clé non plus — l'état ne peut donc pas croître sans borne.
+    for (NSString *key in next.allKeys) {
+        if (![key hasPrefix:@"th:"]) continue;
+        NSRange at = [key rangeOfString:@"@" options:NSBackwardsSearch];
+        if (at.location != NSNotFound && [key substringFromIndex:at.location + 1].longLongValue <= (long long)now)
+            [next removeObjectForKey:key];
+    }
+
+    for (NSArray *pair in pairs) {
+        if (![pair isKindOfClass:NSArray.class] || pair.count < 2) continue;
+        NSString *provider = pair[0];
+        for (NSDictionary *window in pair[1]) {
+            if (![window isKindOfClass:NSDictionary.class]) continue;
+            NSString *identifier = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"]
+                                 : ([window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : nil);
+            long long resetsAt = TMInteger(window[@"resetsAt"]);
+            if (!identifier.length || resetsAt <= 0) continue;
+            double used = TMNumber(window[@"usedPercent"]);
+            NSString *label = [window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : identifier;
+
+            // Seuils : le plus haut niveau atteint, notifié une seule fois par niveau et par
+            // période — la clé inclut resetsAt, une nouvelle période réarme d'elle-même.
+            if (levels.count) {
+                NSString *thresholdKey = [NSString stringWithFormat:@"th:%@:%@@%lld", provider, identifier, resetsAt];
+                NSInteger reached = 0;
+                for (NSNumber *level in levels)
+                    if (used >= level.doubleValue) reached = MAX(reached, level.integerValue);
+                if (reached > [next[thresholdKey] integerValue]) {
+                    next[thresholdKey] = @(reached);
+                    [events addObject:@{ @"kind": @"threshold", @"provider": provider, @"label": label,
+                                         @"level": @(reached), @"usedPercent": @(used), @"resetsAt": @(resetsAt) }];
+                }
+            }
+
+            // Réinitialisations : hebdo seulement — les fenêtres session tournent plusieurs fois
+            // par jour. Un pourcentage encore haut à l'arrivée de la nouvelle période signale des
+            // données mêlées (deux sources) : l'état avance, la notification se tait.
+            if (TMWindowIsWeekly(window)) {
+                NSString *resetKey = [NSString stringWithFormat:@"reset:%@:%@", provider, identifier];
+                long long known = [next[resetKey] longLongValue];
+                if (weeklyResets && known > 0 && resetsAt > known && used < 50)
+                    [events addObject:@{ @"kind": @"reset", @"provider": provider, @"label": label,
+                                         @"usedPercent": @(used), @"resetsAt": @(resetsAt) }];
+                if (resetsAt > known) next[resetKey] = @(resetsAt);
+            }
+        }
+    }
+    return @{ @"events": events, @"state": next };
+}
+
 BOOL TMWindowIsSession(NSDictionary *window) {
     NSString *windowId = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"] : @"";
     NSString *label = [window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : @"";

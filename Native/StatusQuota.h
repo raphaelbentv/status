@@ -34,6 +34,26 @@ NSArray *TMDropExpiredWindows(NSArray *windows);
 
 BOOL TMWindowIsSession(NSDictionary *window);
 BOOL TMWindowIsWeekly(NSDictionary *window);
+
+#pragma mark - Notifications de quota
+
+// Décisions de notification entre deux observations des fenêtres : seuils franchis et
+// réinitialisations hebdomadaires. Pur — l'appelant poste les notifications et persiste l'état.
+//   state  : état persistant (plist-safe) — { "th:<provider>:<id>@<resetsAt>": niveau déjà notifié,
+//            "reset:<provider>:<id>": dernier resetsAt connu }. nil = première observation.
+//   pairs  : [[provider, fenêtres], …] — fenêtres normalisées (voir en tête de fichier).
+//   levels : seuils croissants de % consommé (ex. @[@80, @95]) ; un franchissement notifie le plus
+//            haut niveau atteint, une seule fois par niveau et par période — la clé inclut
+//            resetsAt, une nouvelle période réarme donc tout. Vide = seuils coupés.
+//   weeklyResets : notifier quand une fenêtre HEBDO tourne (resetsAt avance et la nouvelle fenêtre
+//            est peu entamée — un pourcentage encore haut signale des données mêlées, pas un
+//            reset). Les fenêtres session (5 h) ne notifient jamais : il y en a plusieurs par jour.
+//   now    : epoch (s), pour purger du nouvel état les clés de périodes passées.
+// Retourne { events: [ { kind: "threshold"|"reset", provider, label, level, usedPercent,
+//            resetsAt } ], state: nouvel état }, events dans l'ordre des fenêtres fournies.
+NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
+                                           NSArray<NSNumber *> *levels, BOOL weeklyResets,
+                                           NSTimeInterval now);
 BOOL TMMaxUsedPercent(NSArray<NSArray *> *windowArrays, BOOL (^predicate)(NSDictionary *window), double *outValue);
 
 #pragma mark - Payloads de compte

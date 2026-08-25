@@ -851,6 +851,20 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
 
 #pragma mark - Processus
 
+NSDictionary *TMMetricsDeltaPayload(NSDictionary *payload) {
+    NSMutableDictionary *delta = [payload mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableArray *families = [NSMutableArray array];
+    for (NSDictionary *family in payload[@"families"]) {
+        if (![family isKindOfClass:NSDictionary.class]) continue;
+        NSMutableDictionary *slim = [family mutableCopy];
+        [slim removeObjectForKey:@"series"];
+        [families addObject:slim];
+    }
+    delta[@"families"] = families;
+    delta[@"delta"] = @YES;
+    return delta;
+}
+
 NSDictionary *TMProcessSample(void) {
     // ri_user_time/ri_system_time sont en unités mach_absolute_time, pas en nanosecondes —
     // identiques sur Intel (1/1), différentes sur Apple Silicon. Conversion obligatoire.

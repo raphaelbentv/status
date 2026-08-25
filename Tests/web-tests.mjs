@@ -266,5 +266,67 @@ check(!/,0\.0/.test(autoScale), 'échelle auto : la crête garde de l’air au-d
 const pctScale = widget('chart([{values:[0,100],color:"var(--chart-a)"}])');
 check(/,0\.0/.test(pctScale), 'échelle 0-100 : 100 % touche bien le haut du cadre');
 
+// Le tick incrémental : le natif n'envoie les séries qu'à l'ouverture d'une surface ; ensuite
+// chaque tick n'apporte que `now`, et la série glisse côté client — même sémantique que l'anneau
+// natif (plafond 300, valeurs non numériques écartées, famille muette absente du snapshot).
+section('mergeMetricsDelta — ticks incrémentaux (les trois surfaces)');
+for (const [name, evalIn] of [['dashboard', dashboard], ['menubar', menubar], ['widget', widget]]) {
+  const full = { families: [{ id: 'cpu', now: { total: 43, coreTypes: 'EEPP' }, series: { total: [40, 41, 43] } }],
+                 processes: [], intervalSeconds: 1 };
+  const fullJson = JSON.stringify(full);
+  checkEqual(evalIn(`mergeMetricsDelta(null, ${fullJson})`), full, `${name} : payload complet adopté tel quel`);
+
+  const delta = { delta: true, families: [{ id: 'cpu', now: { total: 50, coreTypes: 'EEPP' } }],
+                  processes: [{ name: 'X' }], intervalSeconds: 1 };
+  const merged = evalIn(`mergeMetricsDelta(${fullJson}, ${JSON.stringify(delta)})`);
+  checkEqual(merged?.families?.[0]?.now?.total, 50, `${name} : now remplacé`);
+  checkEqual(merged?.families?.[0]?.series?.total, [40, 41, 43, 50], `${name} : la série glisse`);
+  check(merged?.families?.[0]?.series?.coreTypes === undefined, `${name} : valeur non numérique sans série`);
+  checkEqual(merged?.processes, [{ name: 'X' }], `${name} : processus du delta adoptés`);
+  check(evalIn(`mergeMetricsDelta(null, ${JSON.stringify(delta)})`) === null,
+        `${name} : delta sans base ignoré (le natif renverra un complet)`);
+
+  const long = { families: [{ id: 'cpu', now: { total: 1 }, series: { total: Array.from({ length: 300 }, (_, i) => i) } }] };
+  const capped = evalIn(`mergeMetricsDelta(${JSON.stringify(long)}, ${JSON.stringify({ delta: true, families: [{ id: 'cpu', now: { total: 99 } }] })})`);
+  checkEqual(capped?.families?.[0]?.series?.total?.length, 300, `${name} : série plafonnée à 300`);
+  checkEqual(capped?.families?.[0]?.series?.total?.[299], 99, `${name} : la nouvelle valeur entre`);
+  checkEqual(capped?.families?.[0]?.series?.total?.[0], 1, `${name} : le plus ancien point sort`);
+
+  const appeared = evalIn(`mergeMetricsDelta(${fullJson}, ${JSON.stringify({ delta: true, families: [{ id: 'cpu', now: { total: 44 } }, { id: 'battery', now: { percent: 90 } }] })})`);
+  checkEqual(appeared?.families?.length, 2, `${name} : famille apparue créée`);
+  checkEqual(appeared?.families?.[1]?.series?.percent, [90], `${name} : sa série démarre au premier point`);
+  const vanished = evalIn(`mergeMetricsDelta(${fullJson}, ${JSON.stringify({ delta: true, families: [] })})`);
+  checkEqual(vanished?.families?.length, 0, `${name} : famille muette absente, comme le snapshot natif`);
+}
+
+// Bout en bout : les VRAIS handlers exposés au natif, enchaînant payload complet puis delta —
+// exactement la séquence que le natif envoie (amorçage à l'ouverture, ticks incrémentaux ensuite).
+// Le rendu tourne sur le DOM bouchonné ; ce qui est vérifié est l'état fusionné.
+section('updateMetrics — enchaînement complet puis delta via les handlers réels');
+{
+  const full = JSON.stringify({ families: [{ id: 'cpu', now: { total: 43 }, series: { total: [40, 41, 43] } }],
+                                processes: [], intervalSeconds: 1 });
+  const tick = JSON.stringify({ delta: true, families: [{ id: 'cpu', now: { total: 50 } }],
+                                processes: [], intervalSeconds: 1 });
+  dashboard(`StatusApp.updateMetrics(${full})`); dashboard(`StatusApp.updateMetrics(${tick})`);
+  checkEqual(dashboard('metricsData.families[0].series.total'), [40, 41, 43, 50], 'dashboard : le handler réel fusionne le delta');
+  checkEqual(dashboard('metricsData.families[0].now.total'), 50, 'dashboard : now à jour');
+  menubar(`StatusMenu.updateMetrics(${full})`); menubar(`StatusMenu.updateMetrics(${tick})`);
+  checkEqual(menubar('lastMetrics.families[0].series.total'), [40, 41, 43, 50], 'popover : le handler réel fusionne le delta');
+  widget(`StatusWidget.updateMetrics(${full})`); widget(`StatusWidget.updateMetrics(${tick})`);
+  checkEqual(widget('metrics.families[0].series.total'), [40, 41, 43, 50], 'widget : le handler réel fusionne le delta');
+}
+
+// Les alertes quota rejoignent le bloc des alertes réglables : un seuil à choix pour « entamé »,
+// un simple interrupteur pour la réinitialisation hebdo (pas de seuil à régler sur un événement).
+section('alertRows — réglages des alertes, quotas compris');
+const rows = dashboard(`alertRows({})`);
+check(rows.includes('Quota entamé'), 'la rangée du seuil quota existe');
+check(rows.includes('Réinitialisation hebdo'), 'la rangée du reset hebdo existe');
+const quotaRow = rows.split('<div class="wc-row">').find(r => r.includes('Quota entamé'));
+check(quotaRow && quotaRow.includes('80 %'), 'seuil quota : choix de pourcentages');
+const resetRow = rows.split('<div class="wc-row">').find(r => r.includes('Réinitialisation'));
+check(resetRow && !resetRow.includes('wc-shapes'), 'reset hebdo : interrupteur seul, pas de seuil');
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);
