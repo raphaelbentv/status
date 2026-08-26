@@ -528,6 +528,11 @@ BOOL TMWindowIsWeekly(NSDictionary *window) {
     return [label isEqualToString:@"Semaine"] || [label isEqualToString:@"7 jours"];
 }
 
+BOOL TMWindowIsScopedWeekly(NSDictionary *window) {
+    NSString *windowId = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"] : @"";
+    return TMWindowIsWeekly(window) && [windowId containsString:@"scoped"];
+}
+
 BOOL TMMaxUsedPercent(NSArray<NSArray *> *windowArrays, BOOL (^predicate)(NSDictionary *window), double *outValue) {
     BOOL found = NO;
     double best = 0;

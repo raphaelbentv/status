@@ -974,6 +974,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     BOOL (^matches)(NSString *) = ^BOOL(NSString *key) {
         if ([metric isEqualToString:@"claude:session"]) return [key isEqualToString:@"claude:five_hour"];
         if ([metric isEqualToString:@"claude:weekly"])  return [key isEqualToString:@"claude:seven_day"];
+        if ([metric isEqualToString:@"claude:weekly-fable"]) return [key hasPrefix:@"claude:seven_day_scoped"];
         if ([metric isEqualToString:@"openai:weekly"])  return [key hasPrefix:@"openai:"];
         return YES;  // « lowest » : toutes les fenêtres, on garde le max par point
     };
@@ -996,15 +997,20 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     NSArray *claudeWindows = self.claudeAccount[@"windows"] ?: @[];
     NSArray *openAIWindows = self.openAIAccount[@"windows"] ?: @[];
 
-    double claudeSession = 0, claudeWeekly = 0, openAIWeekly = 0;
+    // La semaine Claude se lit hors fenêtres « scoped » : le sous-quota Fable est un quota à part,
+    // le fondre dans « semaine » ferait dire à l'icône autre chose que les cartes de l'app
+    // (observé : icône à 51 % — le max avec Fable — quand la carte 7 jours affichait 35 %).
+    double claudeSession = 0, claudeWeekly = 0, claudeFable = 0, openAIWeekly = 0;
     BOOL hasClaudeSession = [self usedPercentIn:claudeWindows matching:^BOOL(NSDictionary *w) { return TMWindowIsSession(w); } out:&claudeSession];
-    BOOL hasClaudeWeekly = [self usedPercentIn:claudeWindows matching:^BOOL(NSDictionary *w) { return TMWindowIsWeekly(w); } out:&claudeWeekly];
+    BOOL hasClaudeWeekly = [self usedPercentIn:claudeWindows matching:^BOOL(NSDictionary *w) { return TMWindowIsWeekly(w) && !TMWindowIsScopedWeekly(w); } out:&claudeWeekly];
+    BOOL hasClaudeFable = [self usedPercentIn:claudeWindows matching:^BOOL(NSDictionary *w) { return TMWindowIsScopedWeekly(w); } out:&claudeFable];
     BOOL hasOpenAIWeekly = [self usedPercentIn:openAIWindows matching:^BOOL(NSDictionary *w) { return TMWindowIsWeekly(w); } out:&openAIWeekly];
 
-    // Infobulle : le détail complet, quel que soit le chiffre épinglé.
+    // Infobulle : le détail complet, fenêtre par fenêtre, quel que soit le chiffre épinglé.
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     if (hasClaudeSession) [lines addObject:[NSString stringWithFormat:@"Claude · 5 h : %ld %% consommé", (long)(claudeSession + 0.5)]];
     if (hasClaudeWeekly) [lines addObject:[NSString stringWithFormat:@"Claude · semaine : %ld %% consommé", (long)(claudeWeekly + 0.5)]];
+    if (hasClaudeFable) [lines addObject:[NSString stringWithFormat:@"Claude · semaine Fable : %ld %% consommé", (long)(claudeFable + 0.5)]];
     if (hasOpenAIWeekly) [lines addObject:[NSString stringWithFormat:@"OpenAI · semaine : %ld %% consommé", (long)(openAIWeekly + 0.5)]];
     self.statusItem.button.toolTip = lines.count
         ? [lines componentsJoinedByString:@"\n"]
@@ -1024,6 +1030,8 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         hasValue = hasClaudeSession; shown = claudeSession; providerInk = TM_INK_CLAUDE;
     } else if ([metric isEqualToString:@"claude:weekly"]) {
         hasValue = hasClaudeWeekly; shown = claudeWeekly; providerInk = TM_INK_CLAUDE;
+    } else if ([metric isEqualToString:@"claude:weekly-fable"]) {
+        hasValue = hasClaudeFable; shown = claudeFable; providerInk = TM_INK_CLAUDE;
     } else if ([metric isEqualToString:@"openai:weekly"]) {
         hasValue = hasOpenAIWeekly; shown = openAIWeekly; providerInk = TM_INK_OPENAI;
     } else if ([metric hasPrefix:@"system:"]) {
@@ -1041,6 +1049,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         NSArray *candidates = @[
             @[@(hasClaudeSession), @(claudeSession), @"C 5h", TM_INK_CLAUDE],
             @[@(hasClaudeWeekly), @(claudeWeekly), @"C sem", TM_INK_CLAUDE],
+            @[@(hasClaudeFable), @(claudeFable), @"C Fab", TM_INK_CLAUDE],
             @[@(hasOpenAIWeekly), @(openAIWeekly), @"AI sem", TM_INK_OPENAI],
         ];
         for (NSArray *candidate in candidates) {

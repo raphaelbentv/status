@@ -185,6 +185,15 @@ static void TestWindowClassification(void) {
     Check(TMWindowIsWeekly(@{@"windowId": @"seven_day_scoped_fable"}), @"une fenêtre scoped est hebdomadaire");
     Check(!TMWindowIsWeekly(@{@"windowId": @"overage"}), @"overage n'est pas une fenêtre hebdomadaire");
 
+    // Les fenêtres « scoped » (sous-quota par modèle) s'agrègent à part : fondre leur pourcentage
+    // dans « semaine » ferait dire à l'icône autre chose que les cartes de l'app.
+    Check(TMWindowIsScopedWeekly(@{@"windowId": @"seven_day_scoped_fable"}), @"seven_day_scoped_fable est scoped");
+    Check(TMWindowIsScopedWeekly(@{@"windowId": @"seven_day_scoped_opus"}), @"tout scoped futur l'est aussi");
+    Check(!TMWindowIsScopedWeekly(@{@"windowId": @"seven_day"}), @"la semaine générale n'est pas scoped");
+    Check(!TMWindowIsScopedWeekly(@{@"windowId": @"five_hour"}), @"une session n'est pas scoped");
+    Check(!TMWindowIsScopedWeekly(@{@"windowId": @"codex-10080", @"durationMinutes": @10080}), @"une hebdo OpenAI n'est pas scoped");
+    Check(!TMWindowIsScopedWeekly(@{@"label": @"Semaine", @"durationMinutes": @10080}), @"hebdo sans windowId : pas scoped");
+
     Section(@"TMMaxUsedPercent — retient la fenêtre la plus contrainte");
     double out = 0;
     BOOL found = TMMaxUsedPercent(@[@[@{@"windowId": @"five_hour", @"usedPercent": @30.0},

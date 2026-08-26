@@ -34,6 +34,10 @@ NSArray *TMDropExpiredWindows(NSArray *windows);
 
 BOOL TMWindowIsSession(NSDictionary *window);
 BOOL TMWindowIsWeekly(NSDictionary *window);
+// Fenêtre hebdo « scoped » : un sous-quota dédié à un modèle (seven_day_scoped_fable), distinct de
+// la semaine générale. À agréger séparément — fondre son pourcentage dans « semaine » ferait dire
+// à l'icône autre chose que ce que les cartes de l'app affichent.
+BOOL TMWindowIsScopedWeekly(NSDictionary *window);
 
 #pragma mark - Notifications de quota
 

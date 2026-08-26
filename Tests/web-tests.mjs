@@ -328,5 +328,11 @@ check(quotaRow && quotaRow.includes('80 %'), 'seuil quota : choix de pourcentage
 const resetRow = rows.split('<div class="wc-row">').find(r => r.includes('Réinitialisation'));
 check(resetRow && !resetRow.includes('wc-shapes'), 'reset hebdo : interrupteur seul, pas de seuil');
 
+// Le sous-quota hebdo Fable est épinglable dans la barre des menus, comme les autres fenêtres.
+section('settingsView — épinglage de la semaine Fable');
+const settings = dashboard(`settingsView({prefs:{}})`);
+check(settings.includes("claude:weekly-fable"), 'le choix « semaine Fable » est proposé');
+check(settings.includes('Claude Fable'), 'avec un libellé lisible');
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);
