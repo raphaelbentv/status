@@ -334,5 +334,27 @@ const settings = dashboard(`settingsView({prefs:{}})`);
 check(settings.includes("claude:weekly-fable"), 'le choix « semaine Fable » est proposé');
 check(settings.includes('Claude Fable'), 'avec un libellé lisible');
 
+// Les sous-quotas « scoped » (7 j · Fable) ne pilotent aucun chiffre agrégé : ni le héros du
+// tableau de bord, ni la jauge hebdo du popover. Ils gardent leur carte et leur épinglage dédié.
+section('sous-quotas scoped — exclus des chiffres agrégés');
+{
+  const claudeWindows = [
+    { windowId: 'seven_day', label: '7 jours', usedPercent: 37, resetsAt: 9999999999 },
+    { windowId: 'seven_day_scoped_fable', label: '7 j · Fable', usedPercent: 54, resetsAt: 9999999999 },
+  ];
+  check(dashboard(`isScopedWeekly({windowId:'seven_day_scoped_fable'})`) === true, 'dashboard : scoped reconnu');
+  check(dashboard(`isScopedWeekly({windowId:'seven_day'})`) === false, 'dashboard : la semaine générale ne l’est pas');
+  const data = JSON.stringify({ accounts: { claude: { windows: claudeWindows }, openai: { windows: [] } },
+                                history: [], updatedAt: 0 });
+  const hero = dashboard(`overview(${data})`).split('hero-detail')[0];
+  check(hero.includes('hero-value">37<span'), 'héros : la semaine générale (37) donne le chiffre');
+  check(!hero.includes('54'), 'héros : le sous-quota Fable (54) ne le pilote pas');
+  const mw = menubar(`mainWeekly(${JSON.stringify(claudeWindows)})`);
+  checkEqual(mw?.windowId, 'seven_day', 'popover : la jauge hebdo suit la semaine générale');
+  checkEqual(menubar(`mainWeekly([{windowId:'codex-10080',durationMinutes:10080,usedPercent:1},{windowId:'codex_b-10080',durationMinutes:10080,usedPercent:84}])`)?.usedPercent,
+             84, 'popover : OpenAI garde le max de ses limites générales');
+  check(menubar(`mainWeekly([])`) == null, 'popover : aucune hebdo → rien');
+}
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

@@ -110,6 +110,12 @@ const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessag
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
+// Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, exclu de la
+// jauge « Semaine » — le max avec lui ferait dire à la jauge autre chose que la carte 7 jours.
+// Le max reste voulu entre limites GÉNÉRALES (OpenAI en expose plusieurs : afficher la première
+// venue montrerait 1 % pendant que l'autre est à 84 %).
+const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
+const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
 const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
 const reset=w=>{
@@ -133,10 +139,8 @@ function providerCost(id){
 }
 function provider(id,name,account){
   const windows=account?.windows||[];
-  // OpenAI expose plusieurs limites hebdo : prendre la première venue afficherait 1 % pendant que
-  // l'autre est à 84 %. Une jauge doit montrer la limite la plus proche de sa borne, comme le fait
-  // déjà l'aperçu du tableau de bord.
-  const weekly=windows.filter(isWeekly).sort((a,b)=>(used(b)??0)-(used(a)??0))[0];
+  // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
+  const weekly=mainWeekly(windows);
   const connected=id==='openai'?account?.connected:(account?.authenticated||account?.trackingConfigured);
   const action=id==='openai'?'loginOpenAI':account?.cliAvailable?'loginClaude':'installClaudeCLI';
   const actionLabel=id==='openai'?'connecter':'configurer';

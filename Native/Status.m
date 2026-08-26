@@ -976,7 +976,9 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         if ([metric isEqualToString:@"claude:weekly"])  return [key isEqualToString:@"claude:seven_day"];
         if ([metric isEqualToString:@"claude:weekly-fable"]) return [key hasPrefix:@"claude:seven_day_scoped"];
         if ([metric isEqualToString:@"openai:weekly"])  return [key hasPrefix:@"openai:"];
-        return YES;  // « lowest » : toutes les fenêtres, on garde le max par point
+        // « lowest » : toutes les fenêtres générales, max par point — les sous-quotas scoped en
+        // sont exclus, comme du chiffre qu'accompagne cette sparkline.
+        return ![key containsString:@"scoped"];
     };
 
     NSArray *history = TMLoadHistory();
@@ -1046,10 +1048,12 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         // « lowest » = la marge la plus faible, donc le pourcentage consommé le plus élevé.
         // La couleur suit la fenêtre gagnante : elle change avec elle, ce qui est précisément
         // l'information que ce mode doit transmettre.
+        // Fenêtres générales seulement : les sous-quotas scoped (Fable) ne pilotent aucun chiffre
+        // agrégé — même règle que le héros du tableau de bord et la jauge du popover. Pour les
+        // surveiller, ils ont leur épinglage dédié (claude:weekly-fable).
         NSArray *candidates = @[
             @[@(hasClaudeSession), @(claudeSession), @"C 5h", TM_INK_CLAUDE],
             @[@(hasClaudeWeekly), @(claudeWeekly), @"C sem", TM_INK_CLAUDE],
-            @[@(hasClaudeFable), @(claudeFable), @"C Fab", TM_INK_CLAUDE],
             @[@(hasOpenAIWeekly), @(openAIWeekly), @"AI sem", TM_INK_OPENAI],
         ];
         for (NSArray *candidate in candidates) {
