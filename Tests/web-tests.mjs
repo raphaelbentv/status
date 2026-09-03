@@ -395,6 +395,20 @@ section('accountsOf / historyKey — la liste de comptes');
   check(new Set(series.map(s => s.key)).size === 3, 'trois clés distinctes');
   check(series.every(s => !String(s.color).includes('--chart-c')), 'aucune couleur ne pointe un jeton inexistant');
 
+  section('weeklyChart — le graphe traverse la voie des séries');
+  {
+    // Le graphe n'est rendu que s'il y a deux points : sans ce test, weeklySeriesFor et la
+    // résolution des couleurs ne seraient jamais exécutées ici, et une référence morte y
+    // passerait inaperçue jusqu'à l'ouverture réelle de la fenêtre.
+    const now = Date.now() / 1000;
+    const key = dashboard(`historyKey(${JSON.stringify(pro)},{windowId:'seven_day'})`);
+    const history = [{ t: now - 3600, p: { [key]: 60 } }, { t: now - 60, p: { [key]: 72 } }];
+    const chart = dashboard(`weeklyChart(${JSON.stringify({ ...data, history })})`);
+    check(chart.length > 0, 'le graphe est rendu');
+    check(chart.includes('Pro'), 'la série porte le nom du compte');
+    check(!chart.includes('${'), 'aucune interpolation non résolue');
+  }
+
   section('connectionsView — ajout et plafond');
   const connections = dashboard(`connectionsView(${json})`);
   check(connections.includes("send('addAccount',{provider:'claude'})"), 'on peut ajouter un compte Claude');

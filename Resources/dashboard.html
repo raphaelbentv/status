@@ -491,12 +491,15 @@ function weeklySeriesFor(data){
   });
   return out;
 }
-function weeklyChart(history){
+// `data` et non le seul historique : les séries se déduisent des comptes, et aller les chercher
+// dans le global appData rendait la fonction dépendante d'un état invisible depuis sa signature.
+function weeklyChart(data){
+  const history=data?.history;
   if(!history||history.length<2)return '';
   const now=Date.now()/1000, start=now-7*86400, W=920, H=150;
   const x=t=>(t-start)/(now-start)*W;
   const y=v=>H-(v/100)*H;
-  const series=weeklySeriesFor(appData).map(s=>{
+  const series=weeklySeriesFor(data).map(s=>{
     const pts=history.map(r=>({t:r.t,v:r.p?.[s.key]})).filter(p=>p.t>=start&&typeof p.v==='number');
     return {...s,pts};
   }).filter(s=>s.pts.length>1);
@@ -529,7 +532,7 @@ function overview(data){
   const heroDetail=max?`<strong>${esc(max.account.label)}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Ajoutez un compte dans Connexions pour afficher les volumes consommés.';
   const heroColor=max?providerColor(max.account.provider):'var(--blue)';
   const backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';
-  return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accountsOf(data,p.id),data.history)).join('')}</div>${weeklyChart(data.history)}`;
+  return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accountsOf(data,p.id),data.history)).join('')}</div>${weeklyChart(data)}`;
 }
 // Épinglage compte par compte. Le popover de la barre des menus ne propose que les agrégats :
 // avec dix comptes possibles, une liste complète y serait illisible. Ici la place existe.
