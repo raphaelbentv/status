@@ -4,6 +4,7 @@
 // sont couvertes par Tests/native-tests.m.
 
 #import "StatusQuota.h"
+#import "StatusAccounts.h"
 
 // Accepts either a bare Cookie header value or a whole "Copy as cURL" paste, so the user never has
 // to isolate the header by hand. Only the Cookie/-b value is kept; everything else is discarded.
@@ -126,33 +127,6 @@ NSString *TMClaudeWindowLabel(NSString *name) {
     NSString *label = labels[name];
     if (label) return label;
     return [[name stringByReplacingOccurrencesOfString:@"_" withString:@" "] capitalizedStringWithLocale:[NSLocale localeWithLocaleIdentifier:@"fr_FR"]];
-}
-
-NSArray *TMClaudeWindowsFromSnapshot(NSDictionary *snapshot) {
-    if (![snapshot[@"schema_version"] isEqual:@1] || ![snapshot[@"provider"] isEqual:@"claude"]) return @[];
-    NSDictionary *limits = [snapshot[@"rate_limits"] isKindOfClass:NSDictionary.class] ? snapshot[@"rate_limits"] : nil;
-    if (!limits) return @[];
-    // Confirmed against a live snapshot: Claude Code's statusLine only ever sends five_hour and
-    // seven_day (plus seven_day_opus/seven_day_sonnet/overage per Anthropic's docs, if applicable).
-    // Any per-model scoped window (e.g. Fable) is NOT exposed here — see TMFetchClaudeUsage below.
-    NSArray *preferred = @[@"five_hour", @"seven_day", @"seven_day_opus", @"seven_day_sonnet", @"overage"];
-    NSMutableArray *names = [NSMutableArray array];
-    for (NSString *name in preferred) if (limits[name]) [names addObject:name];
-    for (NSString *name in [[limits allKeys] sortedArrayUsingSelector:@selector(compare:)]) if (![names containsObject:name]) [names addObject:name];
-    NSMutableArray *windows = [NSMutableArray array];
-    for (NSString *name in names) {
-        NSDictionary *window = [limits[name] isKindOfClass:NSDictionary.class] ? limits[name] : nil;
-        if (!window) continue;
-        double usedRaw = TMNumber(window[@"used_percentage"]);
-        long long resetsAt = TMInteger(window[@"resets_at"]);
-        if (resetsAt <= 0) continue;
-        double used = MAX(0, MIN(100, usedRaw));
-        [windows addObject:@{
-            @"label": TMClaudeWindowLabel(name), @"windowId": name,
-            @"usedPercent": @(used), @"remainingPercent": @(100.0 - used), @"resetsAt": @(resetsAt)
-        }];
-    }
-    return windows;
 }
 
 NSDate *TMParseISODate(NSString *value) {
@@ -375,17 +349,229 @@ NSArray *TMLoadHistory(void) {
     return [history isKindOfClass:NSArray.class] ? history : @[];
 }
 
-// Appends one sample per provider window to a rolling on-disk series (max ~2000 points ≈ a week at
-// 5-min cadence). Nothing here is a secret: only window ids and used percentages.
-NSArray *TMAppendHistory(NSArray *claudeWindows, NSArray *openAIWindows, long long now) {
-    NSMutableDictionary *points = [NSMutableDictionary dictionary];
-    for (NSDictionary *w in claudeWindows) {
-        NSString *wid = w[@"windowId"];
-        if (wid) points[[@"claude:" stringByAppendingString:wid]] = @((long)(TMNumber(w[@"usedPercent"]) + 0.5));
+#pragma mark - Clés d'historique par compte
+
+NSString *TMHistoryKey(NSString *provider, NSString *accountId, NSString *windowId) {
+    if (!provider.length || !windowId.length) return @"";
+    if (!accountId.length) return [NSString stringWithFormat:@"%@:%@", provider, windowId];
+    return [NSString stringWithFormat:@"%@:%@:%@", provider, accountId, windowId];
+}
+
+NSString *TMHistoryKeyProvider(NSString *key) {
+    NSRange colon = [key rangeOfString:@":"];
+    return colon.location == NSNotFound ? @"" : [key substringToIndex:colon.location];
+}
+
+NSString *TMHistoryKeyAccountID(NSString *key) {
+    NSArray *parts = [key componentsSeparatedByString:@":"];
+    if (parts.count < 3) return @"";
+    return TMIsAccountID(parts[1]) ? parts[1] : @"";
+}
+
+NSString *TMHistoryKeyWindowID(NSString *key) {
+    NSArray *parts = [key componentsSeparatedByString:@":"];
+    if (parts.count < 2) return @"";
+    NSUInteger start = (parts.count >= 3 && TMIsAccountID(parts[1])) ? 2 : 1;
+    NSArray *tail = [parts subarrayWithRange:NSMakeRange(start, parts.count - start)];
+    return [tail componentsJoinedByString:@":"];
+}
+
+NSArray *TMMigrateHistoryKeys(NSArray *history, NSString *openaiAccountId, NSString *claudeAccountId) {
+    if (![history isKindOfClass:NSArray.class]) return @[];
+    NSMutableArray *out = [NSMutableArray array];
+    for (id rawRow in history) {
+        if (![rawRow isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *row = rawRow;
+        NSDictionary *points = [row[@"p"] isKindOfClass:NSDictionary.class] ? row[@"p"] : @{};
+        NSMutableDictionary *migrated = [NSMutableDictionary dictionary];
+        for (NSString *key in points) {
+            if (![key isKindOfClass:NSString.class]) continue;
+            // Une clé déjà migrée porte un UUID en deuxième segment : la forme suffit à la
+            // reconnaître, donc repasser sur un historique migré ne change rien.
+            if (TMHistoryKeyAccountID(key).length) { migrated[key] = points[key]; continue; }
+            NSString *provider = TMHistoryKeyProvider(key);
+            NSString *accountId = [provider isEqualToString:TMProviderOpenAI] ? openaiAccountId
+                                : [provider isEqualToString:TMProviderClaude] ? claudeAccountId : nil;
+            if (!accountId.length) { migrated[key] = points[key]; continue; }
+            migrated[TMHistoryKey(provider, accountId, TMHistoryKeyWindowID(key))] = points[key];
+        }
+        NSMutableDictionary *nextRow = [row mutableCopy];
+        nextRow[@"p"] = migrated;
+        [out addObject:nextRow];
     }
-    for (NSDictionary *w in openAIWindows) {
-        NSString *wid = w[@"windowId"] ?: w[@"label"];
-        if (wid) points[[@"openai:" stringByAppendingString:wid]] = @((long)(TMNumber(w[@"usedPercent"]) + 0.5));
+    return out;
+}
+
+NSArray *TMHistoryDroppingAccount(NSArray *history, NSString *accountId) {
+    if (![history isKindOfClass:NSArray.class] || !accountId.length) return history ?: @[];
+    NSMutableArray *out = [NSMutableArray array];
+    for (id rawRow in history) {
+        if (![rawRow isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *row = rawRow;
+        NSDictionary *points = [row[@"p"] isKindOfClass:NSDictionary.class] ? row[@"p"] : @{};
+        NSMutableDictionary *kept = [NSMutableDictionary dictionary];
+        for (NSString *key in points) {
+            if ([TMHistoryKeyAccountID(key) isEqualToString:accountId]) continue;
+            kept[key] = points[key];
+        }
+        // Une rangée vidée de tous ses points ne dit plus rien : la garder ferait un trou dans les
+        // courbes des autres comptes, qui y liraient un instant sans mesure.
+        if (!kept.count) continue;
+        NSMutableDictionary *nextRow = [row mutableCopy];
+        nextRow[@"p"] = kept;
+        [out addObject:nextRow];
+    }
+    return out;
+}
+
+#pragma mark - Métrique de la barre des menus
+
+BOOL TMWindowMatchesKind(NSDictionary *window, NSString *kind) {
+    if ([kind isEqualToString:@"session"]) return TMWindowIsSession(window);
+    if ([kind isEqualToString:@"weekly"]) return TMWindowIsWeekly(window) && !TMWindowIsScopedWeekly(window);
+    if ([kind isEqualToString:@"weekly-fable"]) return TMWindowIsScopedWeekly(window);
+    return NO;
+}
+
+NSString *TMPinnedMetricForAccount(NSString *provider, NSString *accountId, NSString *kind) {
+    return [NSString stringWithFormat:@"acct:%@:%@:%@", provider, accountId, kind];
+}
+
+// Étiquette courte affichée à côté de l'icône quand la fenêtre montrée peut changer toute seule.
+static NSString *TMShortLabelForKind(NSString *provider, NSString *kind) {
+    if ([provider isEqualToString:TMProviderOpenAI]) return @"AI sem";
+    if ([kind isEqualToString:@"session"]) return @"C 5h";
+    if ([kind isEqualToString:@"weekly-fable"]) return @"C Fable";
+    return @"C sem";
+}
+
+// Meilleur (= plus consommé) candidat parmi les comptes retenus par `filter`, pour un genre donné.
+static NSDictionary *TMBestForKind(NSArray *accounts, NSString *kind,
+                                   BOOL (^filter)(NSDictionary *account)) {
+    NSDictionary *best = nil;
+    double bestValue = -1;
+    for (NSDictionary *account in accounts) {
+        if (![account isKindOfClass:NSDictionary.class]) continue;
+        if (filter && !filter(account)) continue;
+        NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
+        for (NSDictionary *window in windows) {
+            if (![window isKindOfClass:NSDictionary.class] || !TMWindowMatchesKind(window, kind)) continue;
+            double used = TMNumber(window[@"usedPercent"]);
+            if (used <= bestValue) continue;
+            bestValue = used;
+            NSString *provider = [account[@"provider"] isKindOfClass:NSString.class] ? account[@"provider"] : @"";
+            best = @{
+                @"usedPercent": @(used), @"provider": provider,
+                @"accountId": [account[@"accountId"] isKindOfClass:NSString.class] ? account[@"accountId"] : @"",
+                @"label": [account[@"label"] isKindOfClass:NSString.class] ? account[@"label"] : @"",
+                @"kind": kind, @"shortLabel": TMShortLabelForKind(provider, kind)
+            };
+        }
+    }
+    return best;
+}
+
+static NSDictionary *TMAggregate(NSArray *accounts, NSString *provider, NSString *kind) {
+    NSDictionary *best = TMBestForKind(accounts, kind, ^BOOL(NSDictionary *account) {
+        return [account[@"provider"] isEqualToString:provider];
+    });
+    if (!best) return nil;
+    NSMutableDictionary *out = [best mutableCopy];
+    out[@"aggregated"] = @YES;
+    return out;
+}
+
+NSDictionary *TMResolveMenuBarMetric(NSString *metric, NSArray *accounts) {
+    if (![accounts isKindOfClass:NSArray.class]) accounts = @[];
+    NSString *value = metric.length ? metric : @"claude:weekly";
+
+    if ([value hasPrefix:@"acct:"]) {
+        NSArray *parts = [value componentsSeparatedByString:@":"];
+        if (parts.count >= 4) {
+            NSString *provider = parts[1], *accountId = parts[2];
+            NSString *kind = [[parts subarrayWithRange:NSMakeRange(3, parts.count - 3)]
+                              componentsJoinedByString:@":"];
+            NSDictionary *pinned = TMBestForKind(accounts, kind, ^BOOL(NSDictionary *account) {
+                return [account[@"accountId"] isEqualToString:accountId];
+            });
+            if (pinned) return pinned;
+            // Compte supprimé, ou qui n'a pas encore de fenêtre : l'agrégat de son fournisseur dit
+            // encore quelque chose de vrai, là où un tiret permanent ne dirait rien.
+            return TMAggregate(accounts, provider, kind);
+        }
+        return nil;
+    }
+
+    NSArray *parts = [value componentsSeparatedByString:@":"];
+    if (parts.count >= 2) {
+        NSString *provider = parts[0];
+        NSString *kind = [[parts subarrayWithRange:NSMakeRange(1, parts.count - 1)]
+                          componentsJoinedByString:@":"];
+        return TMAggregate(accounts, provider, kind);
+    }
+
+    // « lowest » : la marge la plus faible, donc le pourcentage consommé le plus élevé. Fenêtres
+    // générales seulement — les sous-quotas scoped (Fable) ne pilotent aucun chiffre agrégé, même
+    // règle que le héros du tableau de bord.
+    NSDictionary *best = nil;
+    for (NSString *kind in @[@"session", @"weekly"]) {
+        NSDictionary *candidate = TMBestForKind(accounts, kind, nil);
+        if (candidate && (!best || TMNumber(candidate[@"usedPercent"]) > TMNumber(best[@"usedPercent"]))) {
+            best = candidate;
+        }
+    }
+    return best;
+}
+
+BOOL TMHistoryKeyMatchesMetric(NSString *key, NSString *metric) {
+    NSString *windowId = TMHistoryKeyWindowID(key);
+    NSString *provider = TMHistoryKeyProvider(key);
+    BOOL (^windowMatchesKind)(NSString *) = ^BOOL(NSString *kind) {
+        if ([kind isEqualToString:@"session"]) return [windowId isEqualToString:@"five_hour"];
+        if ([kind isEqualToString:@"weekly-fable"]) return [windowId hasPrefix:@"seven_day_scoped"];
+        if ([kind isEqualToString:@"weekly"]) {
+            if ([provider isEqualToString:TMProviderOpenAI]) return YES;
+            return [windowId isEqualToString:@"seven_day"];
+        }
+        return NO;
+    };
+
+    if ([metric hasPrefix:@"acct:"]) {
+        NSArray *parts = [metric componentsSeparatedByString:@":"];
+        if (parts.count < 4) return NO;
+        if (![TMHistoryKeyAccountID(key) isEqualToString:parts[2]]) return NO;
+        return windowMatchesKind([[parts subarrayWithRange:NSMakeRange(3, parts.count - 3)]
+                                  componentsJoinedByString:@":"]);
+    }
+
+    NSArray *parts = [metric componentsSeparatedByString:@":"];
+    if (parts.count >= 2) {
+        if (![provider isEqualToString:parts[0]]) return NO;
+        return windowMatchesKind([[parts subarrayWithRange:NSMakeRange(1, parts.count - 1)]
+                                  componentsJoinedByString:@":"]);
+    }
+    // « lowest » : toutes les fenêtres générales.
+    return ![windowId containsString:@"scoped"];
+}
+
+#pragma mark - Historique
+
+// Appends one sample per account window to a rolling on-disk series (max ~2000 points ≈ a week at
+// 5-min cadence). Nothing here is a secret: only window ids and used percentages.
+NSArray *TMAppendHistory(NSArray *pairs, long long now) {
+    NSMutableDictionary *points = [NSMutableDictionary dictionary];
+    for (NSArray *pair in pairs) {
+        if (![pair isKindOfClass:NSArray.class] || pair.count < 3) continue;
+        NSString *provider = pair[0], *accountId = pair[1];
+        NSArray *windows = [pair[2] isKindOfClass:NSArray.class] ? pair[2] : @[];
+        for (NSDictionary *w in windows) {
+            if (![w isKindOfClass:NSDictionary.class]) continue;
+            // windowId identifie la limite, pas la durée : sans lui deux limites OpenAI écrasaient
+            // la même clé et la moitié de la donnée disparaissait en silence.
+            NSString *wid = [w[@"windowId"] isKindOfClass:NSString.class] ? w[@"windowId"] : w[@"label"];
+            if (![wid isKindOfClass:NSString.class] || !wid.length) continue;
+            points[TMHistoryKey(provider, accountId, wid)] = @((long)(TMNumber(w[@"usedPercent"]) + 0.5));
+        }
     }
     if (!points.count) return TMLoadHistory();
 

@@ -25,9 +25,7 @@ NSArray<NSHTTPCookie *> *TMCookiesFromHeader(NSString *header);
 #pragma mark - Fenêtres de quota
 NSString *TMQuotaWindowLabel(long long minutes);
 NSString *TMClaudeWindowLabel(NSString *name);
-// Source officielle : snapshot écrit par la status line de Claude Code.
-NSArray *TMClaudeWindowsFromSnapshot(NSDictionary *snapshot);
-// Source non officielle : réponse de claude.ai /api/organizations/{org}/usage.
+// Unique source des quotas Claude : réponse de claude.ai /api/organizations/{org}/usage.
 NSArray *TMClaudeWindowsFromUsagePayload(NSDictionary *payload);
 // Écarte les fenêtres dont le reset est passé : leur pourcentage ne veut plus rien dire.
 NSArray *TMDropExpiredWindows(NSArray *windows);
@@ -122,4 +120,41 @@ BOOL TMWatchdogShouldReload(NSInteger *failures, BOOL success, NSInteger thresho
 
 extern const NSTimeInterval TMForecastMinimumSpan;
 BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resetsAt, NSTimeInterval *outAt);
-NSArray *TMAppendHistory(NSArray *claudeWindows, NSArray *openAIWindows, long long now);
+#pragma mark - Clés d'historique par compte
+// Forme : `<provider>:<accountId>:<windowId>`. L'accountId est dans la clé, jamais le libellé :
+// renommer un compte réécrirait sinon tout son historique. Le libellé est résolu à l'affichage.
+NSString *TMHistoryKey(NSString *provider, NSString *accountId, NSString *windowId);
+NSString *TMHistoryKeyProvider(NSString *key);
+// @"" pour une clé héritée (mono-compte), qui n'en porte pas.
+NSString *TMHistoryKeyAccountID(NSString *key);
+NSString *TMHistoryKeyWindowID(NSString *key);
+
+// Réécrit les clés héritées vers le compte migré de leur fournisseur. Idempotent : une clé qui
+// porte déjà un accountId traverse sans changement — la forme de l'UUID suffit à les distinguer,
+// donc aucun drapeau persistant n'est nécessaire.
+NSArray *TMMigrateHistoryKeys(NSArray *history, NSString *openaiAccountId, NSString *claudeAccountId);
+
+// Retire toutes les clés d'un compte. Sans cela, supprimer un compte laisserait dans le graphe des
+// séries orphelines que plus rien ne permet de nommer.
+NSArray *TMHistoryDroppingAccount(NSArray *history, NSString *accountId);
+
+#pragma mark - Métrique de la barre des menus
+// Grammaire de `menuBarMetric`, côté quotas :
+//   "lowest"                              — la fenêtre générale la plus consommée, tous comptes ;
+//   "<provider>:<kind>"                   — agrégat : le maximum des comptes du fournisseur ;
+//   "acct:<provider>:<accountId>:<kind>"  — un compte précis.
+// `kind` ∈ { "session", "weekly", "weekly-fable" }. Le fournisseur figure dans la forme épinglée
+// pour qu'un compte supprimé retombe sur l'agrégat de SON fournisseur plutôt que sur du vide.
+BOOL TMWindowMatchesKind(NSDictionary *window, NSString *kind);
+NSString *TMPinnedMetricForAccount(NSString *provider, NSString *accountId, NSString *kind);
+
+// `accounts` : [ { accountId, provider, label, windows } ] dans l'ordre d'affichage.
+// nil si aucune valeur n'est disponible ; sinon
+//   { usedPercent, provider, accountId, label, kind, shortLabel, aggregated }
+NSDictionary *TMResolveMenuBarMetric(NSString *metric, NSArray *accounts);
+
+// Une clé d'historique participe-t-elle à la sparkline de cette métrique ?
+BOOL TMHistoryKeyMatchesMetric(NSString *key, NSString *metric);
+
+// `pairs` : [ [provider, accountId, fenêtres] ].
+NSArray *TMAppendHistory(NSArray *pairs, long long now);

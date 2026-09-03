@@ -8,6 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import "StatusQuota.h"
+#import "StatusAccounts.h"
 #import "StatusAwake.h"
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
@@ -45,6 +46,11 @@ static void CheckEqual(id actual, id expected, NSString *what) {
 }
 
 static void Section(NSString *name) { printf("\n\033[1m%s\033[0m\n", name.UTF8String); }
+
+// Identifiants de compte fixes : les tests d'historique comparent des clés, elles doivent être
+// reproductibles d'une exécution à l'autre.
+#define TM_ACC_A @"11111111-1111-4111-8111-111111111111"
+#define TM_ACC_B @"22222222-2222-4222-8222-222222222222"
 
 #pragma mark - Coercition défensive
 
@@ -112,29 +118,6 @@ static void TestWindowLabels(void) {
     CheckEqual(TMQuotaWindowLabel(10080), @"Semaine", @"10080 min -> Semaine");
     CheckEqual(TMQuotaWindowLabel(1440), @"24 h", @"1440 min -> 24 h");
     CheckEqual(TMQuotaWindowLabel(0), @"Période", @"0 -> libellé générique");
-}
-
-static void TestSnapshotParsing(void) {
-    Section(@"TMClaudeWindowsFromSnapshot — status line officielle");
-    NSDictionary *snapshot = @{
-        @"schema_version": @1, @"provider": @"claude",
-        @"rate_limits": @{
-            @"five_hour": @{@"used_percentage": @34.0, @"resets_at": @4102444800},
-            @"seven_day": @{@"used_percentage": @25.0, @"resets_at": @4102444800}
-        }
-    };
-    NSArray *windows = TMClaudeWindowsFromSnapshot(snapshot);
-    CheckEqual(@(windows.count), @2, @"les deux fenêtres sont lues");
-    CheckEqual(windows[0][@"windowId"], @"five_hour", @"five_hour vient en premier");
-    CheckEqual(windows[0][@"usedPercent"], @34.0, @"pourcentage consommé");
-    CheckEqual(windows[0][@"remainingPercent"], @66.0, @"restant = 100 - consommé");
-
-    CheckEqual(@(TMClaudeWindowsFromSnapshot(@{@"schema_version": @99}).count), @0,
-               @"schéma inconnu -> vide (pas de crash)");
-    CheckEqual(@(TMClaudeWindowsFromSnapshot(nil).count), @0, @"nil -> vide");
-    CheckEqual(@(TMClaudeWindowsFromSnapshot(@{@"schema_version": @1, @"provider": @"claude",
-                 @"rate_limits": @{@"x": @{@"used_percentage": @10.0}}}).count), @0,
-               @"fenêtre sans resets_at -> écartée");
 }
 
 static void TestUsagePayloadParsing(void) {
@@ -258,7 +241,7 @@ static void TestOpenAIHistoryCollision(void) {
 
     NSDictionary *account = @{@"type": @"chatgpt", @"email": @"x@y.z", @"planType": @"pro"};
     NSArray *windows = TMOpenAIAccountPayload(account, TMFakeOpenAIResponse(), NO, nil)[@"windows"];
-    NSArray *history = TMAppendHistory(@[], windows, 5000);
+    NSArray *history = TMAppendHistory(@[@[TMProviderOpenAI, TM_ACC_A, windows]], 5000);
 
     NSDictionary *points = history.lastObject[@"p"];
     Check(points.count == 2, @"les deux limites sont historisées séparément");
@@ -278,23 +261,194 @@ static void TestHistory(void) {
 
     NSArray *claude = @[@{@"windowId": @"five_hour", @"usedPercent": @34.0}];
     NSArray *openai = @[@{@"windowId": @"seven_day", @"usedPercent": @41.0}];
+    NSArray *pairs = @[@[TMProviderClaude, TM_ACC_A, claude], @[TMProviderOpenAI, TM_ACC_B, openai]];
 
     long long t0 = 1784000000;
-    NSArray *h1 = TMAppendHistory(claude, openai, t0);
+    NSArray *h1 = TMAppendHistory(pairs, t0);
     CheckEqual(@(h1.count), @1, @"premier point enregistré");
-    CheckEqual(h1[0][@"p"][@"claude:five_hour"], @34, @"le point Claude est présent");
-    CheckEqual(h1[0][@"p"][@"openai:seven_day"], @41, @"le point OpenAI est présent");
+    CheckEqual(h1[0][@"p"][TMHistoryKey(TMProviderClaude, TM_ACC_A, @"five_hour")], @34, @"le point Claude est présent");
+    CheckEqual(h1[0][@"p"][TMHistoryKey(TMProviderOpenAI, TM_ACC_B, @"seven_day")], @41, @"le point OpenAI est présent");
 
-    NSArray *h2 = TMAppendHistory(claude, openai, t0 + 30);
+    NSArray *h2 = TMAppendHistory(pairs, t0 + 30);
     CheckEqual(@(h2.count), @1, @"un point < 2 min après est fusionné (pas de doublon)");
 
-    NSArray *h3 = TMAppendHistory(claude, openai, t0 + 200);
+    NSArray *h3 = TMAppendHistory(pairs, t0 + 200);
     CheckEqual(@(h3.count), @2, @"un point > 2 min après est ajouté");
 
-    NSArray *h4 = TMAppendHistory(@[], @[], t0 + 400);
+    NSArray *h4 = TMAppendHistory(@[], t0 + 400);
     CheckEqual(@(h4.count), @2, @"sans fenêtre, rien n'est enregistré");
 
+    // Deux comptes du même fournisseur : la régression déjà vue côté OpenAI (deux limites sur une
+    // seule clé, la moitié de la donnée perdue en silence) se reproduirait ici à l'identique.
+    NSArray *twoClaude = @[@[TMProviderClaude, TM_ACC_A, claude],
+                           @[TMProviderClaude, TM_ACC_B, @[@{@"windowId": @"five_hour", @"usedPercent": @77.0}]]];
+    NSArray *h5 = TMAppendHistory(twoClaude, t0 + 600);
+    NSDictionary *last = h5.lastObject[@"p"];
+    CheckEqual(last[TMHistoryKey(TMProviderClaude, TM_ACC_A, @"five_hour")], @34, @"compte A gardé");
+    CheckEqual(last[TMHistoryKey(TMProviderClaude, TM_ACC_B, @"five_hour")], @77, @"compte B gardé, pas écrasé");
+
     [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
+}
+
+#pragma mark - Registre de comptes
+
+static void TestAccountRegistry(void) {
+    Section(@"TMNormalizeAccountRegistry — un registre corrompu ne fait pas tomber l'app");
+    CheckEqual(@(TMNormalizeAccountRegistry(nil).count), @0, @"nil -> vide");
+    CheckEqual(@(TMNormalizeAccountRegistry(@"pas un tableau").count), @0, @"type inattendu -> vide");
+    CheckEqual(@(TMNormalizeAccountRegistry(@[@{@"accountId": @"pas-un-uuid", @"provider": @"claude"}]).count),
+               @0, @"identifiant invalide écarté");
+    CheckEqual(@(TMNormalizeAccountRegistry(@[@{@"accountId": TM_ACC_A, @"provider": @"mistral"}]).count),
+               @0, @"fournisseur inconnu écarté");
+
+    NSArray *dupes = @[@{@"accountId": TM_ACC_A, @"provider": @"claude"},
+                       @{@"accountId": TM_ACC_A, @"provider": @"claude"}];
+    CheckEqual(@(TMNormalizeAccountRegistry(dupes).count), @1, @"identifiant dupliqué : une seule entrée");
+
+    Section(@"TMRegistryAdding / Removing / Setting");
+    NSArray *registry = TMRegistryAdding(@[], TMProviderClaude, TM_ACC_A, @"Perso");
+    registry = TMRegistryAdding(registry, TMProviderClaude, TM_ACC_B, @"Pro");
+    CheckEqual(@(TMAccountsForProvider(registry, TMProviderClaude).count), @2, @"deux comptes Claude");
+    CheckEqual(@(TMAccountsForProvider(registry, TMProviderOpenAI).count), @0, @"aucun compte OpenAI");
+    CheckEqual(TMAccountWithID(registry, TM_ACC_B)[@"label"], @"Pro", @"le label est retenu");
+
+    registry = TMRegistrySetting(registry, TM_ACC_B, @"orgId", @"org-42");
+    CheckEqual(TMAccountWithID(registry, TM_ACC_B)[@"orgId"], @"org-42", @"org id enregistré");
+    CheckEqual(TMAccountWithID(registry, TM_ACC_B)[@"label"], @"Pro", @"les autres champs sont intacts");
+
+    registry = TMRegistryRemoving(registry, TM_ACC_A);
+    Check(TMAccountWithID(registry, TM_ACC_A) == nil, @"compte supprimé");
+    CheckEqual(TMAccountWithID(registry, TM_ACC_B)[@"order"], @0, @"l'ordre est renuméroté après suppression");
+
+    Section(@"Plafond par fournisseur");
+    NSArray *full = @[];
+    for (NSInteger i = 0; i < TMMaxAccountsPerProvider; i++) {
+        full = TMRegistryAdding(full, TMProviderOpenAI, TMNewAccountID(), @"");
+    }
+    Check(TMProviderIsFull(full, TMProviderOpenAI), @"le fournisseur est plein");
+    Check(TMRegistryAdding(full, TMProviderOpenAI, TMNewAccountID(), @"") == nil,
+          @"ajout refusé au-delà du plafond (nil, pas un ajout silencieux)");
+    Check(TMRegistryAdding(full, TMProviderClaude, TMNewAccountID(), @"") != nil,
+          @"l'autre fournisseur n'est pas affecté");
+
+    Section(@"TMAccountDisplayLabel — repli lisible");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderClaude, @"label": @""}, 1),
+               @"Compte Claude 2", @"sans label, un repli numéroté");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderClaude, @"label": @"Perso"}, 1),
+               @"Perso", @"avec label, le label");
+}
+
+static void TestLegacyMigration(void) {
+    Section(@"TMMigrateLegacyRegistry — mise à jour depuis le mono-compte");
+    NSDictionary *migrated = TMMigrateLegacyRegistry(@[]);
+    NSArray *registry = migrated[@"registry"];
+    CheckEqual(@(registry.count), @2, @"un compte par fournisseur est créé");
+    Check(TMIsAccountID(migrated[@"openaiAccountId"]), @"identifiant OpenAI exploitable");
+    Check(TMIsAccountID(migrated[@"claudeAccountId"]), @"identifiant Claude exploitable");
+
+    NSDictionary *again = TMMigrateLegacyRegistry(registry);
+    Check(again[@"openaiAccountId"] == nil, @"un registre déjà peuplé n'est pas re-migré");
+    CheckEqual(@([again[@"registry"] count]), @2, @"et il traverse intact");
+
+    Section(@"TMMigrateHistoryKeys — les courbes ne repartent pas de zéro");
+    NSArray *legacy = @[@{@"t": @1784000000, @"p": @{@"claude:five_hour": @30, @"openai:seven_day": @44}}];
+    NSArray *out = TMMigrateHistoryKeys(legacy, TM_ACC_B, TM_ACC_A);
+    NSDictionary *points = out[0][@"p"];
+    CheckEqual(points[TMHistoryKey(TMProviderClaude, TM_ACC_A, @"five_hour")], @30, @"clé Claude réécrite");
+    CheckEqual(points[TMHistoryKey(TMProviderOpenAI, TM_ACC_B, @"seven_day")], @44, @"clé OpenAI réécrite");
+    CheckEqual(@(points.count), @2, @"aucune clé héritée ne subsiste");
+
+    NSArray *twice = TMMigrateHistoryKeys(out, TM_ACC_B, TM_ACC_A);
+    CheckEqual(twice[0][@"p"], points, @"idempotent : repasser dessus ne change rien");
+
+    // Les identifiants d'une deuxième migration ne doivent pas déplacer les points déjà rattachés.
+    NSArray *thrice = TMMigrateHistoryKeys(out, TMNewAccountID(), TMNewAccountID());
+    CheckEqual(thrice[0][@"p"], points, @"un compte déjà porté par la clé n'est pas réattribué");
+
+    Section(@"TMHistoryDroppingAccount — pas de série orpheline");
+    NSArray *mixed = @[@{@"t": @1, @"p": @{TMHistoryKey(TMProviderClaude, TM_ACC_A, @"five_hour"): @10,
+                                          TMHistoryKey(TMProviderClaude, TM_ACC_B, @"five_hour"): @20}},
+                       @{@"t": @2, @"p": @{TMHistoryKey(TMProviderClaude, TM_ACC_A, @"five_hour"): @11}}];
+    NSArray *dropped = TMHistoryDroppingAccount(mixed, TM_ACC_A);
+    CheckEqual(@(dropped.count), @1, @"une rangée vidée de tous ses points disparaît");
+    CheckEqual(dropped[0][@"p"][TMHistoryKey(TMProviderClaude, TM_ACC_B, @"five_hour")], @20,
+               @"les points de l'autre compte survivent");
+
+    Section(@"TMMigrateLegacyAccountsCache — dictionnaire par fournisseur vers par compte");
+    NSDictionary *cache = TMMigrateLegacyAccountsCache(@{@"claude": @{@"windows": @[]},
+                                                         @"openai": @{@"windows": @[]}},
+                                                        TM_ACC_B, TM_ACC_A);
+    Check(cache[TM_ACC_A] != nil && cache[TM_ACC_B] != nil, @"les deux payloads sont réattribués");
+    NSDictionary *already = TMMigrateLegacyAccountsCache(cache, TMNewAccountID(), TMNewAccountID());
+    CheckEqual(@(already.count), @2, @"un cache déjà au bon format traverse sans changement");
+    Check(already[TM_ACC_A] != nil, @"et garde ses identifiants");
+}
+
+#pragma mark - Métrique de la barre des menus
+
+static NSArray *TMFakeAccounts(void) {
+    return @[
+        @{@"accountId": TM_ACC_A, @"provider": TMProviderClaude, @"label": @"Perso",
+          @"windows": @[@{@"windowId": @"five_hour", @"label": @"5 h", @"usedPercent": @30.0, @"resetsAt": @4102444800},
+                        @{@"windowId": @"seven_day", @"label": @"7 j", @"usedPercent": @40.0, @"resetsAt": @4102444800},
+                        @{@"windowId": @"seven_day_scoped_fable", @"label": @"Fable", @"usedPercent": @95.0, @"resetsAt": @4102444800}]},
+        @{@"accountId": TM_ACC_B, @"provider": TMProviderClaude, @"label": @"Pro",
+          @"windows": @[@{@"windowId": @"seven_day", @"label": @"7 j", @"usedPercent": @72.0, @"resetsAt": @4102444800}]},
+        @{@"accountId": @"33333333-3333-4333-8333-333333333333", @"provider": TMProviderOpenAI, @"label": @"Boulot",
+          @"windows": @[@{@"windowId": @"codex-10080", @"label": @"Semaine", @"durationMinutes": @10080, @"usedPercent": @55.0, @"resetsAt": @4102444800}]}
+    ];
+}
+
+static void TestMenuBarMetricResolution(void) {
+    Section(@"TMResolveMenuBarMetric — agrégats");
+    NSArray *accounts = TMFakeAccounts();
+
+    NSDictionary *weekly = TMResolveMenuBarMetric(@"claude:weekly", accounts);
+    CheckEqual(weekly[@"usedPercent"], @72.0, @"agrégat Claude semaine : le compte le plus contraint");
+    CheckEqual(weekly[@"label"], @"Pro", @"et il se nomme");
+    CheckEqual(weekly[@"aggregated"], @YES, @"marqué comme agrégat");
+
+    CheckEqual(TMResolveMenuBarMetric(@"claude:session", accounts)[@"usedPercent"], @30.0,
+               @"agrégat Claude 5 h");
+    CheckEqual(TMResolveMenuBarMetric(@"claude:weekly-fable", accounts)[@"usedPercent"], @95.0,
+               @"agrégat Fable");
+    CheckEqual(TMResolveMenuBarMetric(@"openai:weekly", accounts)[@"usedPercent"], @55.0,
+               @"agrégat OpenAI semaine");
+
+    Section(@"TMResolveMenuBarMetric — « lowest » exclut les sous-quotas scoped");
+    NSDictionary *lowest = TMResolveMenuBarMetric(@"lowest", accounts);
+    CheckEqual(lowest[@"usedPercent"], @72.0, @"la semaine Pro (72) gagne, pas le Fable à 95");
+    CheckEqual(lowest[@"shortLabel"], @"C sem", @"étiquette courte de la fenêtre montrée");
+
+    Section(@"TMResolveMenuBarMetric — épinglage d'un compte");
+    NSString *pinned = TMPinnedMetricForAccount(TMProviderClaude, TM_ACC_A, @"weekly");
+    CheckEqual(TMResolveMenuBarMetric(pinned, accounts)[@"usedPercent"], @40.0,
+               @"le compte épinglé donne SON chiffre, pas le maximum");
+    CheckEqual(TMResolveMenuBarMetric(pinned, accounts)[@"label"], @"Perso", @"et son nom");
+
+    // Le cas qui compte : un compte épinglé puis supprimé ne doit pas figer l'icône sur un tiret.
+    NSString *ghost = TMPinnedMetricForAccount(TMProviderClaude, @"44444444-4444-4444-8444-444444444444", @"weekly");
+    NSDictionary *fallback = TMResolveMenuBarMetric(ghost, accounts);
+    Check(fallback != nil, @"compte épinglé disparu : on retombe sur quelque chose");
+    CheckEqual(fallback[@"usedPercent"], @72.0, @"…sur l'agrégat de SON fournisseur");
+    CheckEqual(fallback[@"aggregated"], @YES, @"…marqué comme tel");
+
+    Section(@"TMResolveMenuBarMetric — sans donnée");
+    Check(TMResolveMenuBarMetric(@"claude:weekly", @[]) == nil, @"aucun compte -> nil");
+    Check(TMResolveMenuBarMetric(@"openai:weekly", @[accounts[0]]) == nil,
+          @"fournisseur sans compte -> nil");
+
+    Section(@"TMHistoryKeyMatchesMetric — sparkline");
+    NSString *claudeWeeklyA = TMHistoryKey(TMProviderClaude, TM_ACC_A, @"seven_day");
+    NSString *claudeFableA = TMHistoryKey(TMProviderClaude, TM_ACC_A, @"seven_day_scoped_fable");
+    Check(TMHistoryKeyMatchesMetric(claudeWeeklyA, @"claude:weekly"), @"agrégat : la clé participe");
+    Check(!TMHistoryKeyMatchesMetric(claudeFableA, @"claude:weekly"), @"le scoped ne pollue pas la semaine");
+    Check(TMHistoryKeyMatchesMetric(claudeFableA, @"claude:weekly-fable"), @"le scoped alimente Fable");
+    Check(TMHistoryKeyMatchesMetric(claudeWeeklyA, pinned), @"épinglé : la clé du compte participe");
+    Check(!TMHistoryKeyMatchesMetric(TMHistoryKey(TMProviderClaude, TM_ACC_B, @"seven_day"), pinned),
+          @"épinglé : la clé d'un autre compte est exclue");
+    Check(!TMHistoryKeyMatchesMetric(claudeFableA, @"lowest"), @"« lowest » exclut le scoped");
+    Check(TMHistoryKeyMatchesMetric(claudeWeeklyA, @"lowest"), @"« lowest » inclut la semaine");
 }
 
 static void TestAccountsCache(void) {
@@ -306,22 +460,22 @@ static void TestAccountsCache(void) {
     Check(TMLoadAccountsCache() == nil, @"aucun cache au départ : nil (démarrage vide, comme avant)");
 
     NSDictionary *accounts = @{
-        @"claude": @{ @"windows": @[@{@"windowId": @"seven_day", @"usedPercent": @62.0, @"resetsAt": @4102444800}],
-                      @"capturedAt": @1784000000, @"authenticated": @YES },
-        @"openai": @{ @"windows": @[], @"connected": @NO }
+        TM_ACC_A: @{ @"windows": @[@{@"windowId": @"seven_day", @"usedPercent": @62.0, @"resetsAt": @4102444800}],
+                     @"capturedAt": @1784000000, @"provider": TMProviderClaude },
+        TM_ACC_B: @{ @"windows": @[], @"provider": TMProviderOpenAI }
     };
     TMSaveAccountsCache(accounts);
     NSDictionary *loaded = TMLoadAccountsCache();
     Check(loaded != nil, @"le cache se recharge après écriture");
-    CheckEqual(loaded[@"claude"][@"windows"][0][@"usedPercent"], @62, @"les volumes Claude survivent au round-trip");
-    CheckEqual(loaded[@"claude"][@"capturedAt"], @1784000000, @"l'horodatage de la dernière mesure est conservé");
+    CheckEqual(loaded[TM_ACC_A][@"windows"][0][@"usedPercent"], @62, @"les volumes Claude survivent au round-trip");
+    CheckEqual(loaded[TM_ACC_A][@"capturedAt"], @1784000000, @"l'horodatage de la dernière mesure est conservé");
 
     // Robustesse : une entrée non sérialisable n'écrase pas un cache valide par un fichier corrompu.
     TMSaveAccountsCache((NSDictionary *)@"pas un dictionnaire");
     Check(TMLoadAccountsCache() != nil, @"une entrée invalide laisse le cache précédent intact");
     TMSaveAccountsCache(@{});
     // Un dictionnaire vide est ignoré (guard !count) : le dernier cache valide reste.
-    CheckEqual(TMLoadAccountsCache()[@"claude"][@"windows"][0][@"usedPercent"], @62, @"dictionnaire vide ignoré : cache valide préservé");
+    CheckEqual(TMLoadAccountsCache()[TM_ACC_A][@"windows"][0][@"usedPercent"], @62, @"dictionnaire vide ignoré : cache valide préservé");
 
     [NSFileManager.defaultManager removeItemAtPath:sandbox error:nil];
 }
@@ -1673,12 +1827,14 @@ int main(void) {
         TestCookieExtraction();
         TestCookieConversion();
         TestWindowLabels();
-        TestSnapshotParsing();
         TestUsagePayloadParsing();
         TestExpiredWindows();
         TestWindowClassification();
         TestHistory();
         TestAccountsCache();
+        TestAccountRegistry();
+        TestLegacyMigration();
+        TestMenuBarMetricResolution();
         TestOpenAIWindowIdentity();
         TestOpenAIHistoryCollision();
         TestAwake();
