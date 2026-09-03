@@ -11,13 +11,14 @@ mkdir -p "$ROOT/work" "$ROOT/outputs"
 clang -fobjc-arc -O2 -I "$ROOT/Native" \
   -framework Cocoa -framework WebKit -framework Security \
   -framework ServiceManagement -framework UserNotifications -framework IOKit \
-  "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAwake.m" \
+  "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" \
+  "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
   "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
-mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/scripts" "$OUTPUT/Contents/Resources/icons"
+mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/icons"
 cp "$BUILD" "$OUTPUT/Contents/MacOS/Status"
 cp "$ROOT/Resources/Info.plist" "$OUTPUT/Contents/Info.plist"
 cp "$ROOT/Resources/StatusIcon.icns" "$OUTPUT/Contents/Resources/StatusIcon.icns"
@@ -27,8 +28,6 @@ cp "$ROOT/Resources/widget.html" "$OUTPUT/Contents/Resources/widget.html"
 cp "$ROOT/Resources/picker.html" "$OUTPUT/Contents/Resources/picker.html"
 cp "$ROOT/Resources/themes.css" "$OUTPUT/Contents/Resources/themes.css"
 cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"
-cp "$ROOT/scripts/status-claude-bridge.py" "$OUTPUT/Contents/Resources/scripts/status-claude-bridge.py"
-chmod 755 "$OUTPUT/Contents/Resources/scripts/status-claude-bridge.py"
 
 xattr -cr "$OUTPUT"
 

@@ -57,6 +57,15 @@ NSString *TMCodexExecutablePath(void) {
     self.task = [NSTask new];
     self.task.executableURL = [NSURL fileURLWithPath:path];
     self.task.arguments = @[@"app-server", @"--listen", @"stdio://"];
+    if (self.codexHome.length) {
+        [NSFileManager.defaultManager createDirectoryAtPath:self.codexHome
+                                withIntermediateDirectories:YES
+                                                 attributes:@{NSFilePosixPermissions: @0700}
+                                                      error:nil];
+        NSMutableDictionary *environment = [NSProcessInfo.processInfo.environment mutableCopy];
+        environment[@"CODEX_HOME"] = self.codexHome;
+        self.task.environment = environment;
+    }
     self.inputPipe = [NSPipe pipe];
     self.outputPipe = [NSPipe pipe];
     self.errorPipe = [NSPipe pipe];

@@ -18,6 +18,10 @@ typedef void (^TMAppServerCompletion)(id _Nullable result, NSError * _Nullable e
 NSString * _Nullable TMCodexExecutablePath(void);
 
 @interface TMCodexAppServer : NSObject
+// Dossier d'authentification du serveur, passé en CODEX_HOME au processus fils. Un dossier par
+// compte : c'est ce qui rend le multi-comptes possible, et ce qui fait qu'une déconnexion depuis
+// Status ne touche plus la session Codex partagée du Mac. nil ⇒ le CODEX_HOME hérité (~/.codex).
+@property (copy, nullable) NSString *codexHome;
 @property (copy, nullable) void (^notificationHandler)(NSString *method, NSDictionary *params);
 - (void)start:(TMAppServerCompletion)completion;
 - (void)request:(NSString *)method params:(nullable NSDictionary *)params completion:(TMAppServerCompletion)completion;
