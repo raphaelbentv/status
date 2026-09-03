@@ -664,7 +664,10 @@ function connectionsView(data){
     const panels=accounts.map(panel).join('')||`<div class="quota-empty">Aucun compte ${provider.name}.</div>`;
     const full=accounts.length>=limit;
     const add=`<button class="account-action primary" ${full?'disabled':''} onclick="send('addAccount',{provider:'${provider.id}'})" title="${full?`Maximum de ${limit} comptes atteint`:'Ajouter un compte'}">Ajouter un compte</button>`;
-    return `<article class="connection-panel"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
+    // --provider doit vivre sur le panneau, pas seulement sur le bloc d'un compte : « Ajouter un
+    // compte » l'utilise comme fond, et sans lui le bouton s'affichait en texte quasi noir sur
+    // fond sombre — présent, mais invisible.
+    return `<article class="connection-panel" style="--provider:${providerColor(provider.id)}"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
   };
   return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Quotas ChatGPT via un serveur Codex local par compte.',openAIPanel)}${section(PROVIDERS[1],'Quotas Claude lus sur claude.ai avec le cookie de session du compte (source non officielle).',claudePanel)}</div>`;
 }
