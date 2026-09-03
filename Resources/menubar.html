@@ -69,7 +69,10 @@
   .tool .glyph{font-size:15px;line-height:1;height:15px;display:flex;align-items:center;justify-content:center}
   /* Pleine largeur, segments à parts égales : la rangée leur appartient entièrement. */
   .segmented{display:flex;border:1px solid var(--hair-strong);overflow:hidden;flex:1}
-  .seg{flex:1;border:0;background:transparent;color:var(--muted);padding:6px 4px;cursor:pointer;font:inherit;font-size:9.5px;border-radius:0;white-space:nowrap}
+  .seg{flex:1;border:0;background:transparent;color:var(--muted);padding:6px 4px;cursor:pointer;font:inherit;font-size:9.5px;border-radius:0;white-space:nowrap;
+    /* Un nom de compte peut être long (« contact@venio.paris's Organization ») : il se tronque
+       plutôt que d'élargir son segment et d'écraser les autres. */
+    overflow:hidden;text-overflow:ellipsis;min-width:0}
   .seg+.seg{border-left:1px solid var(--hair-strong)}
   .seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:rgba(103,232,249,.14);color:var(--blue);font-weight:700}
@@ -106,7 +109,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row" id="accountRow" hidden><span class="segmented" id="account"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -144,7 +147,14 @@ function providerCost(id){
 // l'autre : y empiler N comptes la ferait éclater, et le détail par compte a déjà sa place dans le
 // tableau de bord. Le nom du compte retenu est affiché dès qu'il y en a plusieurs, sans quoi le
 // chiffre ne dirait pas de qui il parle.
-function pickAccount(accounts){
+function pickAccount(accounts,metric){
+  // Un compte épinglé prime : sans cela, basculer depuis la rangée « compte » ne changerait rien
+  // à l'écran et le geste n'aurait aucun retour.
+  const m=parseMetric(metric);
+  if(m.accountId){
+    const pinned=(accounts||[]).find(a=>a.accountId===m.accountId);
+    if(pinned)return pinned;
+  }
   let best=null,bestValue=-1;
   (accounts||[]).forEach(account=>{
     const value=used(mainWeekly(account.windows||[]));
@@ -152,8 +162,8 @@ function pickAccount(accounts){
   });
   return best||(accounts||[])[0]||null;
 }
-function provider(id,name,accounts){
-  const account=pickAccount(accounts);
+function provider(id,name,accounts,metric){
+  const account=pickAccount(accounts,metric);
   const windows=account?.windows||[];
   // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
   const weekly=mainWeekly(windows);
@@ -220,17 +230,77 @@ function brightnessRow(displays){
   // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne.
   return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="Luminosité — ${esc(d.name)}">☀</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
 }
+// Grammaire de menuBarMetric, identique à celle du natif (voir StatusQuota.h) :
+//   "lowest" | "<provider>:<kind>" (agrégat) | "acct:<provider>:<accountId>:<kind>" (épinglé).
+// Le popover la décompose en deux choix distincts — quelle fenêtre, quel compte — parce que ce
+// sont deux décisions différentes : une liste unique « compte × fenêtre » ferait dix boutons
+// dans 400 px.
+function parseMetric(metric){
+  const value=metric||'claude:weekly';
+  if(value.startsWith('system:'))return {system:true,value};
+  const parts=value.split(':');
+  if(value.startsWith('acct:')&&parts.length>=4)
+    return {provider:parts[1],accountId:parts[2],kind:parts.slice(3).join(':'),value};
+  if(parts.length>=2)return {provider:parts[0],kind:parts.slice(1).join(':'),value};
+  return {lowest:true,value};
+}
+const aggregateMetric=(provider,kind)=>`${provider}:${kind}`;
+const pinnedMetric=(provider,accountId,kind)=>`acct:${provider}:${accountId}:${kind}`;
+// Choisir une fenêtre garde le compte déjà épinglé chez ce fournisseur : changer de fenêtre ne
+// doit pas rendre l'icône à un autre compte sans le dire.
+function metricForWindow(current,provider,kind){
+  const m=parseMetric(current);
+  return m.accountId&&m.provider===provider?pinnedMetric(provider,m.accountId,kind)
+                                           :aggregateMetric(provider,kind);
+}
+// Rangée « compte » : elle n'existe que s'il y a quelque chose à basculer — un fournisseur pilote
+// l'icône, et il a plusieurs comptes. Sinon elle rend @"" et la rangée disparaît, plutôt que
+// d'occuper de la hauteur pour un choix unique.
+// Nom compact pour une pastille : trois pastilles se partagent 400 px, un libellé auto comme
+// « contact@venio.paris's Organization » s'y réduirait à « conta… ». On garde la partie qui
+// identifie — avant l'arobase, ou le premier mot — et le nom complet reste dans l'infobulle.
+function chipLabel(label){
+  const value=String(label||'');
+  const at=value.indexOf('@');
+  const short=(at>0?value.slice(0,at):value.split(/[\s·]+/)[0])||value;
+  return short.length>12?short.slice(0,11)+'…':short;
+}
+function accountSwitcher(accounts,metric){
+  const current=parseMetric(metric);
+  if(!current.provider)return '';
+  const siblings=(accounts||[]).filter(a=>a.provider===current.provider);
+  if(siblings.length<2)return '';
+  const kind=current.kind||'weekly';
+  const chip=(value,label,on,title)=>`<button class="seg ${on?'on':''}" title="${esc(title)}" onclick="send('setMenuBarMetric',{value:'${value}'})">${esc(label)}</button>`;
+  return chip(aggregateMetric(current.provider,kind),'tous',!current.accountId,
+              'Le compte le plus contraint du moment, quel qu’il soit')
+    +siblings.map(a=>chip(pinnedMetric(current.provider,a.accountId,kind),chipLabel(a.label),
+                          current.accountId===a.accountId,a.label)).join('');
+}
 let lastData=null;
 function renderMenu(data){
   document.documentElement.dataset.theme=data.prefs?.theme||'blueprint';
   const accounts=data.accounts||[];
   const of=providerId=>accounts.filter(a=>a.provider===providerId);
-  document.querySelector('#providers').innerHTML=provider('openai','OpenAI',of('openai'))+provider('claude','Claude',of('claude'));
+  const metric=data.prefs?.menuBarMetric||'claude:weekly';
+  document.querySelector('#providers').innerHTML=provider('openai','OpenAI',of('openai'),metric)+provider('claude','Claude',of('claude'),metric);
   document.querySelector('#brightness').innerHTML=brightnessRow(data.displays);
   document.querySelector('#tools').innerHTML=tools(data.tools);
-  const metric=data.prefs?.menuBarMetric||'claude:weekly';
-  const opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
-  document.querySelector('#metric').innerHTML=opt('claude:weekly','C sem')+opt('claude:session','C 5h')+opt('openai:weekly','AI sem')+opt('lowest','max')+opt('system:cpu','cpu')+opt('system:temp','°C')+opt('system:battery','bat');
+  const current=parseMetric(metric);
+  // Un segment de fenêtre reste allumé quand un compte est épinglé sur cette même fenêtre : c'est
+  // toujours « Claude semaine » qui pilote l'icône, seul le compte a été restreint.
+  const win=(provider,kind,label)=>{
+    const on=current.provider===provider&&current.kind===kind;
+    return `<button class="seg ${on?'on':''}" title="Fenêtre affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${metricForWindow(metric,provider,kind)}'})">${label}</button>`;
+  };
+  const plain=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
+  document.querySelector('#metric').innerHTML=win('claude','weekly','C sem')+win('claude','session','C 5h')
+    +win('openai','weekly','AI sem')+plain('lowest','max')+plain('system:cpu','cpu')+plain('system:temp','°C')+plain('system:battery','bat');
+
+  const switcher=accountSwitcher(accounts,metric);
+  const row=document.querySelector('#accountRow');
+  row.hidden=!switcher;
+  if(switcher)document.querySelector('#account').innerHTML=switcher;
   const sync=document.querySelector('#sync');
   sync.textContent=data.refreshing
     ? 'actualisation…'

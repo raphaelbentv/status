@@ -539,6 +539,24 @@ function overview(data){
   const backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';
   return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accountsOf(data,p.id),data.history)).join('')}</div>${weeklyChart(data)}`;
 }
+// Grammaire de menuBarMetric, identique au natif (StatusQuota.h) et au popover.
+function parseMetric(metric){
+  const value=metric||'claude:weekly';
+  if(value.startsWith('system:'))return {system:true,value};
+  const parts=value.split(':');
+  if(value.startsWith('acct:')&&parts.length>=4)
+    return {provider:parts[1],accountId:parts[2],kind:parts.slice(3).join(':'),value};
+  if(parts.length>=2)return {provider:parts[0],kind:parts.slice(1).join(':'),value};
+  return {lowest:true,value};
+}
+// Changer de fenêtre garde le compte épinglé : sinon l'icône rendrait la main à un autre compte
+// sans le dire, et le réglage d'à côté continuerait d'afficher l'ancien choix.
+function metricForWindow(current,provider,kind){
+  const m=parseMetric(current);
+  return m.accountId&&m.provider===provider?`acct:${provider}:${m.accountId}:${kind}`
+                                           :`${provider}:${kind}`;
+}
+
 // Épinglage compte par compte. Le popover de la barre des menus ne propose que les agrégats :
 // avec dix comptes possibles, une liste complète y serait illisible. Ici la place existe.
 function pinnedOptions(data,metric){
@@ -557,7 +575,13 @@ function pinnedOptions(data,metric){
   });
   return rows.length?`<div class="pin-list"><small>Épingler un compte précis</small>${rows.join('')}</div>`:'';
 }
-function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`,theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Barre des menus</h2><p>Ce que Status affiche en haut de l’écran, en permanence.</p></div></div><div class="settings">
+function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',cur=parseMetric(metric),
+  // Un segment de fenêtre reste allumé quand un compte est épinglé dessus : c'est toujours cette
+  // fenêtre qui pilote l'icône, seul le compte a été restreint. Sans cela la rangée paraissait
+  // vide dès qu'un compte était épinglé.
+  opt=(v,l)=>{const m=parseMetric(v);const on=m.system||m.lowest?metric===v:(cur.provider===m.provider&&cur.kind===m.kind);
+    const target=m.system||m.lowest?v:metricForWindow(metric,m.provider,m.kind);
+    return `<button class="seg ${on?'on':''}" onclick="send('setMenuBarMetric',{value:'${target}'})">${l}</button>`},theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Barre des menus</h2><p>Ce que Status affiche en haut de l’écran, en permanence.</p></div></div><div class="settings">
   <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Icônes système dans la barre des menus</strong><small><strong>Cliquez un nom pour afficher ou masquer son icône.</strong> Pastille pleine : elle est visible dans la barre. Chaque icône est indépendante ; forme, couleur et contenu de son panneau se règlent sur la même ligne (« Panneau »). Les flèches ← → donnent l’ordre d’affichage (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône dans la barre pour ouvrir son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
   <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:weekly-fable','Claude Fable')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</div>
   <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Forme et couleur de la jauge</strong><small>L’icône des consommations, celle qui accompagne le pourcentage. « Aucune » ne laisse que le texte. La couleur « auto » suit l’identité du fournisseur affiché — bleu OpenAI, violet Claude — ce qui indique de qui parle le chiffre ; une couleur choisie la remplace. Dans tous les cas, un quota en alerte passe en ambre puis en rouge.</small></div><div class="widget-config"><div class="wc-row"><span class="segmented wc-shapes">${GAUGE_SHAPES.map(([v,l])=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${l}</button>`).join('')}</span><span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${(p.menuBarIconColor||'auto')===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarIconColor',{value:'${c}'})"></button>`).join('')}</span></div></div></div>

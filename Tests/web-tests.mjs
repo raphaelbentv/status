@@ -114,10 +114,10 @@ section('provider — les deux colonnes partagent les mêmes rangées');
 const rowsOf = html => [...html.matchAll(/class="cell (c\d) (r\d)/g)].map(m => m[2]);
 const colsOf = html => [...new Set([...html.matchAll(/class="cell (c\d) /g)].map(m => m[1]))];
 const openaiHTML = menubar('provider')('openai', 'OpenAI', [{ provider: 'openai', connected: true, label: 'Boulot', windows: [
-  { windowId: 'seven_day', usedPercent: 42, resetsAt: Date.now() / 1000 + 90000 } ] }]);
+  { windowId: 'seven_day', usedPercent: 42, resetsAt: Date.now() / 1000 + 90000 } ] }], 'openai:weekly');
 const claudeHTML = menubar('provider')('claude', 'Claude', [{ provider: 'claude', cookieConfigured: true, orgId: 'org', label: 'Perso', windows: [
   { windowId: 'seven_day', usedPercent: 81, resetsAt: Date.now() / 1000 + 90000 },
-  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 } ] }]);
+  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 } ] }], 'claude:weekly');
 checkEqual(rowsOf(openaiHTML), rowsOf(claudeHTML),
   'mêmes rangées des deux côtés, sous-jauges ou non');
 checkEqual(colsOf(openaiHTML), ['c1'], 'OpenAI occupe la première colonne');
@@ -440,31 +440,92 @@ section('accountsOf / historyKey — la liste de comptes');
   check(settings2.includes(`acct:claude:${pro.accountId}:weekly`), 'chaque compte Claude est épinglable');
   check(!settings2.includes(`acct:openai:${boulot.accountId}`), 'un fournisseur à compte unique n’encombre pas la liste');
 
+  section('basculement rapide depuis la barre des menus');
+  {
+    const pinPro = `acct:claude:${pro.accountId}:weekly`;
+    checkEqual(menubar(`parseMetric('${pinPro}')`).accountId, pro.accountId, 'une métrique épinglée se relit');
+    checkEqual(menubar(`parseMetric('claude:weekly')`).accountId, undefined, 'un agrégat ne porte pas de compte');
+    checkEqual(menubar(`parseMetric('lowest')`).lowest, true, '« lowest » est reconnu');
+    checkEqual(menubar(`parseMetric('system:cpu')`).system, true, 'les métriques système aussi');
+
+    // Le piège : changer de fenêtre ne doit pas rendre l'icône à un autre compte en silence.
+    checkEqual(menubar(`metricForWindow('${pinPro}','claude','session')`),
+               `acct:claude:${pro.accountId}:session`, 'changer de fenêtre garde le compte épinglé');
+    checkEqual(menubar(`metricForWindow('${pinPro}','openai','weekly')`), 'openai:weekly',
+               'chez un autre fournisseur, on repart de l’agrégat');
+    checkEqual(menubar(`metricForWindow('claude:weekly','claude','session')`), 'claude:session',
+               'sans épinglage, l’agrégat reste l’agrégat');
+    checkEqual(dashboard(`metricForWindow('${pinPro}','claude','session')`),
+               `acct:claude:${pro.accountId}:session`, 'même grammaire côté dashboard');
+
+    // Le popover doit montrer le compte épinglé, sinon le geste n'a aucun retour à l'écran.
+    checkEqual(menubar(`pickAccount(${JSON.stringify([perso, pro])},'${pinPro}')`).label, 'Pro',
+               'la colonne suit le compte épinglé');
+    checkEqual(menubar(`pickAccount(${JSON.stringify([perso, pro])},'acct:claude:inconnu:weekly')`).label, 'Pro',
+               'un compte épinglé disparu retombe sur le plus contraint');
+    checkEqual(menubar(`pickAccount(${JSON.stringify([pro, perso])},'claude:weekly')`).label, 'Pro',
+               'sans épinglage, le plus contraint');
+
+    // La rangée de bascule elle-même : présente quand il y a un choix, absente sinon.
+    const all = JSON.stringify([boulot, perso, pro]);
+    const switcher = menubar(`accountSwitcher(${all},'claude:weekly')`);
+    check(switcher.includes('>tous<'), 'un retour à l’agrégat est proposé');
+    check(switcher.includes('>Perso<') && switcher.includes('>Pro<'), 'les deux comptes Claude y sont');
+    checkEqual(menubar(`chipLabel("contact@venio.paris's Organization")`), 'contact',
+               'un libellé auto se réduit à ce qui identifie');
+    checkEqual(menubar(`chipLabel('Pro')`), 'Pro', 'un nom court est laissé tel quel');
+    checkEqual(menubar(`chipLabel('Organisation')`), 'Organisation', 'douze caractères passent entiers');
+    checkEqual(menubar(`chipLabel('Organisationnelle')`), 'Organisatio…', 'au-delà, on tronque');
+    check(menubar(`accountSwitcher(${all},'claude:weekly')`).includes('title="Perso"'),
+          'le nom complet reste dans l’infobulle');
+    check(!switcher.includes('Boulot'), 'et pas ceux d’un autre fournisseur');
+    check((switcher.match(/class="seg on"/g) || []).length === 1, 'un seul choix est marqué');
+    check(menubar(`accountSwitcher(${all},'openai:weekly')`) === '',
+          'un fournisseur à compte unique n’affiche aucune rangée');
+    check(menubar(`accountSwitcher(${all},'lowest')`) === '', '« lowest » non plus');
+    check(menubar(`accountSwitcher(${all},'system:cpu')`) === '', 'les métriques système non plus');
+    // Basculer garde la fenêtre choisie : on change de compte, pas de jauge.
+    check(menubar(`accountSwitcher(${all},'claude:session')`).includes(`acct:claude:${pro.accountId}:session`),
+          'la bascule conserve la fenêtre en cours');
+
+    // Réglages : la rangée ne doit pas paraître vide dès qu'un compte est épinglé.
+    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })})`);
+    // La liste d'épinglage plus bas allume elle aussi un segment : on ne compte que la rangée
+    // des fenêtres, qui précède « pin-list ».
+    const windowRow = pinned.split('pin-list')[0];
+    const segs = windowRow.split('<button class="seg').filter(b => b.startsWith(' on'));
+    check(segs.length === 1, 'exactement un segment de fenêtre reste allumé');
+    check(segs[0].includes('Claude sem.'), 'et c’est bien la semaine Claude');
+    const onFor = id => pinned.includes(`class="seg on" onclick="send('setMenuBarMetric',{value:'acct:claude:${id}:weekly'})"`);
+    check(onFor(pro.accountId), 'le compte épinglé est marqué dans la liste');
+    check(!onFor(perso.accountId), 'et pas l’autre compte');
+  }
+
   section('popover — le compte le plus contraint, nommé');
-  const picked = menubar(`pickAccount(${JSON.stringify([perso, pro])})`);
+  const picked = menubar(`pickAccount(${JSON.stringify([perso, pro])},'claude:weekly')`);
   checkEqual(picked?.label, 'Pro', 'le popover retient le compte le plus contraint');
-  const block = menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])})`);
+  const block = menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])},'claude:weekly')`);
   check(block.includes('name-sub">Pro'), 'et le nomme, puisqu’il y en a plusieurs');
-  check(!menubar(`provider('claude','Claude',${JSON.stringify([perso])})`).includes('name-sub'),
+  check(!menubar(`provider('claude','Claude',${JSON.stringify([perso])},'claude:weekly')`).includes('name-sub'),
         'compte unique : pas de nom redondant');
 
   section('aucun compte — l’app le dit au lieu de rester muette');
   const empty = JSON.stringify({ accounts: [], history: [], updatedAt: 0, accountLimit: 5 });
   check(dashboard(`overview(${empty})`).includes('Ajoutez un compte'), 'la vue Volumes invite à en ajouter un');
   check(dashboard(`connectionsView(${empty})`).includes('Aucun compte'), 'la vue Connexions le dit aussi');
-  check(menubar(`provider('openai','OpenAI',[])`).includes("send('addAccount',{provider:'openai'})"), 'le popover propose l’ajout');
+  check(menubar(`provider('openai','OpenAI',[],'openai:weekly')`).includes("send('addAccount',{provider:'openai'})"), 'le popover propose l’ajout');
 
   section('compte non connecté — le bouton nomme une action réelle');
   {
     // Un gabarit imbriqué peut émettre « ${action} » littéralement au lieu de l'interpoler : le
     // bouton reste visible, et n'appelle rien.
     const sansCookie = { ...claudeAccount('a', 'Perso', []), cookieConfigured: false, orgId: '' };
-    const html = menubar(`provider('claude','Claude',${JSON.stringify([sansCookie])})`);
+    const html = menubar(`provider('claude','Claude',${JSON.stringify([sansCookie])},'claude:weekly')`);
     check(!html.includes('${'), 'aucune interpolation non résolue dans le HTML émis');
     check(html.includes(`send('configureClaudeCookie',{accountId:'${sansCookie.accountId}'})`),
           'le bouton cible l’action et le compte');
     const openaiVierge = { ...openAIAccount(3, 'Boulot', []), connected: false };
-    check(menubar(`provider('openai','OpenAI',${JSON.stringify([openaiVierge])})`).includes(`send('loginOpenAI',{accountId:'${openaiVierge.accountId}'})`),
+    check(menubar(`provider('openai','OpenAI',${JSON.stringify([openaiVierge])},'openai:weekly')`).includes(`send('loginOpenAI',{accountId:'${openaiVierge.accountId}'})`),
           'côté OpenAI aussi');
   }
 }
