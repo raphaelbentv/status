@@ -66,6 +66,7 @@ BOOL TMMaxUsedPercent(NSArray<NSArray *> *windowArrays, BOOL (^predicate)(NSDict
 #pragma mark - Payloads de compte
 NSDictionary *TMDisconnectedOpenAIAccount(NSString *error);
 NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateResponse, BOOL connecting, NSString *error);
+// Compte Claude sans source exploitable : ni cookie, ni organisation résolue.
 NSDictionary *TMEmptyClaudeAccount(void);
 
 #pragma mark - Historique local

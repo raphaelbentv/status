@@ -171,7 +171,7 @@ function provider(id,name,accounts){
   };
   // ⟳ : la source directe répond, badge discret. classe .live pour la couleur verte.
   const noteClass=account?.liveSource?'live':(account?.stale?'stale':'');
-  const noteAndAction=(primaryValue)=>`<div class="account-note ${noteClass}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${account?'${action}':'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?actionLabel:'ajouter un compte'}</button>`}`;
+  const noteAndAction=(primaryValue)=>`<div class="account-note ${noteClass}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${account?action:'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?actionLabel:'ajouter un compte'}</button>`}`;
   const col=id==='openai'?'c1':'c2',ink=id==='openai'?'var(--blue)':'var(--purple)';
   // Les sept rangées, dans l'ordre, toujours toutes émises : une case vide tient la place de la
   // donnée absente, et c'est elle qui garde les deux colonnes en face l'une de l'autre.

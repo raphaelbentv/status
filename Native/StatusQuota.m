@@ -112,10 +112,8 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
 
 NSDictionary *TMEmptyClaudeAccount(void) {
     return @{
-        @"cliAvailable": @NO, @"authenticated": @NO, @"authChecking": @NO,
-        @"trackingInstalled": @NO, @"trackingConfigured": @NO, @"snapshotPresent": @NO,
-        @"windows": @[], @"capturedAt": @0, @"subscriptionType": @"", @"fableConfigured": @NO,
-        @"liveSource": @NO, @"error": @""
+        @"windows": @[], @"capturedAt": @0, @"stale": @NO, @"liveSource": @NO,
+        @"cookieConfigured": @NO, @"orgId": @"", @"error": @""
     };
 }
 

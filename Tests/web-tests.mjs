@@ -403,6 +403,13 @@ section('accountsOf / historyKey — la liste de comptes');
   const full = JSON.stringify({ ...data, accounts: [perso, pro, claudeAccount('c', 'Tiers', []), { ...claudeAccount('c', 'Quatre', []), accountId: uuid(4) }, { ...claudeAccount('c', 'Cinq', []), accountId: uuid(5) }] });
   check(dashboard(`connectionsView(${full})`).includes('disabled'), 'au plafond, le bouton d’ajout est désactivé');
 
+  section('aucune interpolation non résolue dans les vues du dashboard');
+  ['overview', 'connectionsView'].forEach(view => {
+    check(!dashboard(`${view}(${json})`).includes('${'), `${view} rend du HTML complet`);
+  });
+  check(!dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })})`).includes('${'),
+        'settingsView rend du HTML complet');
+
   section('settingsView — épinglage par compte');
   const settings2 = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })})`);
   check(settings2.includes(`acct:claude:${pro.accountId}:weekly`), 'chaque compte Claude est épinglable');
@@ -420,7 +427,21 @@ section('accountsOf / historyKey — la liste de comptes');
   const empty = JSON.stringify({ accounts: [], history: [], updatedAt: 0, accountLimit: 5 });
   check(dashboard(`overview(${empty})`).includes('Ajoutez un compte'), 'la vue Volumes invite à en ajouter un');
   check(dashboard(`connectionsView(${empty})`).includes('Aucun compte'), 'la vue Connexions le dit aussi');
-  check(menubar(`provider('openai','OpenAI',[])`).includes('ajouter un compte'), 'le popover propose l’ajout');
+  check(menubar(`provider('openai','OpenAI',[])`).includes("send('addAccount',{provider:'openai'})"), 'le popover propose l’ajout');
+
+  section('compte non connecté — le bouton nomme une action réelle');
+  {
+    // Un gabarit imbriqué peut émettre « ${action} » littéralement au lieu de l'interpoler : le
+    // bouton reste visible, et n'appelle rien.
+    const sansCookie = { ...claudeAccount('a', 'Perso', []), cookieConfigured: false, orgId: '' };
+    const html = menubar(`provider('claude','Claude',${JSON.stringify([sansCookie])})`);
+    check(!html.includes('${'), 'aucune interpolation non résolue dans le HTML émis');
+    check(html.includes(`send('configureClaudeCookie',{accountId:'${sansCookie.accountId}'})`),
+          'le bouton cible l’action et le compte');
+    const openaiVierge = { ...openAIAccount(3, 'Boulot', []), connected: false };
+    check(menubar(`provider('openai','OpenAI',${JSON.stringify([openaiVierge])})`).includes(`send('loginOpenAI',{accountId:'${openaiVierge.accountId}'})`),
+          'côté OpenAI aussi');
+  }
 }
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
