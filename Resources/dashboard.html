@@ -62,6 +62,8 @@
   .account-block+.account-block{border-top:1px solid var(--hair);margin-top:16px;padding-top:16px}
   .account-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
   .account-block-head strong{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .provider-manage{margin-left:8px;border:1px solid var(--hair-strong);border-radius:var(--radius);background:var(--soft);padding:2px 7px;cursor:pointer;font-size:9px;color:var(--muted)}
+  .provider-manage:hover{background:var(--soft-hover);color:var(--text)}
   .account-add{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)}
   .account-add small{color:var(--muted);font-size:9.5px}
   .pin-list{margin-top:14px;padding-top:12px;border-top:1px solid var(--hair)}
@@ -459,13 +461,16 @@ function providerCostTotal(id){
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
 function accountBlock(account,history){
   const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
-  const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`;
+  const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':`Non connecté.<br><button class="account-action" onclick="goToView('connections')">Ouvrir Connexions</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
   return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}<div class="quota-grid">${cards}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 function providerBlock(provider,accounts,history){
-  const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name} — voir Connexions.</div>`;
-  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
+  const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name}.<br><button class="account-action" onclick="goToView('connections')">Ajouter un compte</button></div>`;
+  // Le fournisseur annonce combien de comptes il porte et ouvre l'endroit où on en ajoute : sans
+  // ce chemin, « voir Connexions » n'était qu'une phrase, et l'ajout restait à découvrir.
+  const manage=`<button class="provider-manage" onclick="goToView('connections')" title="Gérer les comptes ${provider.name}">gérer</button>`;
+  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
 }
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur
 // une semaine glissante, à partir de l'historique horodaté. OpenAI y figure au même titre que
@@ -945,12 +950,15 @@ function mergeMetricsDelta(state,payload){
 window.StatusApp={update(data){appData=data;render()},updateMetrics(data){const m=mergeMetricsDelta(metricsData,data);if(m){metricsData=m;renderMonitor()}}};
 // Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
 // encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.
-document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>{
-  currentView=button.dataset.view;
+function goToView(view){
+  currentView=view;
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));
   render();renderMonitor();
-});
+}
+// Exposé sur window : le HTML généré porte des attributs onclick, qui ne voient que le global.
+window.goToView=goToView;
+document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>goToView(button.dataset.view));
 // The countdowns must keep ticking between the 5-minute polls, otherwise "dans 2 h 14" quietly
 // becomes a lie. Re-rendering from the last payload is cheap and needs no native round-trip.
 setInterval(()=>{if(appData)render()},30000);

@@ -395,6 +395,17 @@ section('accountsOf / historyKey — la liste de comptes');
   check(new Set(series.map(s => s.key)).size === 3, 'trois clés distinctes');
   check(series.every(s => !String(s.color).includes('--chart-c')), 'aucune couleur ne pointe un jeton inexistant');
 
+  section('depuis Volumes, Connexions est atteignable');
+  {
+    // « voir Connexions » n'était qu'une phrase : rien ne menait à l'endroit où l'on ajoute un
+    // compte, et l'ajout restait à découvrir dans la barre latérale.
+    const view = dashboard(`overview(${json})`);
+    check(view.includes("goToView('connections')"), 'la vue Volumes ouvre Connexions');
+    const sansCompte = JSON.stringify({ ...data, accounts: [] });
+    check(dashboard(`overview(${sansCompte})`).includes("goToView('connections')"),
+          'y compris quand aucun compte n’existe');
+  }
+
   section('weeklyChart — le graphe traverse la voie des séries');
   {
     // Le graphe n'est rendu que s'il y a deux points : sans ce test, weeklySeriesFor et la
