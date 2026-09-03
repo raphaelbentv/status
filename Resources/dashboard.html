@@ -58,6 +58,16 @@
   .connection-panel:nth-child(2) h3{color:var(--purple)}
   .connection-panel>p{color:var(--muted);margin:0 0 20px;font-size:11.5px}
   .quota-block{border-top:1px solid var(--hair);padding-top:18px}
+  /* Un compte dans la vue Volumes : séparé du suivant, mais sans le poids d'une carte imbriquée. */
+  .account-block+.account-block{border-top:1px solid var(--hair);margin-top:16px;padding-top:16px}
+  .account-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+  .account-block-head strong{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .account-add{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)}
+  .account-add small{color:var(--muted);font-size:9.5px}
+  .pin-list{margin-top:14px;padding-top:12px;border-top:1px solid var(--hair)}
+  .pin-list>small{display:block;color:var(--muted);font-size:9.5px;margin-bottom:8px}
+  .pin-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .pin-name{font-size:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .account-row{display:flex;gap:10px;align-items:center;margin-bottom:15px}
   .account-copy{min-width:0;flex:1}.account-copy strong,.account-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .account-copy small{color:var(--muted);font-size:9.5px;margin-top:3px}
@@ -275,7 +285,7 @@ const countdown=timestamp=>{
   if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
   return `dans ${m} min`;
 };
-const isConnected=(id,account)=>id==='openai'?Boolean(account?.connected):Boolean(account?.authenticated||account?.trackingConfigured);
+const isConnected=(id,account)=>id==='openai'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
 // Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, qui garde sa
 // carte et son épinglage mais ne pilote aucun chiffre agrégé — en tête d'affiche, « 54 % » sans
@@ -284,6 +294,12 @@ const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
 const windowsFor=(providerId,account)=>{const windows=account?.windows||[];return providerId==='openai'?windows.filter(isWeekly):windows};
 const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
+// data.accounts est une liste de payloads, un par compte, déjà dans l'ordre d'affichage.
+const accountsOf=(data,providerId)=>(data?.accounts||[]).filter(a=>a.provider===providerId);
+const accountById=(data,id)=>(data?.accounts||[]).find(a=>a.accountId===id);
+// Clé d'historique d'une fenêtre : elle porte l'identifiant du compte, jamais son nom — renommer
+// un compte ne doit pas décrocher ses courbes.
+const historyKey=(account,w)=>`${account.provider}:${account.accountId}:${w.windowId||w.label}`;
 // Gardez ces couleurs synchronisées avec Resources/themes.css : le JS ne peut pas lire les
 // jetons d'un thème non actif, donc l'aperçu de chaque pastille est dupliqué ici à la main.
 // Doit rester synchronisée avec windowActionForEvent: dans Status.m — c'est la seule source
@@ -409,19 +425,10 @@ function forecastLine(key){
 const fmt1=(v,sym)=>v>=10?`${Math.round(v).toLocaleString('fr-FR')} ${sym}`:`${v.toFixed(2)} ${sym}`;
 const fmtUSD=v=>v==null?'':fmt1(v,'$');
 const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; return r?`${fmt1(v,'$')} · ${fmt1(v*r,'€')}`:fmt1(v,'$');};
-function windowCostValue(id,w){
-  const c=appData?.costs; if(!c||c.scanning)return null;
-  const wid=w.windowId||'';
-  if(id==='claude'&&wid==='five_hour')return {v:c.claude?.session,approx:false};
-  if(id==='claude'&&wid==='seven_day')return {v:c.claude?.weekly,approx:false};
-  if(id==='openai')return {v:c.codex?.weekly,approx:true};
-  return null;
-}
-function windowCost(id,w){
-  const r=windowCostValue(id,w); if(!r||r.v==null)return '';
-  return `<div class="cost"><span class="cost-amount">${r.approx?'~ ':''}${fmtDual(r.v)}</span><span class="cost-lbl">équivalent API · usage terminal</span></div>`;
-}
-function quotaCard(w,id,history){const value=used(w),key=`${id}:${w.windowId||w.label}`;return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}${windowCost(id,w)}</div>`}
+// Le coût équivalent API vient des logs locaux de `claude` et `codex`, qui ne portent aucune
+// identité de compte : il est à l'échelle de la machine. L'afficher sur chaque carte le ferait
+// compter plusieurs fois ; il reste donc au niveau du fournisseur, explicitement étiqueté.
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
@@ -447,23 +454,49 @@ function providerCostTotal(id){
   if(!d||d.total8d==null)return '';
   const unpriced=id==='openai'&&d.unpricedTokens>0?`<div class="cost-warn">~ ${Math.round(d.unpricedTokens/1e6)} M tokens de modèles sans tarif, non chiffrés</div>`:'';
   const title=tariffTitle(d.prices);
-  return `<div class="cost-total"><div class="cost-total-label">Équivalent API sur 8 jours${id==='openai'?' · approximatif':''}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(d.total8d)}</div>${unpriced}${modelBreakdown(d)}</div>`;
+  return `<div class="cost-total"><div class="cost-total-label">Équivalent API sur 8 jours · tous comptes${id==='openai'?' · approximatif':''}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(d.total8d)}</div>${unpriced}${modelBreakdown(d)}</div>`;
 }
-function providerBlock(provider,account,history){const windows=windowsFor(provider.id,account),connected=isConnected(provider.id,account),state=connected?(account?.error?'Attention':'Connecté'):'Non connecté',cards=windows.length?windows.map(w=>quotaCard(w,provider.id,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`,freshness=account?.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${state}</span></div>${freshness}<div class="quota-grid">${cards}</div>${providerCostTotal(provider.id)}${account?.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</section>`}
+// Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
+function accountBlock(account,history){
+  const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
+  const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':'Non connecté — voir Connexions.'}</div>`;
+  const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
+  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}<div class="quota-grid">${cards}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
+}
+function providerBlock(provider,accounts,history){
+  const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name} — voir Connexions.</div>`;
+  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
+}
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur
 // une semaine glissante, à partir de l'historique horodaté. OpenAI y figure au même titre que
 // Claude (feature 11), puisque l'historique stocke les deux.
-const WEEKLY_SERIES=[
-  {key:'claude:seven_day',label:'Claude semaine',color:'var(--purple)'},
-  {key:'claude:seven_day_scoped_fable',label:'Claude Fable',color:'var(--chart-b)'},
-  {key:'openai:codex-10080',label:'OpenAI semaine',color:'var(--blue)'},
-];
+// Une série par compte et par fenêtre hebdomadaire. Les clés en dur d'avant le multi-comptes ne
+// pouvaient nommer qu'un compte par fournisseur ; la couleur vient du fournisseur, nuancée par le
+// rang du compte pour que deux comptes Claude restent distinguables.
+// Les thèmes n'exposent que --chart-a et --chart-b : au-delà du premier compte, la couleur du
+// fournisseur est déclinée par rang plutôt que de pointer des jetons qui n'existent pas — une
+// variable absente donnerait une courbe invisible, sans rien signaler.
+const seriesColor=(providerId,rank)=>rank===0?providerColor(providerId)
+  :`color-mix(in oklab, ${providerColor(providerId)} ${Math.max(30,100-rank*22)}%, var(--chart-a))`;
+function weeklySeriesFor(data){
+  const out=[];
+  PROVIDERS.forEach(p=>{
+    accountsOf(data,p.id).forEach((account,rank)=>{
+      (account.windows||[]).filter(isWeekly).forEach(w=>{
+        const suffix=isScopedWeekly(w)?` ${w.label}`:' semaine';
+        out.push({key:historyKey(account,w),label:`${account.label}${suffix}`,
+                  color:isScopedWeekly(w)?'var(--chart-b)':seriesColor(p.id,rank)});
+      });
+    });
+  });
+  return out;
+}
 function weeklyChart(history){
   if(!history||history.length<2)return '';
   const now=Date.now()/1000, start=now-7*86400, W=920, H=150;
   const x=t=>(t-start)/(now-start)*W;
   const y=v=>H-(v/100)*H;
-  const series=WEEKLY_SERIES.map(s=>{
+  const series=weeklySeriesFor(appData).map(s=>{
     const pts=history.map(r=>({t:r.t,v:r.p?.[s.key]})).filter(p=>p.t>=start&&typeof p.v==='number');
     return {...s,pts};
   }).filter(s=>s.pts.length>1);
@@ -482,10 +515,43 @@ function weeklyChart(history){
     <svg class="wk-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${paths}</svg>
     <div class="wk-legend">${legend}</div></div>`;
 }
-function overview(data){const accounts={openai:data.accounts?.openai,claude:data.accounts?.claude},entries=[];PROVIDERS.forEach(p=>{windowsFor(p.id,accounts[p.id]).filter(w=>!isScopedWeekly(w)).forEach(w=>entries.push({provider:p.name,window:w,used:used(w)}))});entries.sort((a,b)=>b.used-a.used);const max=entries[0],heroValue=max?`${max.used}<span class="unit">%</span>`:'—',heroLabel=max?'consommation la plus élevée actuellement':'quotas en attente',heroDetail=max?`<strong>${max.provider}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Connectez OpenAI et Claude pour afficher les volumes consommés.',heroColor=max?.provider==='Claude'?'var(--purple)':'var(--blue)',backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accounts[p.id],data.history)).join('')}</div>${weeklyChart(data.history)}`}
+function overview(data){
+  const entries=[];
+  PROVIDERS.forEach(p=>accountsOf(data,p.id).forEach(account=>{
+    windowsFor(p.id,account).filter(w=>!isScopedWeekly(w)).forEach(w=>entries.push({account,window:w,used:used(w)}));
+  }));
+  entries.sort((a,b)=>b.used-a.used);
+  const max=entries[0];
+  const heroValue=max?`${max.used}<span class="unit">%</span>`:'—';
+  const heroLabel=max?'consommation la plus élevée actuellement':'quotas en attente';
+  // Avec plusieurs comptes, nommer le fournisseur ne suffit plus : « Claude · semaine à 72 % »
+  // ne dit pas de quel compte il s'agit, donc ne dit pas quoi faire.
+  const heroDetail=max?`<strong>${esc(max.account.label)}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Ajoutez un compte dans Connexions pour afficher les volumes consommés.';
+  const heroColor=max?providerColor(max.account.provider):'var(--blue)';
+  const backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';
+  return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,accountsOf(data,p.id),data.history)).join('')}</div>${weeklyChart(data.history)}`;
+}
+// Épinglage compte par compte. Le popover de la barre des menus ne propose que les agrégats :
+// avec dix comptes possibles, une liste complète y serait illisible. Ici la place existe.
+function pinnedOptions(data,metric){
+  const rows=[];
+  PROVIDERS.forEach(p=>{
+    const accounts=accountsOf(data,p.id);
+    if(accounts.length<2)return;  // un seul compte : l'agrégat dit déjà exactement la même chose
+    accounts.forEach(account=>{
+      const kinds=p.id==='openai'?[['weekly','sem.']]:[['weekly','sem.'],['session','5 h'],['weekly-fable','Fable']];
+      const buttons=kinds.map(([kind,label])=>{
+        const value=`acct:${account.provider}:${account.accountId}:${kind}`;
+        return `<button class="seg ${metric===value?'on':''}" onclick="send('setMenuBarMetric',{value:'${value}'})">${label}</button>`;
+      }).join('');
+      rows.push(`<div class="pin-row"><span class="pin-name">${esc(account.label)}</span><div class="segmented">${buttons}</div></div>`);
+    });
+  });
+  return rows.length?`<div class="pin-list"><small>Épingler un compte précis</small>${rows.join('')}</div>`:'';
+}
 function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',opt=(v,l)=>`<button class="seg ${metric===v?'on':''}" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`,theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Barre des menus</h2><p>Ce que Status affiche en haut de l’écran, en permanence.</p></div></div><div class="settings">
   <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Icônes système dans la barre des menus</strong><small><strong>Cliquez un nom pour afficher ou masquer son icône.</strong> Pastille pleine : elle est visible dans la barre. Chaque icône est indépendante ; forme, couleur et contenu de son panneau se règlent sur la même ligne (« Panneau »). Les flèches ← → donnent l’ordre d’affichage (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône dans la barre pour ouvrir son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></div>
-  <div class="setting"><div class="setting-copy"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. « La plus élevée » suit la fenêtre la plus contrainte du moment, quel que soit le fournisseur. Les deux dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:weekly-fable','Claude Fable')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div></div>
+  <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:weekly-fable','Claude Fable')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</div>
   <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Forme et couleur de la jauge</strong><small>L’icône des consommations, celle qui accompagne le pourcentage. « Aucune » ne laisse que le texte. La couleur « auto » suit l’identité du fournisseur affiché — bleu OpenAI, violet Claude — ce qui indique de qui parle le chiffre ; une couleur choisie la remplace. Dans tous les cas, un quota en alerte passe en ambre puis en rouge.</small></div><div class="widget-config"><div class="wc-row"><span class="segmented wc-shapes">${GAUGE_SHAPES.map(([v,l])=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${l}</button>`).join('')}</span><span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${(p.menuBarIconColor||'auto')===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarIconColor',{value:'${c}'})"></button>`).join('')}</span></div></div></div>
 </div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <div class="setting"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></div>
@@ -507,8 +573,33 @@ function settingsView(data){const p=data.prefs||{},metric=p.menuBarMetric||'clau
   <div class="setting" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Alertes</strong><small>Notifications : quota qui se remplit (puis rappel à 95 %), semaine qui repart de zéro, et machine hors de son régime normal. Chaque alerte s’active et se règle séparément ; aucune ne se répète tant que la situation n’a pas nettement changé.</small></div><div class="widget-config">${alertRows(p)}</div></div>
   <div class="setting"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></div>
 </div>`}
-function quotaPanel(account){if(!account)return '';const name=account.email||'Compte ChatGPT',plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session gérée par Codex',action=account.connected?`<button class="account-action" onclick="send('logoutOpenAI')">Déconnecter</button>`:`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI')">${account.connecting?'Connexion…':'Se connecter'}</button>`,windows=windowsFor('openai',account).map(w=>quotaCard(w,'openai',appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer vos quotas réels.'}</div>`;return `<div class="quota-block" style="--provider:var(--blue)"><div class="account-row"><div class="account-copy"><strong>${esc(name)}</strong><small>${esc(plan)} · OpenAI officiel</small></div><div class="account-actions">${action}</div></div><div class="quota-grid">${windows}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
-function claudePanel(account){if(!account)return '';const busy=account.actionRunning||account.authChecking;let subtitle='',actions='',content='';const windows=(account.windows||[]).map(w=>quotaCard(w,'claude',appData?.history)).join('');if(account.trackingConfigured){subtitle=`Suivi actif${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`;actions=`${!account.cliAvailable?`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`:!account.authenticated?`<button class="account-action primary" onclick="send('loginClaude')">Connecter</button>`:''}<button class="account-action" ${busy?'disabled':''} onclick="send('uninstallClaudeTracking')">Désactiver</button>`;content=windows||`<div class="quota-empty">Le suivi est prêt. Lancez Claude Code et envoyez un message pour recevoir les compteurs.<br><button class="account-action" onclick="send('openClaudeTerminal')">Ouvrir Claude Code</button></div>`}else if(!account.cliAvailable){subtitle='CLI non détectée';actions=`<button class="account-action primary" onclick="send('installClaudeCLI')">Installer</button>`;content=`<div class="quota-empty">Installez Claude Code depuis la documentation officielle.</div>`}else if(!account.authenticated){subtitle='Claude Code détecté · non connecté';actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('loginClaude')">Connecter</button>`;content=`<div class="quota-empty">La connexion s’effectue dans Terminal. Status ne capture aucun secret.</div>`}else{subtitle=`Connecté${account.subscriptionType?` · ${esc(account.subscriptionType)}`:''}`;actions=`<button class="account-action primary" ${busy?'disabled':''} onclick="send('installClaudeTracking')">Activer le suivi</button>`;content=`<div class="quota-empty">Activez le collecteur status line pour recevoir les fenêtres 5 h et 7 jours.</div>`}actions+=`<button class="account-action" onclick="send('configureClaudeFableCookie')" title="Quotas en direct + jauge Fable (avancé, non officiel)">${account.fableConfigured?'direct ✓':'direct'}</button>`;return `<div class="quota-block" style="--provider:var(--purple)"><div class="account-row"><div class="account-copy"><strong>Claude Code</strong><small>${subtitle}</small></div><div class="account-actions">${actions}</div></div><div class="quota-grid">${content}</div>${account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la status line ne s’exécute que pendant une session « claude » en Terminal. Activez « direct » pour une lecture live toutes les 5 min.</div>`:''}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`}
+// Panneau d'un compte OpenAI. Le bouton « Déconnecter » ne touche plus que la session que Status
+// détient pour ce compte : chaque compte a son propre CODEX_HOME.
+function openAIPanel(account){
+  const name=account.email||account.label||'Compte ChatGPT';
+  const plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session propre à Status';
+  const action=account.connected
+    ?`<button class="account-action" onclick="send('logoutOpenAI',{accountId:'${account.accountId}'})">Déconnecter</button>`
+    :`<button class="account-action primary" ${account.connecting?'disabled':''} onclick="send('loginOpenAI',{accountId:'${account.accountId}'})">${account.connecting?'Connexion…':'Se connecter'}</button>`;
+  const windows=windowsFor('openai',account).map(w=>quotaCard(w,account,appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucune fenêtre disponible pour ce compte.':'Connectez ChatGPT pour récupérer les quotas de ce compte.'}</div>`;
+  return accountPanel(account,esc(name),`${esc(plan)} · OpenAI officiel`,action,windows,'');
+}
+// Panneau d'un compte Claude. Une seule source : le cookie de session claude.ai. Sans lui, rien
+// n'est lisible — d'où un panneau qui ne propose que ça.
+function claudePanel(account){
+  const action=`<button class="account-action ${account.cookieConfigured?'':'primary'}" onclick="send('configureClaudeCookie',{accountId:'${account.accountId}'})">${account.cookieConfigured?'Recoller le cookie':'Coller le cookie'}</button>`;
+  const subtitle=account.cookieConfigured
+    ?(account.orgId?`Session active${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`:'Cookie posé · organisation à résoudre')
+    :'Aucun cookie — quotas indisponibles';
+  const windows=(account.windows||[]).map(w=>quotaCard(w,account,appData?.history)).join('')||`<div class="quota-empty">${account.cookieConfigured?'Aucune fenêtre disponible pour ce compte.':'Collez le cookie de session claude.ai de ce compte pour lire ses quotas.'}</div>`;
+  const stale=account.stale?`<div class="quota-stale">Jauges figées depuis ${ageLabel(account.capturedAt)} : la session claude.ai de ce compte ne répond plus. Recollez son cookie.</div>`:'';
+  return accountPanel(account,esc(account.label),subtitle,action,windows,stale);
+}
+// Enveloppe commune : nom, sous-titre, actions du compte (renommer, supprimer) et ses fenêtres.
+function accountPanel(account,name,subtitle,action,windows,extra){
+  const common=`<button class="account-action" onclick="send('renameAccount',{accountId:'${account.accountId}'})" title="Renommer ce compte dans Status">Renommer</button><button class="account-action" onclick="send('removeAccount',{accountId:'${account.accountId}'})" title="Retirer ce compte de Status">Retirer</button>`;
+  return `<div class="quota-block" style="--provider:${providerColor(account.provider)}"><div class="account-row"><div class="account-copy"><strong>${name}</strong><small>${esc(subtitle)}</small></div><div class="account-actions">${action}${common}</div></div><div class="quota-grid">${windows}</div>${extra}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
+}
 // Écrans (feature luminosité). Un curseur par écran pilotable, indépendant des autres — pas de
 // mode « lié » (voir design). L'écriture n'a lieu qu'au relâchement (« change »), pas à chaque
 // frame du glisser (« input » mettrait à jour l'affichage local seulement, sans spammer le natif).
@@ -525,8 +616,32 @@ function displaysView(data){
   const cards=displays.length?displays.map(displayCard).join(''):'<div class="quota-empty">Aucun écran détecté.</div>';
   return `<div class="toolbar"><h1>Écrans</h1></div><div class="section-head"><div><h2>Luminosité</h2><p>Un curseur par écran détecté. Un moniteur externe qui ne répond pas au DDC/CI reste listé, sans curseur actionnable.</p></div></div><div class="display-grid">${cards}</div>`;
 }
-function connectionsView(data){return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Identifiants gérés par les outils officiels</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Status lit uniquement les compteurs autorisés et ne copie jamais vos jetons OAuth.</p></div></div><div class="connections"><article class="connection-panel"><h3>OpenAI</h3><p>Quotas ChatGPT via le serveur local Codex.</p>${quotaPanel(data.accounts?.openai)}</article><article class="connection-panel"><h3>Claude</h3><p>Quotas Claude via la status line officielle de Claude Code.</p>${claudePanel(data.accounts?.claude)}</article></div>`}
-function render(){if(!appData)return;document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';document.querySelector('#overview').innerHTML=overview(appData);document.querySelector('#connections').innerHTML=connectionsView(appData);document.querySelector('#displays').innerHTML=displaysView(appData);document.querySelector('#settings').innerHTML=settingsView(appData);document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));const oa=appData.accounts?.openai,cl=appData.accounts?.claude,errors=Boolean(oa?.error||cl?.error),connected=Boolean(oa?.connected||cl?.authenticated);document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';document.querySelector('#stateDot').className=errors?'warn':connected?'live':''}
+function connectionsView(data){
+  const limit=data.accountLimit||5;
+  const section=(provider,note,panel)=>{
+    const accounts=accountsOf(data,provider.id);
+    const panels=accounts.map(panel).join('')||`<div class="quota-empty">Aucun compte ${provider.name}.</div>`;
+    const full=accounts.length>=limit;
+    const add=`<button class="account-action primary" ${full?'disabled':''} onclick="send('addAccount',{provider:'${provider.id}'})" title="${full?`Maximum de ${limit} comptes atteint`:'Ajouter un compte'}">Ajouter un compte</button>`;
+    return `<article class="connection-panel"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
+  };
+  return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Quotas ChatGPT via un serveur Codex local par compte.',openAIPanel)}${section(PROVIDERS[1],'Quotas Claude lus sur claude.ai avec le cookie de session du compte (source non officielle).',claudePanel)}</div>`;
+}
+function render(){
+  if(!appData)return;
+  document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';
+  document.querySelector('#overview').innerHTML=overview(appData);
+  document.querySelector('#connections').innerHTML=connectionsView(appData);
+  document.querySelector('#displays').innerHTML=displaysView(appData);
+  document.querySelector('#settings').innerHTML=settingsView(appData);
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));
+  const accounts=appData.accounts||[];
+  const errors=accounts.some(a=>a.error);
+  const connected=accounts.some(a=>isConnected(a.provider,a));
+  document.querySelector('#stateText').textContent=errors?'Attention requise':connected?'Connecté':'Non connecté';
+  document.querySelector('#stateDot').className=errors?'warn':connected?'live':'';
+}
 // ─── Moniteur système ───────────────────────────────────────────────────────
 // Flux séparé des quotas : le natif pousse un snapshot par seconde quand la fenêtre est visible.
 // Cette vue a son propre chemin de rendu — re-render() global à 1 Hz reconstruirait trois vues

@@ -9,41 +9,55 @@ facturée à l'API.
 | Fournisseur | Fenêtres affichées | Source |
 |---|---|---|
 | OpenAI / ChatGPT | Semaine | Codex app-server local (JSON-RPC, officiel) |
-| Claude | 5 h, semaine, par modèle (Fable) | Status line Claude Code (officiel) **ou** endpoint `/usage` claude.ai (non officiel, en direct) |
+| Claude | 5 h, semaine, par modèle (Fable) | Endpoint `/usage` de claude.ai (non officiel) |
 
 OpenAI n'expose plus de fenêtre 5 h : seule la jauge hebdomadaire est affichée.
 
 Le suivi de la **consommation API facturée** (tokens, coûts, clés admin) a été entièrement retiré :
 l'app ne traite plus que les quotas d'abonnement.
 
-## Les deux sources Claude, et pourquoi
+## Plusieurs comptes par fournisseur
 
-C'est le point le moins évident du projet.
+Status suit jusqu'à **cinq comptes par fournisseur**, tous affichés en même temps. Chacun a son
+identité, ses jauges, son historique et ses alertes.
 
-**Status line (par défaut, officielle).** Claude Code transmet un objet `rate_limits` aux scripts de
-status line. C'est documenté et stable, mais le script **ne s'exécute que lorsqu'une session `claude`
-en Terminal répond**. Si vous travaillez surtout dans Claude Code Desktop, les jauges se figent —
-observé en pratique : 7 h sans mise à jour. L'app ne peut pas forcer ce rafraîchissement, et
-déclencher une requête Claude uniquement pour rafraîchir une jauge consommerait du quota.
+**OpenAI.** Chaque compte a son propre `CODEX_HOME`, sous
+`~/Library/Application Support/Status/codex/<compte>`. Les comptes sont donc étanches entre eux, et
+se déconnecter dans Status **ne déconnecte pas** Codex ni l'app ChatGPT sur ce Mac. En contrepartie,
+il faut se connecter une fois par compte depuis Status.
 
-**Endpoint `/usage` (optionnel, non officiel).** `GET /api/organizations/{org}/usage` sur claude.ai
-renvoie les trois fenêtres en direct à chaque appel. Il est **non documenté**, peut casser sans
-préavis, et exige un cookie de session — équivalent à un accès complet au compte.
+**Claude.** Chaque compte a son propre cookie de session claude.ai et sa propre session WebKit
+isolée (un `WKWebsiteDataStore` par compte). Cette isolation n'est pas cosmétique : les cookies de
+claude.ai portent les mêmes noms sur le même domaine, et un magasin partagé afficherait pour un
+compte les chiffres d'un autre — des chiffres plausibles, silencieux et faux.
 
-Quand le cookie est configuré, cette source remplace la status line pour toutes les fenêtres et
-l'app affiche « ⟳ en direct ». Sinon elle retombe sur la status line et signale l'ancienneté
-(« ⚠ figé depuis … »). Une fenêtre dont l'heure de reset est passée est écartée plutôt qu'affichée
-avec un pourcentage périmé.
+## La source Claude, et ce qu'elle coûte
 
-Voir [`docs/quota-auth-research.md`](docs/quota-auth-research.md) § 6 pour le détail de cet arbitrage.
+Les quotas Claude sont lus sur `GET /api/organizations/{org}/usage`, avec la session du compte.
+Cet endpoint est **non documenté**, peut casser sans préavis, et exige un cookie de session —
+équivalent à un accès complet au compte. Le cookie est conservé dans le Trousseau de ce Mac, n'est
+envoyé qu'à claude.ai, et se périme à la prochaine déconnexion.
+
+C'est la seule source. Les versions précédentes retombaient sur la status line de Claude Code
+quand aucun cookie n'était configuré ; cette voie a été retirée avec le multi-comptes, car elle
+n'écrit qu'un seul `quota-snapshot.json`, accroché à l'installation locale de `claude` : elle ne
+peut refléter qu'un compte, celui auquel la CLI est connectée. La conserver pour ce seul compte
+aurait produit deux natures de comptes, deux modes de fraîcheur et deux jeux de bugs.
+
+Conséquence à assumer : **un cookie expiré n'éteint pas seulement le direct, il éteint le compte.**
+Celui-ci affiche alors son erreur et ses dernières fenêtres connues, et rien de plus. Le remède est
+de recoller son cookie depuis Connexions.
+
+Voir [`docs/quota-auth-research.md`](docs/quota-auth-research.md) § 6 pour l'historique de cet
+arbitrage, et [`docs/superpowers/specs/2026-09-03-multi-comptes-design.md`](docs/superpowers/specs/2026-09-03-multi-comptes-design.md)
+pour la conception du multi-comptes.
 
 ## Prérequis
 
 - macOS 14 ou plus récent
 - **OpenAI** : Codex CLI (fourni par l'app ChatGPT, ou `codex` dans le `PATH`)
-- **Claude** : Claude Code (`claude`), détecté via le `PATH` d'un shell de login — les installations
-  par nvm/volta/asdf sont donc trouvées
-- **Python 3** : requis par le collecteur de status line
+- **Claude** : un cookie de session claude.ai par compte — aucune installation requise, la CLI
+  `claude` n'est plus utilisée
 
 ## Signature stable (recommandé)
 
@@ -109,8 +123,8 @@ bloquera au premier lancement. Procédure :
    clavier), et refaites les connexions OpenAI/Claude — les identifiants ne voyagent pas avec
    l'app, c'est voulu (ils vivent dans le Trousseau).
 
-Les prérequis (Codex CLI, Claude Code, Python 3) s'appliquent sur chaque machine pour les
-quotas ; le Moniteur système, lui, fonctionne sans rien.
+Le prérequis (Codex CLI) s'applique sur chaque machine pour les quotas OpenAI, et chaque compte
+Claude y demande son cookie ; le Moniteur système, lui, fonctionne sans rien.
 
 ## Construire et lancer
 
@@ -126,13 +140,15 @@ requis.
 
 Depuis l'onglet **Connexions** :
 
-- **OpenAI** → « Se connecter » : OAuth navigateur piloté par le Codex app-server. Status ne voit
-  jamais les jetons ; la session est celle de Codex (« Déconnecter » déconnecte donc aussi Codex).
-- **Claude** → « Connecter » : lance `claude auth login` dans Terminal.
-- **Claude** → « Activer le suivi » : installe le collecteur de status line. Une status line
-  existante est sauvegardée et restaurée à la désactivation ; elle n'est jamais écrasée en silence.
-- **Claude** → « direct » : active la source en direct. Accepte un collage « Copier comme cURL » et
-  n'en extrait que le cookie, stocké dans le Trousseau. Bouton « Effacer » pour révoquer.
+- **Ajouter un compte** : présent sous chaque fournisseur, jusqu'à cinq comptes chacun.
+- **OpenAI** → « Se connecter » : OAuth navigateur piloté par le Codex app-server du compte.
+  Status ne voit jamais les jetons. « Déconnecter » n'efface que la session de ce compte, pas celle
+  de Codex ni celle des autres comptes.
+- **Claude** → « Coller le cookie » : accepte un collage « Copier comme cURL » et n'en extrait que
+  le cookie, stocké dans le Trousseau sous une entrée propre au compte. L'organisation est ensuite
+  résolue depuis ce cookie ; si le compte en couvre plusieurs, Status demande laquelle suivre.
+- **Renommer** / **Retirer** : sur chaque compte. Retirer efface le secret ou le dossier de session
+  du compte, ainsi que son historique de quotas.
 
 Actualisation automatique toutes les **5 minutes**, plus au lancement.
 
@@ -147,26 +163,35 @@ Actualisation automatique toutes les **5 minutes**, plus au lancement.
   (~2000 points, soit une semaine), rendu en sparkline sous chaque jauge. Ne contient que des
   identifiants de fenêtre et des pourcentages.
 - **Réglages** (onglet dédié) : lancement au démarrage, et choix de la jauge affichée dans la barre
-  des menus (la plus élevée / 5 h / semaine).
+  des menus. Les agrégats (« Claude sem. ») suivent le compte le plus contraint du fournisseur et
+  changent donc de compte tout seuls ; un épinglage par compte est proposé dès qu'un fournisseur en
+  a plusieurs. Le popover de la barre des menus, lui, ne propose que les agrégats : avec dix comptes
+  possibles, une liste complète y serait illisible.
 
 ## Architecture
 
 ```
-Native/StatusQuota.{h,m}   logique pure : parsing quotas, fenêtres, cookies, historique.
+Native/StatusQuota.{h,m}   logique pure : parsing quotas, fenêtres, cookies, historique,
+                           résolution de la métrique de la barre des menus.
                            Foundation seul, aucune UI — c'est la partie testée.
-Native/Status.m            shell AppKit + WebKit : fenêtres, popover, Codex, réseau, préférences
+Native/StatusAccounts.{h,m}      registre des comptes : identités, ordre, plafond, migrations.
+                                 Foundation seul, testé.
+Native/StatusClaudeSession.{h,m} une session claude.ai par compte : WebView et magasin de
+                                 données isolés, fetch /usage et /organizations
+Native/StatusCodexServer.{h,m}   app-server Codex, un par compte (CODEX_HOME dédié)
+Native/Status.m            shell AppKit + WebKit : fenêtres, popover, comptes, préférences
 Resources/dashboard.html   fenêtre principale (WKWebView)
 Resources/menubar.html     popover de la barre des menus (WKWebView)
 Resources/StatusIcon.icns  icône du Dock ; l'icône de la barre des menus est dessinée
                            en template monochrome dans TMStatusIcon()
-scripts/status-claude-bridge.py  collecteur de status line, opt-in
 scripts/package-app.sh     compilation + bundle + signature
-scripts/run-tests.sh       tests natifs + tests du bridge
+scripts/run-tests.sh       tests natifs + tests des surfaces web
 scripts/create-signing-identity.sh  identité de signature locale (voir plus bas)
 ```
 
-Le natif ne stocke que le cookie claude.ai dans le Trousseau. Il ne lit jamais
-`~/.codex/auth.json`, ni les entrées Trousseau d'un autre produit, ni les transcripts.
+Le natif ne stocke dans le Trousseau que les cookies claude.ai, un par compte. Les sessions
+OpenAI vivent dans les `CODEX_HOME` que Status gère lui-même : il ne lit jamais `~/.codex/auth.json`,
+ni les entrées Trousseau d'un autre produit, ni les transcripts.
 
 ## Tests
 
@@ -174,8 +199,10 @@ Le natif ne stocke que le cookie claude.ai dans le Trousseau. Il ne lit jamais
 ./scripts/run-tests.sh
 ```
 
-Couvre `StatusQuota` (coercition des payloads non documentés, extraction de cookie, parsing des
-deux sources Claude, rejet des fenêtres expirées, historique) et le collecteur Python.
+Couvre `StatusQuota` (coercition des payloads non documentés, extraction de cookie, parsing de la
+réponse `/usage`, rejet des fenêtres expirées, historique par compte, résolution de la métrique de
+la barre des menus), `StatusAccounts` (registre, plafond, migrations depuis le mono-compte) et les
+surfaces web (rendu à zéro, un et cinq comptes).
 `STATUS_SUPPORT_DIR` permet aux tests d'écrire ailleurs que dans les données réelles — redéfinir
 `HOME` ne suffit pas, Foundation met le chemin en cache.
 

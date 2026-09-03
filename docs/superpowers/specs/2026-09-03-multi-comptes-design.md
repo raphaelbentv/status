@@ -84,10 +84,18 @@ Supprimer un compte : `account/logout` sur son serveur, arrêt du processus, sup
 
 ### Claude — une WebView par compte
 
-Un cookie par compte, et **une `WKWebView` par compte sur un `WKWebsiteDataStore` non persistant
-distinct**. Ce point n'est pas cosmétique : les cookies de claude.ai portent les mêmes noms sur le
+Un cookie par compte, et **une `WKWebView` par compte sur un `WKWebsiteDataStore` distinct**. Ce
+point n'est pas cosmétique : les cookies de claude.ai portent les mêmes noms sur le
 même domaine, un store partagé ferait s'écraser les comptes entre eux. Le bug serait « le compte Pro
 affiche les chiffres du compte Perso » — silencieux, plausible et faux.
+
+**Écart assumé à la mise en œuvre.** Le magasin isolé est *persistant*
+(`+[WKWebsiteDataStore dataStoreForIdentifier:]`, macOS 14+, identifié par l'accountId) et non
+éphémère comme envisagé ici. Un magasin éphémère isolerait aussi bien, mais reperdrait à chaque
+lancement la session et le `cf_clearance` que WebKit gagne en résolvant le défi Cloudflare — un
+coût inutile, puisque l'isolation par identifiant procure les deux propriétés à la fois. Un
+identifiant illisible retombe sur un magasin éphémère plutôt que sur le magasin par défaut : mieux
+vaut reperdre une session que mélanger deux comptes.
 
 L'org id ne vient plus de `claude auth status`. À l'enregistrement d'un cookie, Status appelle
 `GET /api/organizations` dans la WebView du compte et récupère l'org id et le nom d'organisation,

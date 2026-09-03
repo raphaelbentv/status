@@ -1,5 +1,13 @@
 # Bridge Claude Code pour Status
 
+> **Document historique — ce collecteur n'existe plus.**
+> Le bridge de status line et son script `scripts/status-claude-bridge.py` ont été retirés avec le
+> passage au multi-comptes : la status line n'écrit qu'un seul `quota-snapshot.json`, accroché à
+> l'installation locale de `claude`, et ne peut donc refléter qu'un compte. Les quotas Claude sont
+> désormais lus exclusivement sur `/api/organizations/{org}/usage`, un cookie par compte.
+> Voir [`superpowers/specs/2026-09-03-multi-comptes-design.md`](superpowers/specs/2026-09-03-multi-comptes-design.md).
+> Ce qui suit décrit l'état antérieur et n'est conservé que pour la trace.
+
 Le script `scripts/status-claude-bridge.py` collecte uniquement le champ officiel `rate_limits` fourni par Claude Code aux commandes `statusLine`. Il ne lit aucun identifiant, cookie, fichier de credentials ou transcript.
 
 Prérequis : Claude Code 2.1.80 ou ultérieur, connecté à un abonnement Claude.ai Pro/Max. Les compteurs apparaissent après la première réponse d'une session Claude Code.

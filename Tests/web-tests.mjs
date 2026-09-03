@@ -113,11 +113,11 @@ checkEqual(menubar('used')(null), null, 'fenêtre absente : null, distinct de 0'
 section('provider — les deux colonnes partagent les mêmes rangées');
 const rowsOf = html => [...html.matchAll(/class="cell (c\d) (r\d)/g)].map(m => m[2]);
 const colsOf = html => [...new Set([...html.matchAll(/class="cell (c\d) /g)].map(m => m[1]))];
-const openaiHTML = menubar('provider')('openai', 'OpenAI', { connected: true, windows: [
-  { windowId: 'seven_day', usedPercent: 42, resetsAt: Date.now() / 1000 + 90000 } ] });
-const claudeHTML = menubar('provider')('claude', 'Claude', { authenticated: true, windows: [
+const openaiHTML = menubar('provider')('openai', 'OpenAI', [{ provider: 'openai', connected: true, label: 'Boulot', windows: [
+  { windowId: 'seven_day', usedPercent: 42, resetsAt: Date.now() / 1000 + 90000 } ] }]);
+const claudeHTML = menubar('provider')('claude', 'Claude', [{ provider: 'claude', cookieConfigured: true, orgId: 'org', label: 'Perso', windows: [
   { windowId: 'seven_day', usedPercent: 81, resetsAt: Date.now() / 1000 + 90000 },
-  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 } ] });
+  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 } ] }]);
 checkEqual(rowsOf(openaiHTML), rowsOf(claudeHTML),
   'mêmes rangées des deux côtés, sous-jauges ou non');
 checkEqual(colsOf(openaiHTML), ['c1'], 'OpenAI occupe la première colonne');
@@ -334,6 +334,16 @@ const settings = dashboard(`settingsView({prefs:{}})`);
 check(settings.includes("claude:weekly-fable"), 'le choix « semaine Fable » est proposé');
 check(settings.includes('Claude Fable'), 'avec un libellé lisible');
 
+// Fabrique de comptes au format poussé par l'app : une liste, un payload par compte.
+const uuid = n => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
+const claudeAccount = (n, label, windows) => ({
+  accountId: uuid(n === 'a' ? 1 : n === 'b' ? 2 : 3), provider: 'claude', label,
+  windows, cookieConfigured: true, orgId: 'org', capturedAt: 0, error: '',
+});
+const openAIAccount = (n, label, windows) => ({
+  accountId: uuid(n), provider: 'openai', label, windows, connected: true, error: '',
+});
+
 // Les sous-quotas « scoped » (7 j · Fable) ne pilotent aucun chiffre agrégé : ni le héros du
 // tableau de bord, ni la jauge hebdo du popover. Ils gardent leur carte et leur épinglage dédié.
 section('sous-quotas scoped — exclus des chiffres agrégés');
@@ -344,7 +354,7 @@ section('sous-quotas scoped — exclus des chiffres agrégés');
   ];
   check(dashboard(`isScopedWeekly({windowId:'seven_day_scoped_fable'})`) === true, 'dashboard : scoped reconnu');
   check(dashboard(`isScopedWeekly({windowId:'seven_day'})`) === false, 'dashboard : la semaine générale ne l’est pas');
-  const data = JSON.stringify({ accounts: { claude: { windows: claudeWindows }, openai: { windows: [] } },
+  const data = JSON.stringify({ accounts: [claudeAccount('a', 'Perso', claudeWindows)],
                                 history: [], updatedAt: 0 });
   const hero = dashboard(`overview(${data})`).split('hero-detail')[0];
   check(hero.includes('hero-value">37<span'), 'héros : la semaine générale (37) donne le chiffre');
@@ -354,6 +364,63 @@ section('sous-quotas scoped — exclus des chiffres agrégés');
   checkEqual(menubar(`mainWeekly([{windowId:'codex-10080',durationMinutes:10080,usedPercent:1},{windowId:'codex_b-10080',durationMinutes:10080,usedPercent:84}])`)?.usedPercent,
              84, 'popover : OpenAI garde le max de ses limites générales');
   check(menubar(`mainWeekly([])`) == null, 'popover : aucune hebdo → rien');
+}
+
+// ── Multi-comptes ───────────────────────────────────────────────────────────
+// Ce qui casse en silence ici, c'est un compte qui n'apparaît pas, ou deux comptes dont les
+// courbes partagent une clé d'historique et s'écrasent l'une l'autre.
+section('accountsOf / historyKey — la liste de comptes');
+{
+  const perso = claudeAccount('a', 'Perso', [{ windowId: 'seven_day', label: '7 jours', usedPercent: 40, resetsAt: 9999999999 }]);
+  const pro = claudeAccount('b', 'Pro', [{ windowId: 'seven_day', label: '7 jours', usedPercent: 72, resetsAt: 9999999999 }]);
+  const boulot = openAIAccount(3, 'Boulot', [{ windowId: 'codex-10080', label: 'Semaine', durationMinutes: 10080, usedPercent: 55, resetsAt: 9999999999 }]);
+  const data = { accounts: [boulot, perso, pro], history: [], updatedAt: 0, accountLimit: 5 };
+  const json = JSON.stringify(data);
+
+  checkEqual(dashboard(`accountsOf(${json},'claude').map(a=>a.label)`), ['Perso', 'Pro'], 'les comptes sont filtrés par fournisseur');
+  const k1 = dashboard(`historyKey(${JSON.stringify(perso)},{windowId:'seven_day'})`);
+  const k2 = dashboard(`historyKey(${JSON.stringify(pro)},{windowId:'seven_day'})`);
+  check(k1 !== k2, 'deux comptes ne partagent pas une clé d’historique');
+  check(k1.includes(perso.accountId), 'la clé porte l’identifiant, pas le nom');
+
+  section('overview — le héros nomme le compte, pas seulement le fournisseur');
+  const view = dashboard(`overview(${json})`);
+  check(view.includes('hero-value">72<span'), 'le compte le plus contraint donne le chiffre');
+  check(view.split('hero-detail')[1].includes('Pro'), 'et le héros le nomme');
+  check(view.includes('Perso') && view.includes('Boulot'), 'tous les comptes sont rendus');
+
+  section('weeklySeriesFor — une série par compte');
+  const series = dashboard(`weeklySeriesFor(${json})`);
+  checkEqual(series.length, 3, 'trois séries pour trois comptes');
+  check(new Set(series.map(s => s.key)).size === 3, 'trois clés distinctes');
+  check(series.every(s => !String(s.color).includes('--chart-c')), 'aucune couleur ne pointe un jeton inexistant');
+
+  section('connectionsView — ajout et plafond');
+  const connections = dashboard(`connectionsView(${json})`);
+  check(connections.includes("send('addAccount',{provider:'claude'})"), 'on peut ajouter un compte Claude');
+  check(connections.includes('2 / 5'), 'le décompte par rapport au plafond est affiché');
+  check(connections.includes("send('removeAccount',{accountId:'" + pro.accountId + "'})"), 'chaque compte est retirable individuellement');
+  const full = JSON.stringify({ ...data, accounts: [perso, pro, claudeAccount('c', 'Tiers', []), { ...claudeAccount('c', 'Quatre', []), accountId: uuid(4) }, { ...claudeAccount('c', 'Cinq', []), accountId: uuid(5) }] });
+  check(dashboard(`connectionsView(${full})`).includes('disabled'), 'au plafond, le bouton d’ajout est désactivé');
+
+  section('settingsView — épinglage par compte');
+  const settings2 = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })})`);
+  check(settings2.includes(`acct:claude:${pro.accountId}:weekly`), 'chaque compte Claude est épinglable');
+  check(!settings2.includes(`acct:openai:${boulot.accountId}`), 'un fournisseur à compte unique n’encombre pas la liste');
+
+  section('popover — le compte le plus contraint, nommé');
+  const picked = menubar(`pickAccount(${JSON.stringify([perso, pro])})`);
+  checkEqual(picked?.label, 'Pro', 'le popover retient le compte le plus contraint');
+  const block = menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])})`);
+  check(block.includes('name-sub">Pro'), 'et le nomme, puisqu’il y en a plusieurs');
+  check(!menubar(`provider('claude','Claude',${JSON.stringify([perso])})`).includes('name-sub'),
+        'compte unique : pas de nom redondant');
+
+  section('aucun compte — l’app le dit au lieu de rester muette');
+  const empty = JSON.stringify({ accounts: [], history: [], updatedAt: 0, accountLimit: 5 });
+  check(dashboard(`overview(${empty})`).includes('Ajoutez un compte'), 'la vue Volumes invite à en ajouter un');
+  check(dashboard(`connectionsView(${empty})`).includes('Aucun compte'), 'la vue Connexions le dit aussi');
+  check(menubar(`provider('openai','OpenAI',[])`).includes('ajouter un compte'), 'le popover propose l’ajout');
 }
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
