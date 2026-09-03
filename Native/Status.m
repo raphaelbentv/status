@@ -1936,6 +1936,21 @@ static NSDictionary *TMAlertDefaults(void) {
         }
         TMSaveAccountsCache(TMMigrateLegacyAccountsCache(TMLoadAccountsCache(), openaiId, claudeId));
     }
+    [self resetAutoDerivedLabelsOnce];
+}
+
+// Les libellés posés par les versions précédentes venaient tous du fournisseur (e-mail,
+// organisation) : aucun n'a été choisi par l'utilisateur. Les effacer une fois rend la
+// numérotation visible ; le drapeau garantit qu'un nom donné ensuite à la main ne sera pas
+// balayé au lancement suivant.
+- (void)resetAutoDerivedLabelsOnce {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if ([defaults boolForKey:@"accountLabelsNumbered"]) return;
+    for (NSDictionary *account in self.accountRegistry) {
+        self.accountRegistry = TMRegistrySetting(self.accountRegistry, account[@"accountId"], @"label", @"");
+    }
+    [defaults setBool:YES forKey:@"accountLabelsNumbered"];
+    [self saveAccountRegistry];
 }
 
 - (void)saveAccountRegistry {
@@ -1961,6 +1976,7 @@ static NSDictionary *TMAlertDefaults(void) {
     payload[@"label"] = TMAccountDisplayLabel(account, index);
     payload[@"customLabel"] = account[@"label"] ?: @"";
     payload[@"orgId"] = account[@"orgId"] ?: @"";
+    payload[@"orgName"] = account[@"orgName"] ?: @"";
     if ([provider isEqualToString:TMProviderClaude]) {
         payload[@"cookieConfigured"] = @([self cookieForAccount:accountId].length > 0);
     }
@@ -2144,14 +2160,6 @@ static NSDictionary *TMAlertDefaults(void) {
             NSDictionary *payload = TMOpenAIAccountPayload(account, rateResponse, NO,
                                                           rateError.localizedDescription);
             [self setPayload:payload forAccount:accountId];
-            // Le libellé par défaut suit l'e-mail lu chez le fournisseur, tant que l'utilisateur
-            // n'a pas donné le sien.
-            NSString *email = payload[@"email"];
-            NSDictionary *entry = TMAccountWithID(self.accountRegistry, accountId);
-            if ([email isKindOfClass:NSString.class] && email.length && ![entry[@"label"] length]) {
-                self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"label", email);
-                [self saveAccountRegistry];
-            }
             [self pushData];
             if (completion) completion();
         }];
@@ -2278,6 +2286,21 @@ static NSDictionary *TMAlertDefaults(void) {
 
     TMClaudeSession *session = [self claudeSessionForAccount:accountId];
     [session seedCookieIfNeeded:cookie];
+    // Un compte migré porte son org id sans son nom : celui-ci n'était renseigné qu'à la pose du
+    // cookie. On le comble une fois, sinon le compte resterait un numéro sans rien pour le situer.
+    if (![entry[@"orgName"] length]) {
+        [session fetchOrganizations:^(NSArray *organizations, NSError *organizationsError) {
+            if (organizationsError) return;
+            for (NSDictionary *organization in organizations) {
+                if (![organization[@"uuid"] isEqualToString:orgId]) continue;
+                self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId,
+                                                         @"orgName", organization[@"name"]);
+                [self saveAccountRegistry];
+                [self pushData];
+                break;
+            }
+        }];
+    }
     [session fetchUsage:orgId completion:^(NSDictionary *json, NSError *error) {
         NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
         BOOL live = windows.count > 0;
@@ -2367,10 +2390,9 @@ static NSDictionary *TMAlertDefaults(void) {
 
 - (void)adoptOrganization:(NSDictionary *)organization forAccount:(NSString *)accountId {
     self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"orgId", organization[@"uuid"]);
-    NSDictionary *entry = TMAccountWithID(self.accountRegistry, accountId);
-    if (![entry[@"label"] length]) {
-        self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"label", organization[@"name"]);
-    }
+    // Le nom d'organisation identifie le compte sans devenir son nom : le nom reste « Claude 1 »,
+    // court et stable, et l'organisation s'affiche en dessous.
+    self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"orgName", organization[@"name"]);
     [self saveAccountRegistry];
     [self mergePayload:@{ @"error": @"" } forAccount:accountId];
     [self pushData];

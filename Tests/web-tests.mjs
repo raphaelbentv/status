@@ -395,6 +395,24 @@ section('accountsOf / historyKey — la liste de comptes');
   check(new Set(series.map(s => s.key)).size === 3, 'trois clés distinctes');
   check(series.every(s => !String(s.color).includes('--chart-c')), 'aucune couleur ne pointe un jeton inexistant');
 
+  section('numérotation des comptes — le numéro nomme, l’identité situe');
+  {
+    const nomme = { ...claudeAccount('a', 'Claude 1', []), orgName: 'Venio' };
+    const chiffre = { ...openAIAccount(3, 'OpenAI 1', []), email: 'contact@venio.paris' };
+    const view = JSON.stringify({ ...data, accounts: [chiffre, nomme] });
+    const connections = dashboard(`connectionsView(${view})`);
+    check(connections.includes('>OpenAI 1<'), 'le compte OpenAI porte son numéro');
+    check(connections.includes('contact@venio.paris'), 'et l’e-mail reste visible en dessous');
+    check(connections.includes('>Claude 1<'), 'le compte Claude porte son numéro');
+    check(connections.includes('Venio'), 'et l’organisation reste visible');
+    const overviewHTML = dashboard(`overview(${view})`);
+    check(overviewHTML.includes('account-identity'), 'la vue Volumes situe aussi les comptes');
+    checkEqual(dashboard(`accountIdentity(${JSON.stringify(nomme)})`), 'Venio', 'identité Claude = organisation');
+    checkEqual(dashboard(`accountIdentity(${JSON.stringify(chiffre)})`), 'contact@venio.paris', 'identité OpenAI = e-mail');
+    checkEqual(dashboard(`accountIdentity(${JSON.stringify({ ...nomme, orgName: '' })})`), '',
+               'compte qui n’a pas encore répondu : rien plutôt qu’un intitulé inventé');
+  }
+
   section('depuis Volumes, Connexions est atteignable');
   {
     // « voir Connexions » n'était qu'une phrase : rien ne menait à l'endroit où l'on ajoute un

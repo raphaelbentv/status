@@ -10,7 +10,11 @@ static NSError *TMSessionError(NSString *message) {
 @property (copy) NSString *accountId;
 @property WKWebView *webView;
 @property BOOL loaded;
-@property (copy, nullable) void (^loadCompletion)(BOOL ok);
+// File d'attente plutôt qu'un seul bloc : deux lectures peuvent partir en même temps (les
+// quotas et le nom d'organisation, par exemple). Rejeter la seconde parce qu'un chargement est
+// en vol lui faisait remonter « session illisible » — un faux négatif, affiché à l'utilisateur
+// comme un cookie à recoller.
+@property NSMutableArray<void (^)(BOOL ok)> *loadWaiters;
 @property (copy, nullable) NSString *seededCookie;
 @end
 
@@ -19,6 +23,7 @@ static NSError *TMSessionError(NSString *message) {
 - (instancetype)initWithAccountID:(NSString *)accountId {
     if ((self = [super init])) {
         _accountId = [accountId copy];
+        _loadWaiters = [NSMutableArray array];
     }
     return self;
 }
@@ -64,15 +69,17 @@ static NSError *TMSessionError(NSString *message) {
 - (void)hardReloadWithCookieHeader:(NSString *)header completion:(void (^)(void))completion {
     if (!header.length) { if (completion) completion(); return; }
     self.loaded = NO;
-    self.loadCompletion = nil;  // abandonne un chargement en cours éventuellement bloqué
+    // Abandonne un chargement en cours éventuellement bloqué : ses appelants sont relâchés en
+    // échec plutôt que laissés en attente pour toujours.
+    [self finishLoad:NO];
     self.seededCookie = header;
     [self seedCookieHeader:header completion:completion];
 }
 
 - (void)ensureLoaded:(void (^)(BOOL ok))completion {
     if (self.loaded) { completion(YES); return; }
-    if (self.loadCompletion) { completion(NO); return; }  // un chargement est déjà en vol
-    self.loadCompletion = completion;
+    [self.loadWaiters addObject:[completion copy]];
+    if (self.loadWaiters.count > 1) return;  // un chargement est déjà en vol : on s'y accroche
     [[self ensureWebView] loadRequest:
         [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://claude.ai/settings/usage"]]];
     // Cloudflare interpose parfois un défi qui se résout par une redirection JavaScript que WebKit
@@ -82,23 +89,26 @@ static NSError *TMSessionError(NSString *message) {
     [self pollReadyWithDeadline:[NSDate dateWithTimeIntervalSinceNow:25]];
 }
 
+// Résout tous les appelants en attente, une seule fois.
+- (void)finishLoad:(BOOL)ok {
+    NSArray<void (^)(BOOL)> *waiters = [self.loadWaiters copy];
+    [self.loadWaiters removeAllObjects];
+    for (void (^waiter)(BOOL) in waiters) waiter(ok);
+}
+
 - (void)pollReadyWithDeadline:(NSDate *)deadline {
-    void (^pending)(BOOL) = self.loadCompletion;
-    if (!pending) return;  // déjà résolu par didFinishNavigation ou une sonde antérieure
+    if (!self.loadWaiters.count) return;  // déjà résolu par didFinishNavigation ou une sonde antérieure
     if ([deadline timeIntervalSinceNow] <= 0) {
-        self.loadCompletion = nil;
-        pending(NO);
+        [self finishLoad:NO];
         return;
     }
     [self.webView evaluateJavaScript:@"document.title" completionHandler:^(id title, NSError *error) {
-        if (!self.loadCompletion) return;  // résolu entre-temps
+        if (!self.loadWaiters.count) return;  // résolu entre-temps
         BOOL challenging = [title isKindOfClass:NSString.class] && [(NSString *)title containsString:@"Just a moment"];
         BOOL loaded = [title isKindOfClass:NSString.class] && [(NSString *)title length] && !challenging;
         if (loaded) {
             self.loaded = YES;
-            void (^done)(BOOL) = self.loadCompletion;
-            self.loadCompletion = nil;
-            done(YES);
+            [self finishLoad:YES];
             return;
         }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -175,7 +185,7 @@ static NSError *TMSessionError(NSString *message) {
     self.webView.navigationDelegate = nil;
     self.webView = nil;
     self.loaded = NO;
-    self.loadCompletion = nil;
+    [self finishLoad:NO];
     self.seededCookie = nil;
     NSUUID *identifier = [[NSUUID alloc] initWithUUIDString:self.accountId];
     if (identifier) [WKWebsiteDataStore removeDataStoreForIdentifier:identifier completionHandler:^(NSError *error) { (void)error; }];
@@ -190,10 +200,7 @@ static NSError *TMSessionError(NSString *message) {
         BOOL challenging = [title isKindOfClass:NSString.class] && [(NSString *)title containsString:@"Just a moment"];
         if (challenging) return;  // un autre didFinishNavigation arrivera une fois le défi résolu
         self.loaded = YES;
-        void (^pending)(BOOL) = self.loadCompletion;
-        if (!pending) return;
-        self.loadCompletion = nil;
-        pending(YES);
+        [self finishLoad:YES];
     }];
 }
 

@@ -50,6 +50,7 @@ NSArray<NSDictionary *> *TMNormalizeAccountRegistry(id raw) {
             @"provider": provider,
             @"label": TMString(account[@"label"]),
             @"orgId": TMString(account[@"orgId"]),
+            @"orgName": TMString(account[@"orgName"]),
             @"order": @(kept.count)
         }];
     }
@@ -79,9 +80,13 @@ BOOL TMProviderIsFull(NSArray *registry, NSString *provider) {
 NSString *TMAccountDisplayLabel(NSDictionary *account, NSInteger indexInProvider) {
     NSString *label = TMString(account[@"label"]);
     if (label.length) return label;
+    // Numérotation par fournisseur plutôt que le nom fourni par le service. Un « OpenAI 2 » tient
+    // dans une pastille de barre des menus, ne change pas quand une organisation se renomme, et
+    // ne vieillit pas comme le ferait « nouveau » à l'arrivée d'un troisième compte. L'identité
+    // réelle — e-mail, organisation — reste affichée en sous-titre du compte.
     NSString *provider = TMString(account[@"provider"]);
     NSString *name = [provider isEqualToString:TMProviderOpenAI] ? @"OpenAI" : @"Claude";
-    return [NSString stringWithFormat:@"Compte %@ %ld", name, (long)(indexInProvider + 1)];
+    return [NSString stringWithFormat:@"%@ %ld", name, (long)(indexInProvider + 1)];
 }
 
 #pragma mark - Écriture
@@ -94,7 +99,8 @@ NSArray<NSDictionary *> *TMRegistryAdding(NSArray *registry, NSString *provider,
     NSMutableArray *next = [current mutableCopy];
     [next addObject:@{
         @"accountId": accountId, @"provider": provider,
-        @"label": label.length ? label : @"", @"orgId": @"", @"order": @(next.count)
+        @"label": label.length ? label : @"", @"orgId": @"", @"orgName": @"",
+        @"order": @(next.count)
     }];
     return TMNormalizeAccountRegistry(next);
 }

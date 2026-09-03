@@ -333,7 +333,9 @@ static void TestAccountRegistry(void) {
 
     Section(@"TMAccountDisplayLabel — repli lisible");
     CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderClaude, @"label": @""}, 1),
-               @"Compte Claude 2", @"sans label, un repli numéroté");
+               @"Claude 2", @"sans label, une numérotation par fournisseur");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderOpenAI, @"label": @""}, 0),
+               @"OpenAI 1", @"la numérotation repart de 1 chez l'autre fournisseur");
     CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderClaude, @"label": @"Perso"}, 1),
                @"Perso", @"avec label, le label");
 }
