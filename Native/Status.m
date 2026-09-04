@@ -452,7 +452,31 @@ static const CGFloat TMTitleBarHeight = 28;
     UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
     [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
                           completionHandler:^(BOOL granted, NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{ self.notificationsAuthorized = granted; });
+        // L'erreur était ignorée. Or c'est précisément elle qui explique une app qui ne notifie
+        // jamais sans que rien ne le dise : macOS refuse la demande pour des raisons qui n'ont
+        // rien à voir avec le choix de l'utilisateur (bundle non enregistré, signature instable).
+        if (error) NSLog(@"Status: demande de notifications refusée — %@", error.localizedDescription);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.notificationsAuthorized = granted;
+            [self pushData];
+        });
+    }];
+    [self refreshNotificationAuthorization];
+}
+
+// L'autorisation se change dans Réglages système à tout moment, sans que l'app en soit avertie :
+// la valeur obtenue une fois au lancement finit par mentir. On relit l'état réel — au lancement et
+// au réveil — pour que l'onglet Réglages dise la vérité.
+- (void)refreshNotificationAuthorization {
+    [UNUserNotificationCenter.currentNotificationCenter getNotificationSettingsWithCompletionHandler:
+     ^(UNNotificationSettings *settings) {
+        BOOL authorized = settings.authorizationStatus == UNAuthorizationStatusAuthorized
+                       || settings.authorizationStatus == UNAuthorizationStatusProvisional;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.notificationsAuthorized == authorized) return;
+            self.notificationsAuthorized = authorized;
+            [self pushData];
+        });
     }];
 }
 
@@ -464,6 +488,7 @@ static const CGFloat TMTitleBarHeight = 28;
 }
 
 - (void)systemDidWake:(NSNotification *)notification {
+    [self refreshNotificationAuthorization];
     [self refresh:nil];  // automatic: if the endpoint was failing before sleep, keep honouring the backoff
     [self rescanDisplays];  // un moniteur externe peut avoir été rebranché pendant la veille
 }
@@ -2547,7 +2572,11 @@ static NSDictionary *TMAlertDefaults(void) {
         [NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"],
         pairs, levels, weeklyResets, NSDate.date.timeIntervalSince1970);
     [NSUserDefaults.standardUserDefaults setObject:result[@"state"] forKey:@"quotaNotificationState"];
-    if (!self.notificationsAuthorized) return;  // l'état avance quand même : pas de rafale à l'autorisation
+    // Aucune garde sur `notificationsAuthorized` ici. Ce drapeau n'est renseigné qu'en asynchrone,
+    // après le premier sondage : le garder ferait taire les événements de ce premier tour — alors
+    // que l'état, lui, a déjà avancé, si bien qu'un reset détecté dans les secondes suivant le
+    // lancement était perdu pour de bon. On soumet toujours ; une notification non autorisée est
+    // écartée par macOS, sans effet de bord.
     for (NSDictionary *event in result[@"events"]) {
         if ([event[@"kind"] isEqualToString:@"reset"]) {
             NSDateFormatter *fmt = [NSDateFormatter new];

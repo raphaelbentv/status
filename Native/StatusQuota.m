@@ -73,6 +73,11 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
         [snapshots addObject:snapshot];
     }
     for (NSDictionary *snapshot in snapshots) {
+        // `rateLimits` est la limite générale du compte ; celles de `rateLimitsByLimitId` sont des
+        // limites additionnelles, ajoutées après elle. Rien dans leur identifiant ne les distingue,
+        // d'où ce drapeau : sans lui, la réinitialisation d'une limite secondaire serait annoncée
+        // comme celle du quota hebdomadaire.
+        BOOL isPrimaryLimit = snapshot == root;
         NSString *limitName = [snapshot[@"limitName"] isKindOfClass:NSString.class] ? snapshot[@"limitName"] : @"";
         NSString *limitID = [snapshot[@"limitId"] isKindOfClass:NSString.class] ? snapshot[@"limitId"] : @"codex";
         for (NSString *slot in @[@"primary", @"secondary"]) {
@@ -95,7 +100,8 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
                 @"windowId": dedupe,
                 @"label": label, @"usedPercent": @(used), @"remainingPercent": @(100 - used),
                 @"resetsAt": @(TMInteger(window[@"resetsAt"])), @"durationMinutes": @(duration),
-                @"limitName": limitName, @"limitId": limitID
+                @"limitName": limitName, @"limitId": limitID,
+                @"primaryLimit": @(isPrimaryLimit)
             }];
         }
     }
@@ -664,7 +670,7 @@ NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
             // mêlées (deux sources) : l'état avance, la notification se tait. Et une seule
             // notification par période (clé rstfired) : deux sources qui oscillent — l'une figée
             // haute, l'autre en direct basse — ne doivent pas mitrailler.
-            if (TMWindowIsWeekly(window)) {
+            if (TMWindowIsPrimaryWeekly(window)) {
                 NSString *resetKey = [NSString stringWithFormat:@"reset:%@:%@", provider, identifier];
                 NSString *usedKey = [NSString stringWithFormat:@"used:%@:%@", provider, identifier];
                 NSString *firedKey = [NSString stringWithFormat:@"rstfired:%@:%@", provider, identifier];
@@ -710,6 +716,12 @@ BOOL TMWindowIsWeekly(NSDictionary *window) {
     if ([windowId hasPrefix:@"seven_day"]) return YES;
     if (duration == 10080) return YES;
     return [label isEqualToString:@"Semaine"] || [label isEqualToString:@"7 jours"];
+}
+
+BOOL TMWindowIsPrimaryWeekly(NSDictionary *window) {
+    if (!TMWindowIsWeekly(window) || TMWindowIsScopedWeekly(window)) return NO;
+    id primary = window[@"primaryLimit"];
+    return primary ? [primary boolValue] : YES;
 }
 
 BOOL TMWindowIsScopedWeekly(NSDictionary *window) {

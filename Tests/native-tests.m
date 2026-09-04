@@ -220,6 +220,18 @@ static void TestOpenAIWindowIdentity(void) {
     Check(ids.count == 2, @"chaque fenêtre a un windowId unique");
     Check(![ids containsObject:[NSNull null]], @"aucun windowId nul");
 
+    // La limite générale (bloc `rateLimits`) doit se distinguer des limites additionnelles : c'est
+    // elle, et elle seule, dont la réinitialisation est annoncée.
+    NSDictionary *general = nil, *additional = nil;
+    for (NSDictionary *window in windows) {
+        if ([window[@"limitId"] isEqualToString:@"codex"]) general = window;
+        if ([window[@"limitId"] isEqualToString:@"gpt5"]) additional = window;
+    }
+    Check([general[@"primaryLimit"] boolValue], @"la limite générale est marquée principale");
+    Check(![additional[@"primaryLimit"] boolValue], @"la limite additionnelle ne l'est pas");
+    Check(TMWindowIsPrimaryWeekly(general) && !TMWindowIsPrimaryWeekly(additional),
+          @"seule la générale passe le filtre des réinitialisations");
+
     NSSet *labels = [NSSet setWithArray:[windows valueForKey:@"label"]];
     Check(labels.count == 2, @"les libellés distinguent les deux limites");
     Check([labels containsObject:@"Codex · Semaine"], @"le nom de la limite apparaît dans le libellé");
@@ -761,6 +773,56 @@ static void TestQuotaNotificationDecisions(void) {
     r = TMQuotaNotificationDecisions(osc, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 2, 1000000, 10080)]]],
                                      levels, YES, now);
     CheckEqual(@([r[@"events"] count]), @0, @"oscillation dans la même période : pas de rafale");
+    // Sous-quotas par modèle : leur réinitialisation N'EST PAS l'événement attendu. Il en existe
+    // plusieurs par compte, ils tournent à leur propre rythme, et une notification par sous-quota
+    // ferait passer le vrai reset hebdomadaire pour du bruit.
+    Section(@"réinitialisation hebdo — sous-quotas exclus");
+    NSDictionary *fableHigh = TMWin(@"seven_day_scoped_fable", @"7 j · Fable", 40, 1000000, 10080);
+    NSDictionary *fableLow = TMWin(@"seven_day_scoped_fable", @"7 j · Fable", 2, 1000000, 10080);
+    NSDictionary *fableState = TMQuotaNotificationDecisions(nil, pairs(fableHigh), levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(fableState, pairs(fableLow), levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"Fable 40 % → 2 % : aucun reset annoncé");
+
+    // Côté OpenAI, la limite additionnelle n'a rien de « scoped » dans son identifiant : seul le
+    // drapeau primaryLimit la distingue de la limite générale.
+    NSDictionary *(^secondary)(double) = ^NSDictionary *(double used) {
+        NSMutableDictionary *w = [TMWin(@"codex_bengalfox-10080", @"bengalfox · Semaine", used, 1000000, 10080) mutableCopy];
+        w[@"primaryLimit"] = @NO;
+        return w;
+    };
+    NSDictionary *secondaryState = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[secondary(40)]]], levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(secondaryState, @[@[@"OpenAI", @[secondary(2)]]], levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @0, @"limite OpenAI additionnelle : aucun reset annoncé");
+
+    // …et la limite générale, elle, notifie toujours, drapeau explicite ou non.
+    NSMutableDictionary *primaryHigh = [TMWin(@"codex-10080", @"Semaine", 40, 1000000, 10080) mutableCopy];
+    primaryHigh[@"primaryLimit"] = @YES;
+    NSMutableDictionary *primaryLow = [TMWin(@"codex-10080", @"Semaine", 2, 1000000, 10080) mutableCopy];
+    primaryLow[@"primaryLimit"] = @YES;
+    NSDictionary *primaryState = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[primaryHigh]]], levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(primaryState, @[@[@"OpenAI", @[primaryLow]]], levels, YES, now);
+    CheckEqual(@([r[@"events"] count]), @1, @"limite générale : le reset est annoncé");
+
+    // Les deux dans le même relevé : une seule notification, celle qui compte.
+    NSDictionary *mixedBefore = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[primaryHigh, secondary(40)]],
+                                                                    @[@"Claude", @[fableHigh]]], levels, YES, now)[@"state"];
+    r = TMQuotaNotificationDecisions(mixedBefore, @[@[@"OpenAI", @[primaryLow, secondary(2)]],
+                                                    @[@"Claude", @[fableLow]]], levels, YES, now);
+    NSArray *resets = [r[@"events"] filteredArrayUsingPredicate:
+                       [NSPredicate predicateWithFormat:@"kind == %@", @"reset"]];
+    CheckEqual(@(resets.count), @1, @"trois fenêtres qui retombent, un seul reset annoncé");
+    CheckEqual(resets.firstObject[@"label"], @"Semaine", @"…celui de la limite générale");
+
+    Section(@"TMWindowIsPrimaryWeekly");
+    Check(TMWindowIsPrimaryWeekly(TMWin(@"seven_day", @"Semaine", 10, 1000000, 10080)),
+          @"la semaine générale Claude est principale");
+    Check(!TMWindowIsPrimaryWeekly(fableHigh), @"le sous-quota Fable ne l'est pas");
+    Check(!TMWindowIsPrimaryWeekly(secondary(10)), @"une limite OpenAI additionnelle non plus");
+    Check(!TMWindowIsPrimaryWeekly(TMWin(@"five_hour", @"5 h", 10, 1000000, 300)),
+          @"une fenêtre 5 h n'est pas hebdomadaire");
+    Check(TMWindowIsPrimaryWeekly(TMWin(@"codex-10080", @"Semaine", 10, 1000000, 10080)),
+          @"sans drapeau, une hebdo non scoped reste principale");
+
     // Une baisse ordinaire n'est pas un reset.
     r = TMQuotaNotificationDecisions(beforeCollapse, @[@[@"OpenAI", @[TMWin(@"codex-10080", @"Semaine", 20, 1000000, 10080)]]],
                                      levels, YES, now);

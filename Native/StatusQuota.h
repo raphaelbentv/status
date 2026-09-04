@@ -37,6 +37,16 @@ BOOL TMWindowIsWeekly(NSDictionary *window);
 // à l'icône autre chose que ce que les cartes de l'app affichent.
 BOOL TMWindowIsScopedWeekly(NSDictionary *window);
 
+// Fenêtre hebdo PRINCIPALE : le quota général du compte, celui qui contraint réellement le travail.
+// Exclut les sous-quotas par modèle des deux côtés :
+//   — Claude : `seven_day_scoped_fable` et consorts, déjà reconnus par TMWindowIsScopedWeekly ;
+//   — OpenAI : les limites additionnelles de `rateLimitsByLimitId`, qui n'ont pas de marqueur
+//     « scoped » dans leur identifiant mais ne sont pas la limite générale pour autant. Elles se
+//     distinguent par le drapeau `primaryLimit`, posé à la construction du payload.
+// Une fenêtre sans ce drapeau est considérée principale : les fenêtres Claude n'en portent pas,
+// et rien ne doit disparaître silencieusement d'une source qui ne connaît pas la notion.
+BOOL TMWindowIsPrimaryWeekly(NSDictionary *window);
+
 #pragma mark - Notifications de quota
 
 // Décisions de notification entre deux observations des fenêtres : seuils franchis et
@@ -47,7 +57,9 @@ BOOL TMWindowIsScopedWeekly(NSDictionary *window);
 //   levels : seuils croissants de % consommé (ex. @[@80, @95]) ; un franchissement notifie le plus
 //            haut niveau atteint, une seule fois par niveau et par période — la clé inclut
 //            resetsAt, une nouvelle période réarme donc tout. Vide = seuils coupés.
-//   weeklyResets : notifier quand une fenêtre HEBDO tourne. Deux signaux, tous deux corroborés
+//   weeklyResets : notifier quand une fenêtre hebdo PRINCIPALE tourne (voir
+//            TMWindowIsPrimaryWeekly) — un sous-quota par modèle qui se recharge n'est pas
+//            l'événement que l'on attend, et il en existe plusieurs par compte. Deux signaux, tous deux corroborés
 //            par une baisse du compteur — la fenêtre OpenAI est glissante, sa date dérive au fil
 //            de l'activité sans que rien ne se recharge, la date seule ne prouve donc rien :
 //            resetsAt qui avance avec une consommation retombée d'au moins 20 points, ou
