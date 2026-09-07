@@ -57,6 +57,18 @@ texte réseau ↓/↑, temp/watts sur deux lignes).
 | temperature | twoLine | « 50° » / « 20 W » (watts omis si absent) | sensors.tempC, battery.powerWatts |
 | battery | battery | pile + « Full »/« 2 h 14 » / « 100 % » ; éclair si charge | famille battery |
 | disk | pie | titre « 74 % » ; camembert = `disk.usedPercent` | famille disk |
+| claudeWeek | pie | titre « 72 % » ; camembert = volume hebdo Claude | famille quota injectée |
+| codexWeek | pie | titre « 41 % » ; camembert = volume hebdo Codex | famille quota injectée |
+
+**Volumes hebdomadaires des deux IA** (ajout de 2026-09-07) : la jauge principale ne montre
+qu'une seule métrique épinglée ; ces deux widgets permettent d'afficher **les deux IA côte à
+côte**, chacune avec sa forme et sa couleur. Leur donnée ne vient pas du moniteur système mais des
+comptes (`TMResolveMenuBarMetric` sur `claude:weekly` / `openai:weekly`), injectée dans le snapshot
+sous forme de familles homonymes par `snapshotWithQuotaFamilies` — le moteur des widgets les traite
+alors comme les autres. Le calcul est refait sur `pushData` (pas à chaque tick : il touche le
+Trousseau et l'historique sur disque), et la série n'est lue que si la forme choisie la dessine.
+Seuils d'alerte identiques à la jauge (80 % / 95 %). Un clic ouvre le popover des quotas, pas un
+panneau moniteur — c'est là qu'est leur détail.
 
 **Conventions** (héritées de l'icône actuelle) : chiffres monospace, couleur
 seulement quand elle informe (ambre/rouge en alerte ; sinon template suivant le

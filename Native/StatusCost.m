@@ -260,9 +260,10 @@ static NSDictionary *TMScanCodexFile(NSString *path) {
     return @{ @"buckets": buckets };
 }
 
-// La fenêtre la plus longue affichée est de 7 jours : les sessions plus anciennes ne peuvent
-// contribuer à aucun coût de fenêtre. On les ignore — ce qui rend le balayage à froid tenable.
-static const NSTimeInterval TMCostMaxAge = 8 * 86400;
+// La fenêtre la plus longue affichée est de 30 jours (totaux 8 j et 30 j de la vue Volumes) : les
+// sessions plus anciennes ne peuvent contribuer à aucun coût affiché. On les ignore — c'est ce qui
+// garde le balayage à froid tenable. Un jour de marge couvre les journaux écrits en fin de fenêtre.
+static const NSTimeInterval TMCostMaxAge = 31 * 86400;
 static NSArray<NSString *> *TMLogFiles(NSString *root) {
     NSMutableArray *files = [NSMutableArray array];
     NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-TMCostMaxAge];

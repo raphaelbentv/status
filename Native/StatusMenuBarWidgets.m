@@ -3,13 +3,15 @@
 #pragma mark - Catalogue
 
 NSArray<NSString *> *TMMenuBarWidgetIDs(void) {
-    return @[@"cpu", @"memory", @"gpu", @"network", @"temperature", @"battery", @"disk"];
+    return @[@"cpu", @"memory", @"gpu", @"network", @"temperature", @"battery", @"disk",
+             @"claudeWeek", @"codexWeek"];
 }
 
 NSString *TMMenuBarWidgetLabel(NSString *widgetId) {
     NSDictionary *labels = @{
         @"cpu": @"CPU", @"memory": @"Mémoire", @"gpu": @"GPU", @"network": @"Réseau",
         @"temperature": @"Température", @"battery": @"Batterie", @"disk": @"Disque",
+        @"claudeWeek": @"Claude · semaine", @"codexWeek": @"Codex · semaine",
     };
     return labels[widgetId] ?: widgetId;
 }
@@ -42,6 +44,12 @@ static NSArray<NSNumber *> *TMFamilySeries(NSDictionary *snapshot, NSString *fam
             return [series isKindOfClass:NSArray.class] ? series : @[];
         }
     return @[];
+}
+
+// Les deux widgets de consommation hebdomadaire (un par IA) : ils ne lisent pas le moniteur
+// système mais les familles quota injectées dans le snapshot par Status.m.
+BOOL TMWidgetIsQuota(NSString *widgetId) {
+    return [widgetId isEqual:@"claudeWeek"] || [widgetId isEqual:@"codexWeek"];
 }
 
 static NSNumber *TMNum(id value) { return [value isKindOfClass:NSNumber.class] ? value : nil; }
@@ -80,6 +88,11 @@ static NSInteger TMWidgetSeverity(NSString *widgetId, NSDictionary *snapshot) {
     } else if ([widgetId isEqual:@"memory"]) {
         NSNumber *p = TMNum(TMFamilyNow(snapshot, @"ram")[@"pressureLevel"]);
         if (p) { if (p.intValue >= 4) return 2; if (p.intValue >= 2) return 1; }
+    } else if (TMWidgetIsQuota(widgetId)) {
+        // Mêmes seuils que la jauge quota (TMSeverityForPercent) : un seul vocabulaire d'urgence
+        // dans toute la barre des menus, que le chiffre vienne de la jauge ou d'un widget.
+        NSNumber *pct = TMNum(TMFamilyNow(snapshot, widgetId)[@"percent"]);
+        if (pct) { if (pct.doubleValue >= 95) return 2; if (pct.doubleValue >= 80) return 1; }
     }
     return 0;
 }
@@ -118,6 +131,17 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
             r[@"title"] = r[@"value"] = TMPct(value);
             r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
             r[@"series"] = TMFamilySeries(snapshot, fam, key);
+        }
+    } else if (TMWidgetIsQuota(widgetId)) {
+        // Volume hebdomadaire consommé chez un fournisseur. La famille porte le même id que le
+        // widget ; absente (aucun compte connecté), l'icône montre son tiret comme les autres.
+        NSNumber *value = TMNum(TMFamilyNow(snapshot, widgetId)[@"percent"]);
+        r[@"style"] = @"pie";
+        if (value) {
+            r[@"hasValue"] = @YES;
+            r[@"title"] = r[@"value"] = TMPct(value);
+            r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
+            r[@"series"] = TMFamilySeries(snapshot, widgetId, @"percent");
         }
     } else if ([widgetId isEqual:@"memory"] || [widgetId isEqual:@"disk"]) {
         NSString *fam = [widgetId isEqual:@"memory"] ? @"ram" : @"disk";

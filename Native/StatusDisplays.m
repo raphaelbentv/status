@@ -160,6 +160,12 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
 
 #pragma mark - TMDisplay
 
+// Interne au fichier : le manager a besoin de l'identifiant CoreGraphics pour retrouver l'écran
+// sous la souris, mais rien à l'extérieur n'a à connaître ce détail de plomberie.
+@interface TMDisplay ()
+@property (readonly) CGDirectDisplayID displayID;
+@end
+
 @implementation TMDisplay {
     CGDirectDisplayID _displayID;
     CFTypeRef _avService;    // +1, écrans externes uniquement ; libéré au dealloc
@@ -187,6 +193,8 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
 - (void)dealloc {
     if (_avService) CFRelease(_avService);
 }
+
+- (CGDirectDisplayID)displayID { return _displayID; }
 
 - (void)syncFromHardware {
     TMLoadPrivateDisplaySymbols();
@@ -326,6 +334,24 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
         double next = TMSteppedBrightness(display.brightnessPercent.doubleValue, increase, stepPercent);
         [display setBrightnessPercent:next];
     }
+}
+
+// Le curseur vit dans le repère Cocoa (origine en bas à gauche de l'écran principal) ; CoreGraphics
+// compte depuis le haut. D'où le retournement avant d'interroger CGGetDisplaysWithPoint.
+- (nullable TMDisplay *)displayUnderMouse {
+    NSPoint mouse = NSEvent.mouseLocation;
+    CGRect mainBounds = CGDisplayBounds(CGMainDisplayID());
+    CGPoint point = CGPointMake(mouse.x, CGRectGetHeight(mainBounds) - mouse.y);
+    CGDirectDisplayID ids[8];
+    uint32_t count = 0;
+    if (CGGetDisplaysWithPoint(point, 8, ids, &count) != kCGErrorSuccess || count == 0) return nil;
+    for (TMDisplay *display in self.displays) if (display.displayID == ids[0]) return display;
+    return nil;
+}
+
+- (nullable TMDisplay *)builtinDisplay {
+    for (TMDisplay *display in self.displays) if (display.kind == TMDisplayKindBuiltin) return display;
+    return nil;
 }
 
 - (void)syncBuiltinDisplaysFromHardware {

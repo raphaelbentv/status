@@ -17,9 +17,9 @@ chaque partie), puis « je valide tout, fais l'implémentation ».
 - **Touches clavier F1/F2** : oui — pilotent aussi les moniteurs externes (fonction phare de
   MonitorControl : macOS ne le fait pas nativement pour les écrans non-Apple). Opt-in, réutilise
   l'autorisation Accessibilité déjà demandée pour le verrou clavier / le gestionnaire de fenêtres.
-- **Multi-écrans** : curseurs **indépendants** par défaut, pas de mode « lié ». La touche
-  clavier, elle, ajuste **tous les écrans pilotables ensemble** (choix délibéré : la touche
-  physique règle l'ambiance générale du poste, le curseur règle un écran précis).
+- **Multi-écrans** : curseurs **indépendants** par défaut, pas de mode « lié ». La touche clavier
+  suit la même règle (révision de 2026-09-07, qui remplace l'ancien « tous les écrans ensemble ») :
+  elle ne règle que **l'écran survolé par la souris**, celui que l'utilisateur regarde.
 - **Échec DDC par écran** : l'écran reste **listé** (nom, badge externe) avec le curseur
   désactivé et la mention « DDC/CI indisponible » — pas de masquage silencieux dans le tableau
   de bord. Dans le popover (trop dense), un écran non pilotable est simplement omis.
@@ -93,21 +93,23 @@ renvoie toujours `1.0` quelle que soit la luminosité réelle, `Set` n'a aucun e
 - Action `setBrightness {id, value}` → `TMDisplay setBrightnessPercent:` (optimiste : pas de
   relecture DDC à chaque écriture, coûteuse sur le bus I2C).
 - Action `toggleBrightnessKeys` → persiste `brightnessKeysEnabled`, (ré)installe le moniteur.
-- **Touches F1/F2** : `NSEventMaskSystemDefined`, `subtype == 8`, `NX_KEYTYPE_BRIGHTNESS_UP/DOWN`,
-  pas de 6 %. Le moniteur **ne consomme jamais** l'événement (contrairement à ⌘⇧S) : on le renvoie
-  inchangé pour laisser macOS continuer à piloter l'écran interne et afficher son propre indicateur.
-  - **Deux traitements distincts selon qui pilote réellement** (corrigé après la première version,
-    qui double-pilotait l'interne) :
-    - **Externes** : macOS ne les touche pas → Status applique le pas lui-même
-      (`stepExternalDisplaysByPercent`), immédiatement, pour qu'une touche maintenue descende en
-      douceur.
-    - **Interne** : macOS l'a déjà changé → Status ne réécrit **pas** (sinon les deux pas se
-      battent : 1/16 ≈ 6,25 % côté macOS contre 6 % côté Status). Il **relit** la valeur réelle
-      (`syncBuiltinDisplaysFromHardware`) et met le curseur à jour. La relecture est différée de
-      60 ms via `dispatch_after` : macOS applique le changement *après* l'événement, une lecture
-      immédiate renverrait encore l'ancienne valeur.
-  - Effet net inchangé pour l'utilisateur : F1/F2 baisse tous les écrans ensemble et les curseurs
-    de Status suivent la valeur réelle.
+- **Touches F1/F2** : `subtype == 8`, `NX_KEYTYPE_BRIGHTNESS_UP/DOWN`, pas de 6 %. **Cible unique :
+  l'écran sous la souris** (`displayUnderMouse`, `CGGetDisplaysWithPoint` après retournement du
+  repère Cocoa).
+  - **Souris sur l'écran interne** (ou cible inconnue) : c'est macOS qui pilote, Status ne réécrit
+    **pas** (sinon les deux pas se battent : 1/16 ≈ 6,25 % côté macOS contre 6 % côté Status) ; il
+    **relit** la valeur réelle 60 ms plus tard (`syncBuiltinDisplaysFromHardware`) — macOS applique
+    le changement *après* l'événement, une lecture immédiate rendrait l'ancienne valeur.
+  - **Souris sur un externe pilotable** : Status applique le pas sur ce seul écran, et doit alors
+    **empêcher macOS de régler l'interne en plus**. Deux chemins :
+    - **Tap CoreGraphics** (`CGEventTapCreate`, masque `NX_SYSDEFINED`) quand Accessibilité est
+      accordée — l'autorisation déjà demandée pour le verrou clavier. L'événement est **consommé**
+      (appui *et* relâchement, pour ne pas laisser passer la moitié d'une séquence) : macOS ne
+      touche à rien, aucun indicateur système parasite.
+    - **Repli sans Accessibilité** : les moniteurs `NSEvent` observent sans pouvoir consommer.
+      macOS change l'interne quoi qu'il arrive → Status le **remet** à sa valeur d'avant après
+      120 ms. L'indicateur macOS clignote brièvement, mais la luminosité de l'interne est
+      préservée : c'est le mieux que permette l'API publique.
 - **Rescan** sur `NSApplicationDidChangeScreenParametersNotification` (branchement/débranchement)
   et au réveil — pas en continu, la luminosité ne dérive pas seule entre deux branchements.
 

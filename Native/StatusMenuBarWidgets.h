@@ -16,6 +16,10 @@ NS_ASSUME_NONNULL_BEGIN
 // Les ids de widgets disponibles, dans l'ordre d'affichage proposé aux Réglages.
 extern NSArray<NSString *> *TMMenuBarWidgetIDs(void);
 
+// Un widget de consommation hebdomadaire d'une IA (« claudeWeek » / « codexWeek ») : sa donnée
+// vient des familles quota injectées dans le snapshot, pas du moniteur système.
+BOOL TMWidgetIsQuota(NSString *widgetId);
+
 // Libellé lisible d'un widget (pour les Réglages).
 NSString *TMMenuBarWidgetLabel(NSString *widgetId);
 

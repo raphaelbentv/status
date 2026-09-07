@@ -133,3 +133,12 @@ bascule de version du cache, fetch FX réel + repli quand le réseau est coupé.
 - Pas de ventilation par modèle dans le popover (hauteur).
 - Pas d'historique du taux de change ni de graphe de change.
 - La borne des 8 jours du scan et l'étiquette « usage terminal » restent inchangées.
+  - **Révision du 2026-09-07** : le scan remonte désormais à **31 jours** (`TMCostMaxAge`) et le
+    compteur de la vue Volumes propose **deux fenêtres, 8 jours et 30 jours**, choisies par un
+    sélecteur commun aux deux fournisseurs (comparer l'un sur 8 j et l'autre sur 30 n'aurait aucun
+    sens). Chaque fenêtre porte son propre total, sa ventilation par modèle et ses tarifs
+    (`costs.<fournisseur>.periods.d8 / .d30`) : le tableau explique toujours le montant affiché.
+    Les totaux sont maintenant **bornés explicitement** (`now − 8 j`, `now − 30 j`) au lieu de
+    sommer tout le contenu lu — un journal modifié hier peut contenir des lignes bien plus
+    anciennes, qui gonflaient le « 8 jours ». Le compteur reste **par fournisseur, tous comptes
+    confondus** : les journaux de session terminal ne sont rattachés à aucun compte.

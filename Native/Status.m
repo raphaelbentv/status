@@ -19,6 +19,7 @@
 #import "StatusMenuBarWidgets.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 #import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
+#import <IOKit/hidsystem/IOLLEvent.h>  // NX_SYSDEFINED
 
 // Unofficial, session-cookie-based source for the live Claude quota windows, which Claude Code's
 // official statusLine cannot provide on demand. The endpoint is undocumented and can change or
@@ -309,6 +310,10 @@ static const CGFloat TMTitleBarHeight = 28;
 @property TMWindowManager *windowManager;
 @property TMDisplayManager *displayManager;
 @property id brightnessGlobalMonitor, brightnessLocalMonitor;
+@property CFMachPortRef brightnessTap;          // chemin privilégié : consomme la touche
+@property CFRunLoopSourceRef brightnessTapSource;
+@property BOOL brightnessKeyConsumed;           // l'appui en cours a-t-il été intercepté
+@property NSArray<NSDictionary *> *quotaWidgetFamilies;  // familles quota injectées dans le snapshot widgets
 @property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
 // widgetId → signature du dernier rendu poussé (TMWidgetRenderSignature). Réassigner l'image d'un
 // NSStatusItem redéclenche un dessin WindowServer : à 1 Hz, on ne le fait que si les pixels changent.
@@ -619,6 +624,7 @@ static const CGFloat TMTitleBarHeight = 28;
         self.widgetItems[wid] = item;
         [self.widgetSignatures removeObjectForKey:wid];  // item neuf (tiret) : forcer le 1er rendu
     }
+    [self refreshQuotaWidgetFamilies];
     [self updateMenuBarWidgetsFromMonitor];
 }
 
@@ -703,6 +709,13 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 
 - (void)widgetClicked:(NSButton *)sender {
     NSString *wid = sender.identifier;
+    // Widgets de consommation : leur détail, c'est le popover des quotas (comptes et fenêtres),
+    // pas un panneau moniteur — widget.html ne saurait rien en dire de plus.
+    if (TMWidgetIsQuota(wid)) {
+        if (self.statusPopover.shown) { [self.statusPopover close]; return; }
+        [self showPopoverFromButton:sender];
+        return;
+    }
     // Reclic sur le même widget déjà ouvert : on ferme (bascule).
     if (self.widgetPopover.shown && [self.currentWidgetId isEqual:wid]) { [self.widgetPopover close]; return; }
     [self ensureWidgetPopover];
@@ -730,8 +743,46 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     return one;
 }
 
+// Les widgets de consommation hebdomadaire ne lisent pas le moniteur système : leurs chiffres
+// viennent des comptes, agrégés par fournisseur comme la jauge. On les injecte dans le snapshot
+// sous forme de familles homonymes, pour que le moteur des widgets les traite comme les autres.
+// La série (coûteuse : relecture de l'historique sur disque) n'est calculée que si la forme
+// choisie la dessine.
+// Recalculé quand les quotas bougent (pushData), pas à chaque tick du moniteur : la lecture des
+// comptes touche le Trousseau et l'historique sur disque — hors de question à 1 Hz.
+- (void)refreshQuotaWidgetFamilies {
+    NSArray *pairs = @[@[@"claudeWeek", @"claude:weekly"], @[@"codexWeek", @"openai:weekly"]];
+    NSMutableArray *wanted = [NSMutableArray array];
+    for (NSArray *pair in pairs) if (self.widgetItems[pair[0]]) [wanted addObject:pair];
+    if (!wanted.count) { self.quotaWidgetFamilies = @[]; return; }
+
+    NSArray *accounts = [self accountPayloadList];
+    NSMutableArray *families = [NSMutableArray array];
+    for (NSArray *pair in wanted) {
+        NSString *wid = pair[0], *metric = pair[1];
+        NSDictionary *resolved = TMResolveMenuBarMetric(metric, accounts);
+        if (!resolved) continue;  // fournisseur non connecté : la famille manque, le widget montre un tiret
+        id shape = [self widgetStyleFor:wid][@"shape"];
+        if (![shape isKindOfClass:NSString.class]) shape = @"";
+        NSArray *series = [@[@"bars", @"graph"] containsObject:shape] ? [self menuBarSeriesForMetric:metric] : @[];
+        [families addObject:@{ @"id": wid,
+                               @"now": @{ @"percent": @(TMNumber(resolved[@"usedPercent"])) },
+                               @"series": @{ @"percent": series ?: @[] } }];
+    }
+    self.quotaWidgetFamilies = families;
+}
+
+- (NSDictionary *)snapshotWithQuotaFamilies:(NSDictionary *)snapshot {
+    if (!self.quotaWidgetFamilies.count) return snapshot;
+    NSArray *existing = [snapshot[@"families"] isKindOfClass:NSArray.class] ? snapshot[@"families"] : @[];
+    NSMutableDictionary *result = [snapshot mutableCopy];
+    result[@"families"] = [existing arrayByAddingObjectsFromArray:self.quotaWidgetFamilies];
+    return result;
+}
+
 - (void)updateMenuBarWidgets:(NSDictionary *)snapshot {
     if (!self.widgetItems.count) return;
+    snapshot = [self snapshotWithQuotaFamilies:snapshot];
     if (!self.widgetSignatures) self.widgetSignatures = [NSMutableDictionary dictionary];
     [self.widgetItems enumerateKeysAndObjectsUsingBlock:^(NSString *wid, NSStatusItem *item, BOOL *stop) {
         NSDictionary *readout = TMWidgetReadout(wid, snapshot);
@@ -1055,28 +1106,9 @@ static const double TMBrightnessKeyStepPercent = 6.0;
     return [NSUserDefaults.standardUserDefaults boolForKey:@"brightnessKeysEnabled"];
 }
 
-// NX_SUBTYPE_AUX_CONTROL_BUTTONS = 8. data1 empaquette (codeTouche << 16 | étatTouche << 8 | …) ;
-// 0x0A signale un appui (down), y compris en répétition. Même mécanisme que celui utilisé par la
-// plupart des utilitaires qui interceptent les touches média — non documenté par Apple, mais
-// stable depuis des années.
-- (void)handleSystemDefinedEvent:(NSEvent *)event {
-    if (event.subtype != 8) return;
-    NSInteger data1 = event.data1;
-    int keyCode = (int)((data1 & 0xFFFF0000) >> 16);
-    int keyState = (int)((data1 & 0x0000FF00) >> 8);
-    if (keyState != 0x0A) return;  // relâchement ou autre état : ignoré
-    BOOL increase;
-    if (keyCode == NX_KEYTYPE_BRIGHTNESS_UP) increase = YES;
-    else if (keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN) increase = NO;
-    else return;
-
-    // Externes : macOS ne les touche pas, on applique le pas nous-mêmes (immédiat, pour qu'une
-    // touche maintenue descende en douceur).
-    [self.displayManager stepExternalDisplaysByPercent:TMBrightnessKeyStepPercent increase:increase];
-
-    // Interne : c'est macOS qui le pilote (l'événement n'est pas consommé), et il applique le
-    // changement juste APRÈS cet événement. On relit donc après un court délai — sinon on lirait
-    // encore l'ancienne valeur — pour que le curseur reflète la réalité sans double-piloter.
+// Relit l'écran interne après coup : quand c'est macOS qui l'a réglé, la valeur réelle n'arrive
+// qu'APRÈS l'événement — lire tout de suite rendrait l'ancienne.
+- (void)scheduleBuiltinBrightnessSync {
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [weakSelf.displayManager syncBuiltinDisplaysFromHardware];
@@ -1084,12 +1116,99 @@ static const double TMBrightnessKeyStepPercent = 6.0;
     });
 }
 
-// Jamais de moniteur local qui consomme l'événement (contrairement à ⌘⇧S) : le renvoyer inchangé
-// laisse macOS continuer à piloter l'écran interne et afficher son propre indicateur — Status
-// n'ajoute que le pilotage DDC/CI des externes à côté, sans rien casser du comportement existant.
+// Un cran de F1/F2 sur le SEUL écran survolé par la souris — comme les curseurs de l'onglet
+// Écrans, un écran à la fois. Retourne YES si Status a réglé l'écran lui-même : l'appelant doit
+// alors empêcher macOS d'agir en plus (sinon l'écran interne bougerait aussi).
+//   — souris sur l'écran interne, ou cible inconnue : on laisse macOS faire, on relit ensuite ;
+//   — souris sur un externe pilotable : on applique le pas nous-mêmes.
+- (BOOL)applyBrightnessStepIncrease:(BOOL)increase {
+    TMDisplay *target = [self.displayManager displayUnderMouse];
+    if (!target || target.kind == TMDisplayKindBuiltin) {
+        [self scheduleBuiltinBrightnessSync];
+        return NO;
+    }
+    if (!target.available || !target.brightnessPercent) return NO;  // écran sans réponse : rien à régler
+    double next = TMSteppedBrightness(target.brightnessPercent.doubleValue, increase, TMBrightnessKeyStepPercent);
+    if (![target setBrightnessPercent:next]) return NO;
+    [self pushData];
+    return YES;
+}
+
+#pragma mark Interception des touches F1/F2
+
+// NX_SUBTYPE_AUX_CONTROL_BUTTONS = 8. data1 empaquette (codeTouche << 16 | étatTouche << 8 | …) ;
+// 0x0A signale un appui (down), y compris en répétition. Même mécanisme que celui utilisé par la
+// plupart des utilitaires qui interceptent les touches média — non documenté par Apple, mais
+// stable depuis des années.
+static BOOL TMDecodeBrightnessKey(NSEvent *event, BOOL *outIncrease, BOOL *outIsDown) {
+    if (event.subtype != 8) return NO;
+    NSInteger data1 = event.data1;
+    int keyCode = (int)((data1 & 0xFFFF0000) >> 16);
+    int keyState = (int)((data1 & 0x0000FF00) >> 8);
+    if (keyCode == NX_KEYTYPE_BRIGHTNESS_UP) *outIncrease = YES;
+    else if (keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN) *outIncrease = NO;
+    else return NO;
+    *outIsDown = (keyState == 0x0A);
+    return YES;
+}
+
+- (void)reenableBrightnessTap { if (self.brightnessTap) CGEventTapEnable(self.brightnessTap, true); }
+
+// Chemin privilégié : un tap CoreGraphics, seul moyen d'EMPÊCHER macOS de régler l'écran interne
+// quand la souris est ailleurs. Sans lui, la touche réglerait toujours l'interne en plus de
+// l'externe visé — exactement ce qu'on cherche à supprimer.
+static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *context) {
+    TMAppDelegate *delegate = (__bridge TMAppDelegate *)context;
+    if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+        [delegate reenableBrightnessTap];
+        return event;
+    }
+    NSEvent *nsEvent = [NSEvent eventWithCGEvent:event];
+    BOOL increase = NO, isDown = NO;
+    if (!nsEvent || !TMDecodeBrightnessKey(nsEvent, &increase, &isDown)) return event;
+
+    // Décision prise à l'appui ; le relâchement suit le même sort, pour ne pas laisser passer à
+    // macOS la moitié d'une séquence qu'on a interceptée.
+    if (!isDown) return delegate.brightnessKeyConsumed ? NULL : event;
+    BOOL handled = [delegate applyBrightnessStepIncrease:increase];
+    delegate.brightnessKeyConsumed = handled;
+    return handled ? NULL : event;
+}
+
+- (BOOL)installBrightnessTap {
+    if (!AXIsProcessTrusted()) return NO;  // sans Accessibilité, pas de tap : repli sur les moniteurs
+    self.brightnessTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault,
+                                          CGEventMaskBit(NX_SYSDEFINED), TMBrightnessTapCallback,
+                                          (__bridge void *)self);
+    if (!self.brightnessTap) return NO;  // permission listée mais pas effective
+    self.brightnessTapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, self.brightnessTap, 0);
+    CFRunLoopAddSource(CFRunLoopGetMain(), self.brightnessTapSource, kCFRunLoopCommonModes);
+    CGEventTapEnable(self.brightnessTap, true);
+    return YES;
+}
+
+// Repli sans Accessibilité : on observe sans pouvoir consommer. macOS règle alors l'écran interne
+// quoi qu'il arrive — on le remet donc à sa valeur d'avant dès que la cible était un externe.
+// Visible (l'indicateur macOS s'affiche une fraction de seconde), mais l'écran interne retrouve
+// sa luminosité : c'est le comportement demandé, au mieux de ce que permet l'API publique.
+- (void)handleSystemDefinedEvent:(NSEvent *)event {
+    BOOL increase = NO, isDown = NO;
+    if (!TMDecodeBrightnessKey(event, &increase, &isDown) || !isDown) return;
+    TMDisplay *builtin = [self.displayManager builtinDisplay];
+    NSNumber *before = builtin.brightnessPercent;
+    if (![self applyBrightnessStepIncrease:increase]) return;  // cible = interne : macOS a raison de faire
+    if (!builtin || !before) return;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [builtin setBrightnessPercent:before.doubleValue];
+        [weakSelf pushData];
+    });
+}
+
 - (void)installBrightnessKeyMonitor {
     [self removeBrightnessKeyMonitor];
     if (![self brightnessKeysEnabled]) return;
+    if ([self installBrightnessTap]) return;
     __weak typeof(self) weakSelf = self;
     self.brightnessGlobalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
                                                                           handler:^(NSEvent *event) {
@@ -1105,6 +1224,14 @@ static const double TMBrightnessKeyStepPercent = 6.0;
 - (void)removeBrightnessKeyMonitor {
     if (self.brightnessGlobalMonitor) { [NSEvent removeMonitor:self.brightnessGlobalMonitor]; self.brightnessGlobalMonitor = nil; }
     if (self.brightnessLocalMonitor) { [NSEvent removeMonitor:self.brightnessLocalMonitor]; self.brightnessLocalMonitor = nil; }
+    if (self.brightnessTapSource) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), self.brightnessTapSource, kCFRunLoopCommonModes);
+        CFRelease(self.brightnessTapSource); self.brightnessTapSource = NULL;
+    }
+    if (self.brightnessTap) {
+        CGEventTapEnable(self.brightnessTap, false);
+        CFRelease(self.brightnessTap); self.brightnessTap = NULL;
+    }
 }
 
 #pragma mark - Gestionnaire de fenêtres
@@ -1422,6 +1549,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             if ([body[@"color"] isKindOfClass:NSString.class]) one[@"color"] = body[@"color"];
             config[wid] = one;
             [NSUserDefaults.standardUserDefaults setObject:config forKey:@"menuBarWidgetConfig"];
+            [self refreshQuotaWidgetFamilies];        // la forme choisie décide si la série est lue
             [self updateMenuBarWidgetsFromMonitor];  // redessine tout de suite avec le nouveau style
             [self pushData];
         }
@@ -1637,13 +1765,14 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     });
 }
 
-// Ventilation par modèle sur toute la fenêtre affichée (8 j), plus les tarifs appliqués (pour
-// l'infobulle) et le total de tokens non tarifés. La ventilation explique le total accentué.
-- (NSDictionary *)modelDetailForBuckets:(NSDictionary *)buckets {
+// Ventilation par modèle sur une fenêtre donnée, plus les tarifs appliqués (pour l'infobulle) et
+// le total de tokens non tarifés. La ventilation explique le total accentué : elle doit donc
+// porter exactement sur la même fenêtre que lui, d'où le paramètre.
+- (NSDictionary *)modelDetailForBuckets:(NSDictionary *)buckets since:(NSTimeInterval)startEpoch {
     NSMutableArray<NSDictionary *> *breakdown = [NSMutableArray array];
     NSMutableDictionary *prices = [NSMutableDictionary dictionary];
     double unpriced = 0;
-    for (NSDictionary *row in TMModelBreakdownSince(buckets, 0)) {
+    for (NSDictionary *row in TMModelBreakdownSince(buckets, startEpoch)) {
         if ([row[@"tokens"] doubleValue] <= 0) continue;  // pseudo-modèles à 0 token (<synthetic>…) : bruit
         [breakdown addObject:row];
         TMPrices p;
@@ -1664,24 +1793,42 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     NSDictionary *claude = self.costScan[@"claude"], *codex = self.costScan[@"codex"];
     NSDictionary *cb = claude[@"buckets"], *xb = codex[@"buckets"];
-    NSDictionary *cd = [self modelDetailForBuckets:cb], *xd = [self modelDetailForBuckets:xb];
+    // Deux fenêtres affichées, bornées explicitement plutôt que « tout ce qui a été lu » : un
+    // fichier modifié hier peut contenir des lignes bien plus anciennes, qui gonfleraient le
+    // total 8 jours sans lui appartenir.
+    NSTimeInterval since8 = now - 8 * 86400, since30 = now - 30 * 86400;
+    NSDictionary *cd8 = [self modelDetailForBuckets:cb since:since8];
+    NSDictionary *cd30 = [self modelDetailForBuckets:cb since:since30];
+    NSDictionary *xd8 = [self modelDetailForBuckets:xb since:since8];
+    NSDictionary *xd30 = [self modelDetailForBuckets:xb since:since30];
     TMFxRate *fx = [TMFxRate shared];
+    // Une entrée par période : montant, ventilation par modèle et tarifs appliqués vont ensemble,
+    // sans quoi le tableau parlerait d'une fenêtre et le total d'une autre.
+    NSDictionary * (^period)(NSDictionary *, NSDictionary *, double) =
+        ^NSDictionary *(NSDictionary *buckets, NSDictionary *detail, double startEpoch) {
+        return @{ @"total": @(TMCostSince(buckets, startEpoch)),
+                  @"breakdown": detail[@"breakdown"], @"prices": detail[@"prices"],
+                  @"unpricedTokens": detail[@"unpricedTokens"] };
+    };
     return @{
         @"scanning": @NO,
         @"asOf": TMPricesAsOfDate,
         @"eurPerUsd": @(fx.eurPerUsd),        // taux live si dispo, repli sur la constante compilée
         @"fxAsOf": fx.asOfDate,               // date du relevé de change réellement utilisé
         // Étiquette « usage terminal » côté web : le web (claude.ai, chatgpt.com) n'est pas journalisé.
+        // `total8d` reste publié tel quel : le popover compact de la barre des menus le lit encore.
         @"claude": @{ @"session": @(TMCostSince(cb, now - 5 * 3600)),
                       @"weekly": @(TMCostSince(cb, now - 7 * 86400)),
-                      @"total8d": @(TMCostSince(cb, 0)),
-                      @"breakdown": cd[@"breakdown"], @"prices": cd[@"prices"],
-                      @"unpricedTokens": cd[@"unpricedTokens"] },
+                      @"total8d": @(TMCostSince(cb, since8)),
+                      @"periods": @{ @"d8": period(cb, cd8, since8), @"d30": period(cb, cd30, since30) },
+                      @"breakdown": cd8[@"breakdown"], @"prices": cd8[@"prices"],
+                      @"unpricedTokens": cd8[@"unpricedTokens"] },
         // Codex : « approximatif » — deux signaux de tokens divergent, et des modèles sans tarif.
         @"codex": @{ @"weekly": @(TMCostSince(xb, now - 7 * 86400)),
-                     @"total8d": @(TMCostSince(xb, 0)),
-                     @"breakdown": xd[@"breakdown"], @"prices": xd[@"prices"],
-                     @"unpricedTokens": xd[@"unpricedTokens"] },
+                     @"total8d": @(TMCostSince(xb, since8)),
+                     @"periods": @{ @"d8": period(xb, xd8, since8), @"d30": period(xb, xd30, since30) },
+                     @"breakdown": xd8[@"breakdown"], @"prices": xd8[@"prices"],
+                     @"unpricedTokens": xd8[@"unpricedTokens"] },
     };
 }
 
@@ -1739,6 +1886,8 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         }];
     }
     [self updateStatusMenu];
+    [self refreshQuotaWidgetFamilies];       // les widgets de consommation suivent les mêmes chiffres
+    [self updateMenuBarWidgetsFromMonitor];
 }
 
 #pragma mark - Moniteur système

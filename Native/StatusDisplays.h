@@ -83,13 +83,16 @@ BOOL TMDDCParseVCPReply(NSData *reply, uint8_t expectedVCPCode, uint16_t *outCur
 // [{ id, name, kind, available, brightness }] — sérialisable en JSON tel quel.
 - (NSArray<NSDictionary *> *)snapshot;
 - (nullable TMDisplay *)displayWithIdentifier:(NSString *)identifier;
-// Touche clavier physique : elle règle l'ambiance du poste (tous les écrans ensemble), pas un
-// écran en particulier comme les curseurs. Deux mécanismes distincts selon qui pilote réellement :
-//   — les écrans externes sont ajustés ici (macOS ne les touche pas en DDC/CI) ;
-//   — l'écran interne est piloté par macOS (l'événement n'est pas consommé) : on ne le réécrit
-//     pas, on relit sa valeur réelle via syncBuiltinDisplaysFromHardware pour refléter le curseur.
+// Touche clavier physique : elle ne règle QUE l'écran survolé par la souris (voir
+// displayUnderMouse) — comme les curseurs, un écran à la fois. Reste ici le pas appliqué à tous
+// les écrans externes, conservé comme brique de repli lorsque la cible ne peut être déterminée.
 - (void)stepExternalDisplaysByPercent:(double)stepPercent increase:(BOOL)increase;
 - (void)syncBuiltinDisplaysFromHardware;
+// L'écran survolé par la souris — celui que les touches F1/F2 doivent régler, et lui seul.
+// nil si le curseur n'est sur aucun écran connu (bureau en cours de reconfiguration).
+- (nullable TMDisplay *)displayUnderMouse;
+// L'écran interne, s'il y en a un (jamais deux).
+- (nullable TMDisplay *)builtinDisplay;
 @end
 
 NS_ASSUME_NONNULL_END

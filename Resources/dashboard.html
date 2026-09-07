@@ -184,6 +184,10 @@
     background:color-mix(in srgb,var(--green) 8%,transparent)}
   .cost-total.scanning{border-color:var(--hair-strong);background:var(--soft);color:var(--muted);font-size:11px;padding:11px 14px}
   .cost-total-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px}
+  /* Le sélecteur de période se pose à droite de l'étiquette, sur la même ligne : il commente le
+     chiffre, il ne doit pas pousser le montant vers le bas. */
+  .cost-total-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .cost-period{margin-bottom:4px;flex:none}
   .cost-total-amount{font-size:22px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;line-height:1;cursor:help}
   .cost-warn{color:var(--amber);font-size:10px;margin-top:6px}
   .model-table{width:100%;margin-top:11px;border-collapse:collapse;font-size:10.5px;font-variant-numeric:tabular-nums}
@@ -326,14 +330,17 @@ const THEMES=[
   {id:'ion',label:'Ion',blue:'#78E1FF',purple:'#B98CFF'}
 ];
 // Widgets système de la barre des menus (mêmes ids que TMMenuBarWidgetIDs côté natif).
-const WIDGETS=[['cpu','CPU'],['memory','Mémoire'],['gpu','GPU'],['network','Réseau'],['temperature','Température'],['battery','Batterie'],['disk','Disque']];
+const WIDGETS=[['cpu','CPU'],['memory','Mémoire'],['gpu','GPU'],['network','Réseau'],['temperature','Température'],['battery','Batterie'],['disk','Disque'],['claudeWeek','Claude · semaine'],['codexWeek','Codex · semaine']];
 // Formes valides par widget (défaut = 1re). Ids alignés sur TMWidgetImageStyled.
 const SHAPE_LABELS={bars:'barres',graph:'courbe',ring:'anneau',pie:'camembert',bar:'jauge',text:'texte',twoLine:'2 lignes',battery:'pile'};
 // « jauge » (barre horizontale) partout où la donnée est un taux de remplissage — pas pour le
 // réseau, dont le débit n'a pas de plafond connu à représenter.
 const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','bar','text'],gpu:['bars','graph','ring','pie','bar','text'],
   memory:['pie','ring','bars','graph','bar','text'],disk:['pie','ring','bars','graph','bar','text'],
-  network:['twoLine','text'],temperature:['twoLine','ring','bar','text'],battery:['battery','ring','bar','twoLine','text']};
+  network:['twoLine','text'],temperature:['twoLine','ring','bar','text'],battery:['battery','ring','bar','twoLine','text'],
+  // Consommations hebdomadaires : mêmes formes que les taux de remplissage — les deux IA peuvent
+  // être affichées côte à côte, chacune avec sa forme et sa couleur.
+  claudeWeek:['pie','ring','bars','graph','bar','text'],codexWeek:['pie','ring','bars','graph','bar','text']};
 // Formes de la jauge des consommations (ids alignés sur updateStatusMenu côté natif). Les quatre
 // dernières viennent du moteur des widgets : une forme ajoutée là profite aux deux.
 const GAUGE_SHAPES=[['ring','Anneau'],['spark','Courbe'],['bars','Barres'],['pie','Camembert'],
@@ -450,15 +457,29 @@ function modelBreakdown(d){
   const body=rows.map(r=>`<tr class="model-row${r.cost==null?' unpriced':''}"><td>${esc(r.model)}</td><td class="num">${fmtTokens(r.tokens)}</td><td class="num">${r.cost==null?'—':fmtDual(r.cost)}</td></tr>`).join('');
   return `<table class="model-table"><thead><tr><th>Modèle</th><th class="num">Tokens</th><th class="num">Coût</th></tr></thead><tbody>${body}</tbody></table>`;
 }
+// Période affichée par le compteur équivalent API. Choix d'affichage, pas un réglage de fond :
+// il vit ici plutôt que dans les préférences natives, et vaut pour les deux fournisseurs à la
+// fois — comparer Claude sur 8 jours et ChatGPT sur 30 n'aurait aucun sens.
+const COST_PERIODS=[['d8','8 jours'],['d30','30 jours']];
+let costPeriod='d8';
+function setCostPeriod(key){costPeriod=key;render();}
+// Le compteur couvre TOUS les comptes du fournisseur : les journaux de session terminal ne sont
+// pas rattachés à un compte, et c'est bien le volume général qu'on veut voir ici.
 function providerCostTotal(id){
   const c=appData?.costs;
   if(!c)return '';
   if(c.scanning)return `<div class="cost-total scanning">⟳ calcul du coût équivalent en cours…</div>`;
   const d=id==='openai'?c.codex:c.claude;
-  if(!d||d.total8d==null)return '';
-  const unpriced=id==='openai'&&d.unpricedTokens>0?`<div class="cost-warn">~ ${Math.round(d.unpricedTokens/1e6)} M tokens de modèles sans tarif, non chiffrés</div>`:'';
-  const title=tariffTitle(d.prices);
-  return `<div class="cost-total"><div class="cost-total-label">Équivalent API sur 8 jours · tous comptes${id==='openai'?' · approximatif':''}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(d.total8d)}</div>${unpriced}${modelBreakdown(d)}</div>`;
+  if(!d)return '';
+  // Repli sur l'ancien format (payload d'une version antérieure) : mieux vaut le total 8 jours
+  // seul qu'un bloc vide.
+  const p=d.periods?.[costPeriod]||(d.total8d!=null?{total:d.total8d,breakdown:d.breakdown,prices:d.prices,unpricedTokens:d.unpricedTokens}:null);
+  if(!p||p.total==null)return '';
+  const label=(COST_PERIODS.find(([k])=>k===costPeriod)||COST_PERIODS[0])[1];
+  const unpriced=id==='openai'&&p.unpricedTokens>0?`<div class="cost-warn">~ ${Math.round(p.unpricedTokens/1e6)} M tokens de modèles sans tarif, non chiffrés</div>`:'';
+  const title=tariffTitle(p.prices);
+  const switcher=d.periods?`<span class="segmented cost-period">${COST_PERIODS.map(([k,lab])=>`<button class="seg ${costPeriod===k?'on':''}" onclick="setCostPeriod('${k}')">${lab}</button>`).join('')}</span>`:'';
+  return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">Équivalent API sur ${label} · tous comptes${id==='openai'?' · approximatif':''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}${modelBreakdown(p)}</div>`;
 }
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
 function accountBlock(account,history){
