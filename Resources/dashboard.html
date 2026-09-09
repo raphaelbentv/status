@@ -320,9 +320,10 @@ const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.duration
 // Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, qui garde sa
 // carte et son épinglage mais ne pilote aucun chiffre agrégé — en tête d'affiche, « 54 % » sans
 // son contexte Fable ferait croire que la semaine entière en est là.
+const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
 const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
-const windowsFor=(providerId,account)=>{const windows=account?.windows||[];return providerId==='openai'?windows.filter(isWeekly):windows};
+const windowsFor=(providerId,account)=>{const windows=account?.windows||[];return providerId==='openai'?windows.filter(w=>isWeekly(w)&&!isCodexSpark(w)):windows};
 const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
 // data.accounts est une liste de payloads, un par compte, déjà dans l'ordre d'affichage.
 const accountsOf=(data,providerId)=>(data?.accounts||[]).filter(a=>a.provider===providerId);
@@ -540,7 +541,7 @@ function weeklySeriesFor(data){
   const out=[];
   PROVIDERS.forEach(p=>{
     accountsOf(data,p.id).forEach((account,rank)=>{
-      (account.windows||[]).filter(isWeekly).forEach(w=>{
+      windowsFor(p.id,account).filter(isWeekly).forEach(w=>{
         const suffix=isScopedWeekly(w)?` ${w.label}`:' semaine';
         out.push({key:historyKey(account,w),label:`${account.label}${suffix}`,
                   color:isScopedWeekly(w)?'var(--chart-b)':seriesColor(p.id,rank)});
@@ -609,7 +610,7 @@ function notificationsNotice(data){return data.prefs?.notificationsAuthorized===
 function overview(data){
   const entries=[];
   PROVIDERS.forEach(p=>accountsOf(data,p.id).forEach(account=>{
-    usableWindows(account).filter(w=>!isScopedWeekly(w)).forEach(w=>entries.push({account,window:w,used:used(w)}));
+    usableWindows(account).filter(w=>!isScopedWeekly(w)&&!(p.id==='openai'&&isCodexSpark(w))).forEach(w=>entries.push({account,window:w,used:used(w)}));
   }));
   entries.sort((a,b)=>b.used-a.used);
   const max=entries[0];

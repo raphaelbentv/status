@@ -129,8 +129,9 @@ const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.duration
 // jauge « Semaine » — le max avec lui ferait dire à la jauge autre chose que la carte 7 jours.
 // Le max reste voulu entre limites GÉNÉRALES (OpenAI en expose plusieurs : afficher la première
 // venue montrerait 1 % pendant que l'autre est à 84 %).
+const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
 const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
-const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
+const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
 const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
 const reset=w=>{
@@ -192,7 +193,7 @@ function lastWeeklyReset(account){
 }
 function provider(id,name,accounts,metric){
   const account=(accounts||[]).find(a=>a.accountId===popupSelection[id])||pickAccount(accounts,metric);
-  const windows=(account?.windows||[]).filter(w=>typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
+  const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
   // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
   const weekly=mainWeekly(windows);
   const connected=id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
