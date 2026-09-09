@@ -47,7 +47,7 @@ function sandboxFor(htmlFile) {
     getBoundingClientRect: () => ({ width: 0, height: 0, left: 0 }), closest: () => null,
   });
   const sandbox = {
-    document: { querySelector: () => element(), querySelectorAll: () => [], addEventListener() {} },
+    document: { documentElement: {dataset:{}}, querySelector: () => element(), querySelectorAll: () => [], addEventListener() {} },
     window: {}, setInterval() {}, setTimeout() {}, console,
     Intl, Date, Math, JSON, Number, String, Array, Object, isNaN, parseFloat, parseInt,
   };
@@ -330,9 +330,9 @@ check(resetRow && !resetRow.includes('wc-shapes'), 'reset hebdo : interrupteur s
 
 // Le sous-quota hebdo Fable est épinglable dans la barre des menus, comme les autres fenêtres.
 section('settingsView — épinglage de la semaine Fable');
-const settings = dashboard(`settingsView({prefs:{}})`);
-check(settings.includes("claude:weekly-fable"), 'le choix « semaine Fable » est proposé');
-check(settings.includes('Claude Fable'), 'avec un libellé lisible');
+const settings = dashboard(`settingsView({prefs:{}},'quotas')`);
+check(!settings.includes("claude:weekly-fable"), 'Fable absent sans fenêtre correspondante');
+check(!settings.includes('Claude Fable'), 'aucun libellé de métrique indisponible');
 
 // Fabrique de comptes au format poussé par l'app : une liste, un payload par compte.
 const uuid = n => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
@@ -450,11 +450,11 @@ section('accountsOf / historyKey — la liste de comptes');
   ['overview', 'connectionsView'].forEach(view => {
     check(!dashboard(`${view}(${json})`).includes('${'), `${view} rend du HTML complet`);
   });
-  check(!dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })})`).includes('${'),
+  check(!dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })},'quotas')`).includes('${'),
         'settingsView rend du HTML complet');
 
   section('settingsView — épinglage par compte');
-  const settings2 = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })})`);
+  const settings2 = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })},'quotas')`);
   check(settings2.includes(`acct:claude:${pro.accountId}:weekly`), 'chaque compte Claude est épinglable');
   check(!settings2.includes(`acct:openai:${boulot.accountId}`), 'un fournisseur à compte unique n’encombre pas la liste');
 
@@ -507,7 +507,7 @@ section('accountsOf / historyKey — la liste de comptes');
           'la bascule conserve la fenêtre en cours');
 
     // Réglages : la rangée ne doit pas paraître vide dès qu'un compte est épinglé.
-    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })})`);
+    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })},'quotas')`);
     // La liste d'épinglage plus bas allume elle aussi un segment : on ne compte que la rangée
     // des fenêtres, qui précède « pin-list ».
     const windowRow = pinned.split('pin-list')[0];
@@ -558,6 +558,75 @@ section('Claude Code : source, connexion et fraîcheur');
   check(dashboard('claudePanel')({...a,stale:true,capturedAt:100}).includes('Mesure ancienne'),'snapshot ancien visible');
   check(dashboard('claudePanel')({...a,connected:false}).includes('Se connecter avec Claude Code'),'reconnexion officielle');
   check(menubar(`provider('claude','Claude',${JSON.stringify([a])},'claude:weekly')`).includes('connecté · en attente'),'compte bridge reconnu connecté en barre des menus');
+}
+
+section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumulés');
+{
+  const future=Date.now()/1000+7200;
+  const account={accountId:uuid(8),provider:'claude',claudeSource:'code',connected:true,label:'Disponible',capturedAt:Date.now()/1000,windows:[
+    {windowId:'five_hour',label:'5 h',usedPercent:5,resetsAt:future},
+    {windowId:'seven_day',label:'7 jours',usedPercent:25,resetsAt:future}]};
+  checkEqual(dashboard('availability')(account).remaining,75,'restant hebdo = 100 moins consommé');
+  checkEqual(dashboard('availability')({...account,stale:true}),null,'mesure ancienne exclue');
+  checkEqual(dashboard('availability')({...account,capturedAt:Date.now()/1000-1900}),null,'âge recalculé indépendamment du drapeau');
+  checkEqual(dashboard('availability')({...account,connected:false}),null,'compte déconnecté exclu');
+  checkEqual(dashboard('availability')({...account,windows:[]}),null,'absence de donnée distincte de 100 % restant');
+  checkEqual(dashboard('availability')({...account,windows:account.windows.slice(1)}),null,'Claude sans mesure 5 h non recommandé');
+  checkEqual(dashboard('availability')({...account,windows:account.windows.map(w=>({...w,resetsAt:1}))}),null,'fenêtres expirées exclues');
+  check(!dashboard('availability')({...account,windows:account.windows.map(w=>({...w,usedPercent:w.windowId==='five_hour'?100:25}))}).available,'quota 5 h épuisé empêche la recommandation');
+  const spark={...account,provider:'openai',windows:[{windowId:'base',durationMinutes:10080,label:'Semaine',usedPercent:2,resetsAt:future},{windowId:'spark',durationMinutes:10080,label:'Spark',usedPercent:99,resetsAt:future}]};
+  checkEqual(dashboard('availability')(spark).remaining,98,'la synthèse standard ne mélange pas Spark avec le quota général');
+  const html=dashboard('providerSummary')({id:'claude',name:'Claude'},[account,{...account,stale:true,label:'Ancien'}]);
+  check(html.includes('1 compte disponible sur 2')&&html.includes('75 % restant'),'compte disponible et restant lisibles');
+  check(!html.includes('175 %'),'aucune addition de pourcentages de comptes');
+  checkEqual(dashboard('sortedAccounts')([{...account,label:'Ancien',stale:true},account])[0].label,'Disponible','tri place les données exploitables en premier');
+}
+section('Réglages regroupés, connexions compactes et données conditionnelles');
+{
+  const fable={...claudeAccount('a','Perso',[]),windows:[{windowId:'seven_day_scoped_fable',label:'Fable',usedPercent:10,resetsAt:9999999999}]};
+  const data={prefs:{notificationsAuthorized:false},accounts:[fable,claudeAccount('b','Pro',[])]};
+  const quotas=dashboard('settingsView')(data,'quotas');
+  check(quotas.includes('Claude Fable'),'Fable conservé quand une vraie fenêtre existe');
+  check(!quotas.includes('Piloter la luminosité au clavier'),'raccourcis séparés des quotas');
+  check(dashboard('settingsView')(data,'shortcuts').includes('Piloter la luminosité au clavier'),'raccourcis restent accessibles');
+  check(dashboard('settingsView')(data,'alerts').includes('Quota entamé'),'alertes conservées');
+  check(dashboard('settingsView')(data,'system').includes('Lancer au démarrage'),'système conserve le démarrage');
+  check(dashboard('settingsView')(data,'appearance').includes('Thème'),'apparence conserve les thèmes');
+  check(dashboard('notificationsNotice')(data).includes("send('openNotificationSettings')"),'lien explicite vers les notifications');
+  checkEqual(dashboard('notificationsNotice')({prefs:{notificationsAuthorized:true}}),'','pas de fausse alerte quand les notifications fonctionnent');
+  const conn=dashboard('claudePanel')({...fable,claudeSource:'code',connected:true});
+  check(conn.includes('account-menu')&&conn.includes('Ouvrir Claude Code'),'action principale et menu secondaire');
+  check(!conn.includes('quota-track')&&!conn.includes('quota-grid'),'pas de doublon des jauges dans Connexions');
+  const disk=dashboard('storageSummary')({freeBytes:25*1024**3,totalBytes:512*1024**3});
+  check(disk.includes('25 Go libres')&&disk.includes('512 Go'),'capacité et espace libre affichés');
+  check(disk.includes("send('openStorageSettings')"),'accès au stockage');
+}
+section('Coût partiel pour les deux fournisseurs');
+{
+  dashboard(`appData={costs:{claude:{periods:{d8:{total:42,unpricedTokens:2000000,breakdown:[]}}},codex:{periods:{d8:{total:5,unpricedTokens:1000000,breakdown:[]}}}}}`);
+  for(const id of ['claude','openai']){
+    const html=dashboard('providerCostTotal')(id);
+    check(html.includes('estimation partielle')&&html.includes('sans tarif'),'volumes exclus signalés pour '+id);
+    check(html.includes('pas une facture'),'nature de l’estimation pour '+id);
+  }
+}
+section('Popup : jauges, sous-quotas, sélecteurs et état inconnu');
+{
+  const windows=[{windowId:'weekly',durationMinutes:10080,label:'Semaine',usedPercent:25,resetsAt:9999999999},{windowId:'spark',durationMinutes:10080,label:'Spark',usedPercent:15,resetsAt:9999999999}];
+  const one=openAIAccount(1,'Boulot',windows),two=openAIAccount(2,'Personnel',windows);
+  const html=menubar('provider')('openai','OpenAI',[one,two],'openai:weekly');
+  check(html.includes('role="meter"')&&html.includes('75 % restant'),'jauge principale et restant');
+  check(html.includes('Spark')&&html.includes('85 % restant'),'sous-quota OpenAI visible');
+  check(html.includes('Compte OpenAI')&&html.includes('Personnel'),'choix de tous les comptes du fournisseur');
+  check(html.includes('Renouvellement'),'réinitialisation près des jauges');
+  checkEqual(menubar('quotaRail')(null),'','aucune jauge inventée sans valeur');
+  check(menubar('quotaRail')({usedPercent:95,label:'Semaine'}).includes('var(--danger)'),'quota critique en couleur d’alerte');
+  check(!menubar('provider')('openai','OpenAI',[{...one,windows:windows.map(w=>({...w,resetsAt:1}))}],'openai:weekly').includes('role="meter"'),'fenêtres expirées masquées dans le popup');
+  menubar(`lastData=${JSON.stringify({accounts:[one,two],updatedAt:0})}`);
+  menubar(`selectPopupAccount('openai','${two.accountId}')`);
+  checkEqual(menubar('popupSelection.openai'),two.accountId,'sélection indépendante dans le popup');
+  menubar(`selectPopupAccount('openai','unknown')`);
+  checkEqual(menubar('popupSelection.openai'),two.accountId,'sélection inconnue ignorée');
 }
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);

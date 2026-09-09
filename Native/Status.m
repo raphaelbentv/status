@@ -561,7 +561,7 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusItem.button.action = @selector(toggleStatusPopover:);
     [self installHoverTracking];
 
-    NSRect frame = NSMakeRect(0, 0, 400, 540);  // 540 : le coût équivalent ajoute une rangée par fournisseur
+    NSRect frame = NSMakeRect(0, 0, 480, MIN(640, NSScreen.mainScreen.visibleFrame.size.height - 80));  // jauges et sélecteurs de comptes, contenu défilant
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.menuWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
@@ -1632,6 +1632,12 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:@"metricsIntervalSeconds"];
         [self startSystemMonitor];  // recrée le timer à la nouvelle cadence
         [self pushData];
+    }
+    if ([action isEqualToString:@"openNotificationSettings"]) {
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.Notifications-Settings.extension"]];
+    }
+    if ([action isEqualToString:@"openStorageSettings"]) {
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.settings.Storage"]];
     }
     if ([action isEqualToString:@"openDashboard"]) [self openDashboard:nil];
     if ([action isEqualToString:@"quit"]) [NSApp terminate:nil];

@@ -157,8 +157,16 @@ Actualisation automatique toutes les **5 minutes**, plus au lancement.
 - **Réglages** (onglet dédié) : lancement au démarrage, et choix de la jauge affichée dans la barre
   des menus. Les agrégats (« Claude sem. ») suivent le compte le plus contraint du fournisseur et
   changent donc de compte tout seuls ; un épinglage par compte est proposé dès qu'un fournisseur en
-  a plusieurs. Le popover de la barre des menus, lui, ne propose que les agrégats : avec dix comptes
-  possibles, une liste complète y serait illisible.
+  a plusieurs. Les réglages sont regroupés en Apparence, Quotas, Alertes, Système et Raccourcis.
+- **Popup** : sélecteur de compte indépendant pour chaque fournisseur, jauges de consommation et
+  pourcentage restant pour chaque fenêtre active, avec date de renouvellement. Ce choix ne modifie
+  pas la jauge épinglée dans la barre des menus. Les outils du Mac sont repliables.
+- **Vue d’ensemble** : disponibilité selon les mesures récentes, compte le plus disponible et
+  prochain renouvellement hebdomadaire par fournisseur ; tri par disponibilité, renouvellement ou nom.
+  Les comptes sans mesure récente restent à actualiser ; leurs quotas ne sont jamais additionnés.
+- **Lisibilité** : connexions compactes, coûts API explicitement estimatifs et partiels lorsque des
+  tokens ne sont pas tarifés, espace disque libre/total et accès aux réglages de stockage. Un bandeau
+  signale les notifications refusées par macOS. Fable n’est proposé que si une fenêtre est reçue.
 
 ## Architecture
 
