@@ -434,7 +434,7 @@ static const CGFloat TMTitleBarHeight = 28;
     // cookie, et après tout ce qui a pu vider un magasin.
     for (NSDictionary *account in [self accountsForProvider:TMProviderClaude]) {
         NSString *accountId = account[@"accountId"];
-        if ([account[@"claudeSource"] isEqual:@"code"]) continue;
+        if ([account[@"claudeSource"] isEqual:@"code"] || [account[@"claudeSource"] isEqual:@"web"]) continue;
         NSString *cookie = [self cookieForAccount:accountId];
         if (cookie.length) [[self claudeSessionForAccount:accountId] seedCookieIfNeeded:cookie];
     }
@@ -1654,6 +1654,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if (!accountId.length) return;
     if ([action isEqualToString:@"loginOpenAI"]) [self loginOpenAIAccount:accountId];
     if ([action isEqualToString:@"logoutOpenAI"]) [self confirmLogoutOpenAIAccount:accountId];
+    if ([action isEqualToString:@"connectClaudeWeb"]) [self connectClaudeWebAccount:accountId];
     if ([action isEqualToString:@"connectClaudeCode"]) [self connectClaudeCodeAccount:accountId];
     if ([action isEqualToString:@"openClaudeCode"]) [self openClaudeCodeAccount:accountId];
     if ([action isEqualToString:@"disconnectClaudeCode"]) [self disconnectClaudeCodeAccount:accountId];
@@ -2164,7 +2165,7 @@ static NSDictionary *TMAlertDefaults(void) {
     payload[@"orgName"] = account[@"orgName"] ?: @"";
     if ([provider isEqualToString:TMProviderClaude]) {
         payload[@"claudeSource"] = account[@"claudeSource"] ?: @"";
-        payload[@"cookieConfigured"] = [account[@"claudeSource"] isEqual:@"code"] ? @NO : @([self cookieForAccount:accountId].length > 0);
+        payload[@"cookieConfigured"] = ([account[@"claudeSource"] isEqual:@"code"] || [account[@"claudeSource"] isEqual:@"web"]) ? @NO : @([self cookieForAccount:accountId].length > 0);
         if ([account[@"claudeSource"] isEqual:@"code"]) {
             payload[@"orgId"] = known[@"orgId"] ?: @"";
             payload[@"orgName"] = @"";
@@ -2222,7 +2223,7 @@ static NSDictionary *TMAlertDefaults(void) {
     [self pushData];
     // Enchaîner sur la connexion : un compte ajouté sans identité ne dit rien et n'affiche rien.
     if ([provider isEqualToString:TMProviderOpenAI]) [self loginOpenAIAccount:accountId];
-    else [self connectClaudeCodeAccount:accountId];
+    else [self connectClaudeWebAccount:accountId];
 }
 
 - (void)confirmRemoveAccount:(NSString *)accountId {
@@ -2490,6 +2491,58 @@ static NSDictionary *TMAlertDefaults(void) {
     });
 }
 
+// La migration n'est appliquée qu'après vérification de l'organisation ET réception de quotas.
+- (void)connectClaudeWebAccount:(NSString *)accountId {
+    NSDictionary *entry = TMAccountWithID(self.accountRegistry, accountId);
+    if (![entry[@"provider"] isEqual:TMProviderClaude]) return;
+    NSString *source = entry[@"claudeSource"] ?: @"";
+    NSString *expected = [source isEqual:@"code"] ? [self knownPayload:accountId][@"orgId"] : entry[@"orgId"];
+    expected = expected ?: @"";
+    TMClaudeSession *session = [self claudeSessionForAccount:accountId];
+    [session showLoginForLabel:TMAccountDisplayLabel(entry, 0) completion:^(NSArray *organizations) {
+        NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
+        if (!current || ![(current[@"claudeSource"] ?: @"") isEqual:source]) { [session finishLogin]; return; }
+        NSDictionary *organization = TMClaudeWebOrganization(organizations, expected);
+        if (organization) { [self validateClaudeWebOrganization:organization account:accountId source:source session:session]; return; }
+        if (expected.length) {
+            [session showLoginMessage:@"Ce compte Claude ne correspond pas au profil suivi. Connectez le bon compte, puis validez."]; return;
+        }
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"Quelle organisation suivre pour ce compte ?";
+        NSPopUpButton *picker = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,360,28) pullsDown:NO];
+        for (NSDictionary *org in organizations) [picker addItemWithTitle:org[@"name"] ?: org[@"uuid"]];
+        alert.accessoryView = picker;
+        [alert addButtonWithTitle:@"Choisir"]; [alert addButtonWithTitle:@"Annuler"];
+        // La fenêtre de connexion reste visible pendant ce choix explicite.
+        [alert beginSheetModalForWindow:NSApp.keyWindow completionHandler:^(NSModalResponse response) {
+            if (response != NSAlertFirstButtonReturn || picker.indexOfSelectedItem < 0) {
+                [session showLoginMessage:@"Choix annulé. Le suivi précédent est conservé."]; return;
+            }
+            [self validateClaudeWebOrganization:organizations[picker.indexOfSelectedItem] account:accountId source:source session:session];
+        }];
+    }];
+}
+- (void)validateClaudeWebOrganization:(NSDictionary *)organization account:(NSString *)accountId
+    source:(NSString *)source session:(TMClaudeSession *)session {
+    NSString *orgId = organization[@"uuid"];
+    if (![[NSUUID alloc] initWithUUIDString:orgId]) { [session showLoginMessage:@"Organisation Claude invalide."]; return; }
+    [session fetchUsage:orgId completion:^(NSDictionary *json, NSError *error) {
+        NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
+        if (!session.loginVisible || !current || ![(current[@"claudeSource"] ?: @"") isEqual:source]) return;
+        NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
+        BOOL hasWeekly = NO;
+        for (NSDictionary *window in windows) if (TMWindowIsPrimaryWeekly(window)) hasWeekly = YES;
+        if (error || !hasWeekly) { [session showLoginMessage:error.localizedDescription ?: @"Quota hebdomadaire indisponible. Le suivi précédent est conservé."]; return; }
+        self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"orgId", orgId);
+        self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"web");
+        [self saveAccountRegistry];
+        [self setPayload:@{@"windows":windows, @"capturedAt":@((long long)NSDate.date.timeIntervalSince1970),
+            @"connected":@YES, @"liveSource":@YES, @"stale":@NO, @"error":@""} forAccount:accountId];
+        [session finishLogin];
+        [self recordHistoryAndNotify]; [self pushData];
+    }];
+}
+
 #pragma mark - Claude, une session claude.ai par compte
 
 // Cookie mémorisé : un seul accès au Trousseau par compte et par lancement. Le relire à chaque
@@ -2530,14 +2583,21 @@ static NSDictionary *TMAlertDefaults(void) {
         });
         return;
     }
-    NSString *cookie = [self cookieForAccount:accountId];
+    BOOL web = [entry[@"claudeSource"] isEqual:@"web"];
+    TMClaudeSession *activeSession = self.claudeSessions[accountId];
+    if (activeSession.loginVisible) { if (completion) completion(); return; }
+    NSString *cookie = web ? @"" : [self cookieForAccount:accountId];
     NSString *orgId = entry[@"orgId"];
 
-    if (!cookie.length) {
+    if (!cookie.length && !web) {
         [self mergePayload:@{ @"cookieConfigured": @NO, @"liveSource": @NO,
                               @"error": @"" } forAccount:accountId];
         if (completion) completion();
         return;
+    }
+    if (!orgId.length && web) {
+        [self mergePayload:@{@"connected":@NO, @"liveSource":@NO, @"error":@"Reconnectez ce compte Claude dans la fenêtre web."} forAccount:accountId];
+        if (completion) completion(); return;
     }
     if (!orgId.length) {
         // Cookie posé mais organisation encore inconnue : la résoudre est le seul chemin vers les
@@ -2553,7 +2613,7 @@ static NSDictionary *TMAlertDefaults(void) {
     [session seedCookieIfNeeded:cookie];
     // Un compte migré porte son org id sans son nom : celui-ci n'était renseigné qu'à la pose du
     // cookie. On le comble une fois, sinon le compte resterait un numéro sans rien pour le situer.
-    if (![entry[@"orgName"] length]) {
+    if (!web && ![entry[@"orgName"] length]) {
         [session fetchOrganizations:^(NSArray *organizations, NSError *organizationsError) {
             if (organizationsError) return;
             for (NSDictionary *organization in organizations) {
@@ -2567,6 +2627,9 @@ static NSDictionary *TMAlertDefaults(void) {
         }];
     }
     [session fetchUsage:orgId completion:^(NSDictionary *json, NSError *error) {
+        NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
+        if (!current || ![(current[@"claudeSource"] ?: @"") isEqual:(entry[@"claudeSource"] ?: @"")] ||
+            ![current[@"orgId"] isEqual:orgId]) { if (completion) completion(); return; }
         NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
         BOOL live = windows.count > 0;
         long long capturedAt = live ? (long long)NSDate.date.timeIntervalSince1970
@@ -2584,7 +2647,7 @@ static NSDictionary *TMAlertDefaults(void) {
         [self setPayload:@{
             @"windows": windows, @"capturedAt": @(capturedAt),
             @"stale": @(!live && capturedAt > 0 && age > 1800), @"liveSource": @(live),
-            @"cookieConfigured": @YES, @"orgId": orgId,
+            @"cookieConfigured": @(!web), @"connected": @(live || [[self knownPayload:accountId][@"connected"] boolValue]), @"orgId": orgId,
             @"error": error.localizedDescription ?: @""
         } forAccount:accountId];
         [self pushData];
@@ -2606,11 +2669,12 @@ static NSDictionary *TMAlertDefaults(void) {
 
     if (TMStaleAlertShouldFire(&wasStale, !live)) {
         [self postNotificationTitle:[NSString stringWithFormat:@"Jauges Claude figées · %@", label]
-                               body:@"La session claude.ai de ce compte ne répond plus. Recollez son cookie si cela persiste."];
+                               body:[entry[@"claudeSource"] isEqual:@"web"] ? @"La session web de ce compte ne répond plus. Ouvrez sa connexion web dans Status si cela persiste." : @"La session claude.ai de ce compte ne répond plus. Recollez son cookie si cela persiste."];
     }
     if (TMWatchdogShouldReload(&failures, live, 3)) {
-        [[self claudeSessionForAccount:accountId] hardReloadWithCookieHeader:[self cookieForAccount:accountId]
-                                                                 completion:^{ [self refresh:nil]; }];
+        if (![entry[@"claudeSource"] isEqual:@"web"])
+            [[self claudeSessionForAccount:accountId] hardReloadWithCookieHeader:[self cookieForAccount:accountId]
+                                                                     completion:^{ [self refresh:nil]; }];
     }
     session.wasStale = wasStale;
     session.failures = failures;

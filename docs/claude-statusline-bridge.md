@@ -1,3 +1,20 @@
+# Suivi automatique Claude via le web
+
+Dans Connexions, **Activer le suivi automatique** ouvre une fenêtre Claude isolée pour ce compte.
+Connectez-vous, puis cliquez sur **Valider la connexion**. Status vérifie l’organisation du profil
+précédent et reçoit un quota hebdomadaire avant de basculer. Un mauvais compte, une annulation ou
+une erreur conserve le suivi précédent. Si un nouveau compte possède plusieurs organisations, un
+choix explicite est demandé.
+
+La session reste dans le WKWebsiteDataStore propre à l’UUID du compte. Aucun cookie n’est copié
+ni aucun identifiant Claude Code extrait. Les relevés utilisent la session web toutes les cinq
+minutes en fonctionnement normal, à l’ouverture du popup et au réveil ; le backoff existant ralentit
+les requêtes en cas d’erreur. La session doit être reconnectée si Claude l’expire. Ces endpoints web
+ne constituent pas une API publique garantie ; les erreurs et mesures anciennes restent visibles.
+
+La fenêtre web doit être validée pour chaque compte. La connexion initiale exige une intervention
+humaine. Les notifications restent limitées aux seuils et renouvellements de la semaine globale.
+
 # Suivi Claude Code dans Status
 
 ## Parcours

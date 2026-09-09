@@ -1795,6 +1795,18 @@ static void TestCostCacheSemantics(void) {
     Check(TMCostForTokens(vide, opus, TMCostProviderClaude) == 0, @"aucun token : coût nul");
 }
 
+static void TestClaudeWebIdentity(void) {
+    Section(@"Connexion web Claude — identité et sélection explicite");
+    NSDictionary *a = @{@"uuid":@"11111111-1111-4111-8111-111111111111", @"name":@"Compte A"};
+    NSDictionary *b = @{@"uuid":@"22222222-2222-4222-8222-222222222222", @"name":@"Compte B"};
+    CheckEqual(TMClaudeWebOrganization(@[a,b], a[@"uuid"]), a, @"retrouve l'organisation attendue parmi plusieurs");
+    Check(!TMClaudeWebOrganization(@[b], a[@"uuid"]), @"mauvais compte : refuse la migration");
+    Check(!TMClaudeWebOrganization(@[a,b], @""), @"sans identité préalable, plusieurs organisations exigent un choix");
+    CheckEqual(TMClaudeWebOrganization(@[b], @""), b, @"nouveau compte à une seule organisation");
+    Check(!TMClaudeWebOrganization(@[], @""), @"aucune organisation : aucune migration");
+    Check(!TMClaudeWebOrganization(@[@{@"uuid":@"../other"}, @"bad"], @""), @"identifiants invalides exclus");
+}
+
 static void TestPriceTable(void) {
     Section(@"TMPricesForModel — table datée, jamais de prix fabriqué");
     TMPrices p;
@@ -1804,6 +1816,12 @@ static void TestPriceTable(void) {
           @"opus : cache 1 h à 2× input (10), 5 min à 1,25× (6,25)");
     Check(TMPricesForModel(@"claude-fable-5", &p) && p.input == 10.0 && p.cacheWrite1h == 20.0, @"fable 5 : input 10, cache 1 h 20");
     Check(TMPricesForModel(@"claude-haiku-4-5", &p) && p.cacheWrite1h == 2.0, @"haiku : cache 1 h 2");
+    Check(TMPricesForModel(@"gpt-6-astra", &p) && p.input == 10 && p.output == 50 && p.cacheRead == 1,
+          @"Astra : tarif standard officiel 10 / 50 / 1 dollars par million");
+    TMPrices astra = {0};
+    TMPricesForModel(@"gpt-6-astra", &astra);
+    Check(fabs(TMCostForTokens((TMTokens){.input=1000000,.cacheRead=800000,.output=100000}, astra, TMCostProviderOpenAI)-7.8)<1e-9,
+          @"Astra : tokens historiques tarifés sans compter le cache deux fois");
     Check(!TMPricesForModel(@"gpt-5.4", &p), @"modèle sans tarif : refusé, pas de prix inventé");
     Check(!TMPricesForModel(@"", &p), @"chaîne vide refusée");
     Check(!TMPricesForModel(nil, &p), @"nil refusé");
@@ -1941,6 +1959,7 @@ int main(void) {
         TestFxRefresh();
         TestCostCacheSemantics();
         TestPriceTable();
+        TestClaudeWebIdentity();
         TestParseClaudeLine();
         TestParseCodex();
         TestHistoryCSV();

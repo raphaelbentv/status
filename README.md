@@ -225,3 +225,10 @@ Developer ID Apple, hors sujet ici.
 `legacy-swiftui-prototype.tar.gz` archive un prototype SwiftUI antérieur (`Sources/`,
 `Package.swift`, ses tests), jamais compilé par le packaging et resté sur l'architecture par clés
 API supprimée depuis. Conservé faute de dépôt Git ; supprimable sans risque.
+
+### Tarif Astra
+
+GPT-6 Astra est inclus dans l’équivalent API, y compris les logs déjà enregistrés : le cache
+est recalculé à la mise à jour. Tarif standard vérifié le 9 septembre 2026 : 10 $ en entrée,
+1 $ en lecture de cache et 50 $ en sortie par million de tokens. Les majorations Fast et contexte
+long ne sont pas incluses dans cette estimation. [Source officielle](https://developers.openai.com/api/docs/models/gpt-6-astra).

@@ -540,7 +540,7 @@ section('accountsOf / historyKey — la liste de comptes');
     const sansCookie = { ...claudeAccount('a', 'Perso', []), cookieConfigured: false, orgId: '' };
     const html = menubar(`provider('claude','Claude',${JSON.stringify([sansCookie])},'claude:weekly')`);
     check(!html.includes('${'), 'aucune interpolation non résolue dans le HTML émis');
-    check(html.includes(`send('connectClaudeCode',{accountId:'${sansCookie.accountId}'})`),
+    check(html.includes(`send('connectClaudeWeb',{accountId:'${sansCookie.accountId}'})`),
           'le bouton cible l’action et le compte');
     const openaiVierge = { ...openAIAccount(3, 'Boulot', []), connected: false };
     check(menubar(`provider('openai','OpenAI',${JSON.stringify([openaiVierge])},'openai:weekly')`).includes(`send('loginOpenAI',{accountId:'${openaiVierge.accountId}'})`),
@@ -556,7 +556,7 @@ section('Claude Code : source, connexion et fraîcheur');
   check(waiting.includes('Ouvrir Claude Code')&&waiting.includes('première réponse'),'première mesure explicitement attendue');
   check(!waiting.includes('Coller le cookie')&&!waiting.includes('en direct'),'pas de cookie ou de direct pour le bridge');
   check(dashboard('claudePanel')({...a,stale:true,capturedAt:100}).includes('Mesure ancienne'),'snapshot ancien visible');
-  check(dashboard('claudePanel')({...a,connected:false}).includes('Se connecter avec Claude Code'),'reconnexion officielle');
+  check(dashboard('claudePanel')({...a,connected:false}).includes('Utiliser Claude Code'),'connexion Claude Code toujours disponible');
   check(menubar(`provider('claude','Claude',${JSON.stringify([a])},'claude:weekly')`).includes('connecté · en attente'),'compte bridge reconnu connecté en barre des menus');
 }
 
@@ -628,6 +628,13 @@ section('Popup : jauges, sous-quotas, sélecteurs et état inconnu');
   menubar(`selectPopupAccount('openai','unknown')`);
   checkEqual(menubar('popupSelection.openai'),two.accountId,'sélection inconnue ignorée');
 }
+
+const webClaude = {provider:'claude',accountId:'web-test',label:'Web',claudeSource:'web',connected:true,cookieConfigured:false,orgId:'org',capturedAt:Math.floor(Date.now()/1000),windows:[]};
+check(dashboard('isConnected')('claude',webClaude),'session web connectée sans cookie collé');
+check(!dashboard('isConnected')('claude',{...webClaude,connected:false}),'session web déconnectée signalée');
+const webPanel=dashboard('claudePanel')(webClaude);
+check(webPanel.includes('suivi automatique')&&webPanel.includes('connectClaudeWeb'),'action de connexion web et mode automatique');
+check(!webPanel.includes('Recoller le cookie'),'aucun collage de cookie pour une session web');
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

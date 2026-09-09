@@ -159,3 +159,15 @@ NSDictionary *TMMigrateLegacyAccountsCache(id cache, NSString *openaiAccountId,
     }
     return out;
 }
+
+NSDictionary *TMClaudeWebOrganization(NSArray *organizations, NSString *expectedOrgId) {
+    if (![organizations isKindOfClass:NSArray.class]) return nil;
+    NSMutableArray *valid = [NSMutableArray array];
+    for (id item in organizations) {
+        if (![item isKindOfClass:NSDictionary.class] || ![item[@"uuid"] isKindOfClass:NSString.class]
+            || ![[NSUUID alloc] initWithUUIDString:item[@"uuid"]]) continue;
+        [valid addObject:item];
+        if (expectedOrgId.length && [item[@"uuid"] caseInsensitiveCompare:expectedOrgId] == NSOrderedSame) return item;
+    }
+    return !expectedOrgId.length && valid.count == 1 ? valid.firstObject : nil;
+}

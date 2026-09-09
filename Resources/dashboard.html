@@ -314,7 +314,7 @@ const countdown=timestamp=>{
   if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
   return `dans ${m} min`;
 };
-const isConnected=(id,account)=>id==='openai'||account?.claudeSource==='code'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
+const isConnected=(id,account)=>id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
 // Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, qui garde sa
 // carte et son épinglage mais ne pilote aucun chiffre agrégé — en tête d'affiche, « 54 % » sans
@@ -501,7 +501,7 @@ function providerCostTotal(id){
   const unpriced=partial?`<div class="cost-warn">~ ${Math.round(p.unpricedTokens/1e6)} M tokens de modèles sans tarif, non chiffrés</div>`:'';
   const title=tariffTitle(p.prices);
   const switcher=d.periods?`<span class="segmented cost-period">${COST_PERIODS.map(([k,lab])=>`<button class="seg ${costPeriod===k?'on':''}" onclick="setCostPeriod('${k}')">${lab}</button>`).join('')}</span>`:'';
-  return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">Équivalent API sur ${label} · tous comptes${partial?' · estimation partielle':id==='openai'?' · approximatif':''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}<div class="summary-note">Estimation au tarif API, pas une facture. Usage terminal uniquement.</div>${modelBreakdown(p)}</div>`;
+  return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">Équivalent API sur ${label} · tous comptes${partial?' · estimation partielle':id==='openai'?' · approximatif':''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}<div class="summary-note">Estimation au tarif API, pas une facture. Usage terminal uniquement.${id==='openai'?' Tarif standard ; majorations Fast et contexte long non incluses.':''}</div>${modelBreakdown(p)}</div>`;
 }
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
 function accountBlock(account,history){
@@ -703,16 +703,20 @@ function openAIPanel(account){
   return accountPanel(account,esc(account.label),[accountIdentity(account),plan].filter(Boolean).join(' · '),primary,secondary,account.connected?'Connecté · quotas dans Status.':'Connexion requise.');
 }
 function claudePanel(account){
+  if(account.claudeSource==='web'){
+    const note=account.capturedAt?`${account.stale?'Mesure ancienne':'Dernière mesure'} : ${ageLabel(account.capturedAt)}. Relevé automatique toutes les 5 minutes.`:'En attente du premier relevé web.';
+    return accountPanel(account,esc(account.label),account.connected?'Session web connectée · suivi automatique':'Connexion web requise',connectionAction('connectClaudeWeb',account,account.error?'Reconnecter le suivi':'Ouvrir la connexion web',true),connectionAction('connectClaudeCode',account,'Utiliser Claude Code'),note);
+  }
   const bridge=account.claudeSource==='code'||!account.cookieConfigured;
   if(bridge){
-    const primary=connectionAction(account.connected?'openClaudeCode':'connectClaudeCode',account,account.connected?'Ouvrir Claude Code':'Se connecter avec Claude Code',true);
-    const secondary=account.connected?connectionAction('connectClaudeCode',account,'Reconnecter')+connectionAction('disconnectClaudeCode',account,'Déconnecter'):'';
+    const primary=connectionAction('connectClaudeWeb',account,'Activer le suivi automatique',true);
+    const secondary=account.connected?connectionAction('openClaudeCode',account,'Ouvrir Claude Code')+connectionAction('connectClaudeCode',account,'Reconnecter Claude Code')+connectionAction('disconnectClaudeCode',account,'Déconnecter'):connectionAction('connectClaudeCode',account,'Utiliser Claude Code');
     const state=account.connected?'Connecté via Claude Code':'Connexion Claude Code requise';
     const freshness=account.capturedAt?`${account.stale?'Mesure ancienne':'Dernière mesure'} : ${ageLabel(account.capturedAt)}.`:'En attente de la première mesure, après une première réponse dans ce profil.';
     return accountPanel(account,esc(account.label),[account.email,state].filter(Boolean).join(' · '),primary,secondary,freshness);
   }
   const state=account.orgId?'Session active':'Cookie posé · organisation à résoudre';
-  return accountPanel(account,esc(account.label),[accountIdentity(account),state].filter(Boolean).join(' · '),connectionAction('connectClaudeCode',account,'Passer à Claude Code',true),connectionAction('configureClaudeCookie',account,'Recoller le cookie'),account.stale?'Mesure ancienne : reconnectez ce compte.':'Ancienne connexion web · quotas dans Status.');
+  return accountPanel(account,esc(account.label),[accountIdentity(account),state].filter(Boolean).join(' · '),connectionAction('connectClaudeWeb',account,'Activer le suivi automatique',true),connectionAction('configureClaudeCookie',account,'Recoller le cookie'),account.stale?'Mesure ancienne : reconnectez ce compte.':'Ancienne connexion web · quotas dans Status.');
 }
 function accountPanel(account,name,subtitle,primary,secondary,note){
   const common=connectionAction('renameAccount',account,'Renommer')+connectionAction('removeAccount',account,'Retirer');
@@ -746,7 +750,7 @@ function connectionsView(data){
     // fond sombre — présent, mais invisible.
     return `<article class="connection-panel" style="--provider:${providerColor(provider.id)}"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
   };
-  return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Connexion ChatGPT · une session par compte.',openAIPanel)}${section(PROVIDERS[1],'Connexion officielle · un profil Claude Code par compte. Les quotas sont dans Status et dans le popup.',claudePanel)}</div>`;
+  return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Connexion ChatGPT · une session par compte.',openAIPanel)}${section(PROVIDERS[1],'Suivi automatique via une session web isolée par compte. Claude Code reste disponible en option.',claudePanel)}</div>`;
 }
 function render(){
   if(!appData)return;
