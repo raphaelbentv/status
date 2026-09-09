@@ -2159,7 +2159,9 @@ static NSDictionary *TMAlertDefaults(void) {
     NSMutableDictionary *payload = [known mutableCopy];
     payload[@"accountId"] = accountId;
     payload[@"provider"] = provider;
-    payload[@"label"] = TMAccountDisplayLabel(account, index);
+    NSMutableDictionary *displayAccount = [account mutableCopy];
+    displayAccount[@"email"] = known[@"email"] ?: @"";
+    payload[@"label"] = TMAccountDisplayLabel(displayAccount, index);
     payload[@"customLabel"] = account[@"label"] ?: @"";
     NSString *resetKey = [NSString stringWithFormat:@"lastresetobserved:%@#%@", provider, accountId];
     payload[@"lastWeeklyResetObservedAt"] = @([[NSUserDefaults.standardUserDefaults

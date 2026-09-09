@@ -63,6 +63,7 @@
   .account-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
   .account-block-head strong{font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* Le numéro nomme, l'identité situe : « Claude 1 » suivi de l'organisation, en retrait. */
+  .account-block-head strong,.account-copy strong{white-space:normal;overflow-wrap:anywhere}
   .account-identity{color:var(--muted);font-weight:400;margin-left:7px}
   .provider-manage{margin-left:8px;border:1px solid var(--hair-strong);border-radius:var(--radius);background:var(--soft);padding:2px 7px;cursor:pointer;font-size:12px;color:var(--muted)}
   .provider-manage:hover{background:var(--soft-hover);color:var(--text)}
@@ -697,7 +698,7 @@ function settingsView(data,selected=settingsTab){
 }
 // Ce qui identifie réellement un compte, le numéro ne le disant pas : e-mail côté OpenAI,
 // organisation côté Claude. Vide tant que le compte n'a pas répondu.
-const accountIdentity=account=>account.provider==='openai'?(account.email||''):(account.orgName||'');
+const accountIdentity=account=>account.provider==='openai'?(account.email&&account.email!==account.label?account.email:''):(account.orgName||'');
 
 // Panneau d'un compte OpenAI. Le bouton « Déconnecter » ne touche plus que la session que Status
 // détient pour ce compte : chaque compte a son propre CODEX_HOME.
@@ -725,7 +726,7 @@ function claudePanel(account){
   return accountPanel(account,esc(account.label),[accountIdentity(account),state].filter(Boolean).join(' · '),connectionAction('connectClaudeWeb',account,'Activer le suivi automatique',true),connectionAction('configureClaudeCookie',account,'Recoller le cookie'),account.stale?'Mesure ancienne : reconnectez ce compte.':'Ancienne connexion web · quotas dans Status.');
 }
 function accountPanel(account,name,subtitle,primary,secondary,note){
-  const common=connectionAction('renameAccount',account,'Renommer')+connectionAction('removeAccount',account,'Retirer');
+  const common=(account.provider==='openai'&&account.email?'':connectionAction('renameAccount',account,'Renommer'))+connectionAction('removeAccount',account,'Retirer');
   return `<div class="quota-block" style="--provider:${providerColor(account.provider)}"><div class="account-row"><div class="account-copy"><strong>${name}</strong><small>${esc(subtitle)}</small></div><div class="account-actions">${primary}<details class="account-menu"><summary aria-label="Actions pour ${esc(account.label)}">⋯</summary><div class="account-menu-items">${secondary}${common}</div></details></div></div><p class="connection-note">${esc(note)}</p>${lastWeeklyReset(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 // Écrans (feature luminosité). Un curseur par écran pilotable, indépendant des autres — pas de

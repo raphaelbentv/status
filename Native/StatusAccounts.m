@@ -79,6 +79,8 @@ BOOL TMProviderIsFull(NSArray *registry, NSString *provider) {
 }
 
 NSString *TMAccountDisplayLabel(NSDictionary *account, NSInteger indexInProvider) {
+    NSString *email = [TMString(account[@"email"]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if ([TMString(account[@"provider"]) isEqualToString:TMProviderOpenAI] && email.length) return email;
     NSString *label = TMString(account[@"label"]);
     if (label.length) return label;
     // Numérotation par fournisseur plutôt que le nom fourni par le service. Un « OpenAI 2 » tient

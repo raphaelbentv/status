@@ -344,6 +344,8 @@ static void TestAccountRegistry(void) {
           @"l'autre fournisseur n'est pas affecté");
 
     Section(@"TMAccountDisplayLabel — repli lisible");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider":TMProviderOpenAI,@"label":@"Perso",@"email":@"person@example.com"},0), @"person@example.com", @"OpenAI : email prioritaire sur le nom");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider":TMProviderClaude,@"label":@"Jeudi",@"email":@"person@example.com"},0), @"Jeudi", @"Claude : nom conservé");
     CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderClaude, @"label": @""}, 1),
                @"Claude 2", @"sans label, une numérotation par fournisseur");
     CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderOpenAI, @"label": @""}, 0),
