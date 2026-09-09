@@ -640,6 +640,9 @@ NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
         NSString *provider = pair[0];
         for (NSDictionary *window in pair[1]) {
             if (![window isKindOfClass:NSDictionary.class]) continue;
+            // Tous les événements de quota partagent ce filtre : ni modèle spécifique,
+            // ni session 5 h, ni dépassement ne doit déclencher une alerte de consommation.
+            if (!TMWindowIsPrimaryWeekly(window)) continue;
             NSString *identifier = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"]
                                  : ([window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : nil);
             long long resetsAt = TMInteger(window[@"resetsAt"]);

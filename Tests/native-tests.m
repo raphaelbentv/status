@@ -794,6 +794,25 @@ static void TestQuotaNotificationDecisions(void) {
     r = TMQuotaNotificationDecisions(secondaryState, @[@[@"OpenAI", @[secondary(2)]]], levels, YES, now);
     CheckEqual(@([r[@"events"] count]), @0, @"limite OpenAI additionnelle : aucun reset annoncé");
 
+    // Les seuils suivent le même périmètre que les renouvellements : semaine globale seule.
+    NSArray *excluded = @[secondary(99),
+        TMWin(@"seven_day_scoped_fable", @"7 j · Fable", 99, 1000000, 10080),
+        TMWin(@"seven_day_scoped_opus", @"7 j · Opus", 99, 1000000, 10080),
+        TMWin(@"seven_day_scoped_sonnet", @"7 j · Sonnet", 99, 1000000, 10080),
+        TMWin(@"five_hour", @"5 h", 99, 1000000, 300),
+        TMWin(@"overage", @"Dépassement", 99, 1000000, 0)];
+    for (NSDictionary *window in excluded) {
+        NSDictionary *ignored = TMQuotaNotificationDecisions(nil, pairs(window), levels, YES, now);
+        CheckEqual(@([ignored[@"events"] count]), @0,
+                   [NSString stringWithFormat:@"%@ à 99 %% : aucune alerte", window[@"label"]]);
+        CheckEqual(@([ignored[@"state"] count]), @0, @"fenêtre exclue : aucun état de notification créé");
+    }
+    NSMutableArray *allWindows = [excluded mutableCopy];
+    [allWindows addObject:TMWin(@"seven_day", @"7 jours", 96, 1000000, 10080)];
+    NSDictionary *globalOnly = TMQuotaNotificationDecisions(nil, @[@[@"Claude", allWindows]], levels, YES, now);
+    CheckEqual(@([globalOnly[@"events"] count]), @1, @"relevé mixte : seul le seuil global notifie");
+    CheckEqual([globalOnly[@"events"] firstObject][@"label"], @"7 jours", @"alerte portée par la semaine globale");
+
     // …et la limite générale, elle, notifie toujours, drapeau explicite ou non.
     NSMutableDictionary *primaryHigh = [TMWin(@"codex-10080", @"Semaine", 40, 1000000, 10080) mutableCopy];
     primaryHigh[@"primaryLimit"] = @YES;

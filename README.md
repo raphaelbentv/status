@@ -149,8 +149,9 @@ Actualisation automatique toutes les **5 minutes**, plus au lancement.
 - **Actualisation** : toutes les 5 min, au lancement, à l'ouverture du popover, et au réveil du Mac.
   En cas d'erreur répétée l'intervalle double jusqu'à 40 min (backoff), et repart à zéro dès qu'un
   clic manuel ou une réponse correcte survient.
-- **Alertes** : une notification à 80 % puis à 95 % de chaque fenêtre, une seule fois par période de
-  reset.
+- **Alertes** : une notification au seuil configuré (80 % par défaut), puis à 95 % du quota
+  hebdomadaire global, une seule fois par niveau et par période. Les renouvellements suivent ce
+  même périmètre : aucun seuil ni renouvellement des modèles spécifiques, fenêtres 5 h ou dépassements.
 - **Historique** : un point toutes les 5 min dans `~/Library/Application Support/Status/`
   (~2000 points, soit une semaine), rendu en sparkline sous chaque jauge. Ne contient que des
   identifiants de fenêtre et des pourcentages.
