@@ -540,12 +540,24 @@ section('accountsOf / historyKey — la liste de comptes');
     const sansCookie = { ...claudeAccount('a', 'Perso', []), cookieConfigured: false, orgId: '' };
     const html = menubar(`provider('claude','Claude',${JSON.stringify([sansCookie])},'claude:weekly')`);
     check(!html.includes('${'), 'aucune interpolation non résolue dans le HTML émis');
-    check(html.includes(`send('configureClaudeCookie',{accountId:'${sansCookie.accountId}'})`),
+    check(html.includes(`send('connectClaudeCode',{accountId:'${sansCookie.accountId}'})`),
           'le bouton cible l’action et le compte');
     const openaiVierge = { ...openAIAccount(3, 'Boulot', []), connected: false };
     check(menubar(`provider('openai','OpenAI',${JSON.stringify([openaiVierge])},'openai:weekly')`).includes(`send('loginOpenAI',{accountId:'${openaiVierge.accountId}'})`),
           'côté OpenAI aussi');
   }
+}
+
+section('Claude Code : source, connexion et fraîcheur');
+{
+  const a={provider:'claude',accountId:'a',label:'Claude 1',claudeSource:'code',connected:true,email:'test@example.invalid',windows:[],capturedAt:0};
+  check(dashboard('isConnected')('claude',a),'connecté sans cookie ni organisation web');
+  const waiting=dashboard('claudePanel')(a);
+  check(waiting.includes('Ouvrir Claude Code')&&waiting.includes('première réponse'),'première mesure explicitement attendue');
+  check(!waiting.includes('Coller le cookie')&&!waiting.includes('en direct'),'pas de cookie ou de direct pour le bridge');
+  check(dashboard('claudePanel')({...a,stale:true,capturedAt:100}).includes('Mesure ancienne'),'snapshot ancien visible');
+  check(dashboard('claudePanel')({...a,connected:false}).includes('Se connecter avec Claude Code'),'reconnexion officielle');
+  check(menubar(`provider('claude','Claude',${JSON.stringify([a])},'claude:weekly')`).includes('connecté · en attente'),'compte bridge reconnu connecté en barre des menus');
 }
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);

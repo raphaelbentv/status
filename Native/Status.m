@@ -12,6 +12,7 @@
 #import "StatusCodexServer.h"
 #import "StatusAccounts.h"
 #import "StatusClaudeSession.h"
+#import "StatusClaudeBridge.h"
 #import "StatusWindowManager.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
@@ -433,6 +434,7 @@ static const CGFloat TMTitleBarHeight = 28;
     // cookie, et après tout ce qui a pu vider un magasin.
     for (NSDictionary *account in [self accountsForProvider:TMProviderClaude]) {
         NSString *accountId = account[@"accountId"];
+        if ([account[@"claudeSource"] isEqual:@"code"]) continue;
         NSString *cookie = [self cookieForAccount:accountId];
         if (cookie.length) [[self claudeSessionForAccount:accountId] seedCookieIfNeeded:cookie];
     }
@@ -1646,6 +1648,9 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if (!accountId.length) return;
     if ([action isEqualToString:@"loginOpenAI"]) [self loginOpenAIAccount:accountId];
     if ([action isEqualToString:@"logoutOpenAI"]) [self confirmLogoutOpenAIAccount:accountId];
+    if ([action isEqualToString:@"connectClaudeCode"]) [self connectClaudeCodeAccount:accountId];
+    if ([action isEqualToString:@"openClaudeCode"]) [self openClaudeCodeAccount:accountId];
+    if ([action isEqualToString:@"disconnectClaudeCode"]) [self disconnectClaudeCodeAccount:accountId];
     if ([action isEqualToString:@"configureClaudeCookie"]) [self configureClaudeCookieForAccount:accountId];
     if ([action isEqualToString:@"removeAccount"]) [self confirmRemoveAccount:accountId];
     if ([action isEqualToString:@"renameAccount"]) [self renameAccount:accountId];
@@ -2152,7 +2157,12 @@ static NSDictionary *TMAlertDefaults(void) {
     payload[@"orgId"] = account[@"orgId"] ?: @"";
     payload[@"orgName"] = account[@"orgName"] ?: @"";
     if ([provider isEqualToString:TMProviderClaude]) {
-        payload[@"cookieConfigured"] = @([self cookieForAccount:accountId].length > 0);
+        payload[@"claudeSource"] = account[@"claudeSource"] ?: @"";
+        payload[@"cookieConfigured"] = [account[@"claudeSource"] isEqual:@"code"] ? @NO : @([self cookieForAccount:accountId].length > 0);
+        if ([account[@"claudeSource"] isEqual:@"code"]) {
+            payload[@"orgId"] = known[@"orgId"] ?: @"";
+            payload[@"orgName"] = @"";
+        }
     }
     return payload;
 }
@@ -2206,7 +2216,7 @@ static NSDictionary *TMAlertDefaults(void) {
     [self pushData];
     // Enchaîner sur la connexion : un compte ajouté sans identité ne dit rien et n'affiche rien.
     if ([provider isEqualToString:TMProviderOpenAI]) [self loginOpenAIAccount:accountId];
-    else [self configureClaudeCookieForAccount:accountId];
+    else [self connectClaudeCodeAccount:accountId];
 }
 
 - (void)confirmRemoveAccount:(NSString *)accountId {
@@ -2218,7 +2228,7 @@ static NSDictionary *TMAlertDefaults(void) {
     alert.informativeText = [provider isEqualToString:TMProviderOpenAI]
         ? @"La session Codex propre à ce compte est effacée, ainsi que son historique de quotas. "
           @"Vos autres comptes et la session Codex du Mac ne sont pas touchés."
-        : @"Le cookie de ce compte est effacé du Trousseau, ainsi que son historique de quotas. "
+        : @"Fermez les sessions Claude Code de ce compte avant de le retirer. Son suivi et son historique de quotas seront retirés ; son profil local reste disponible sur ce Mac. "
           @"Vos autres comptes ne sont pas touchés.";
     [alert addButtonWithTitle:@"Supprimer"];
     [alert addButtonWithTitle:@"Annuler"];
@@ -2245,6 +2255,8 @@ static NSDictionary *TMAlertDefaults(void) {
         [self.openAILoginIDs removeObjectForKey:accountId];
         [NSFileManager.defaultManager removeItemAtPath:[self codexHomeForAccount:accountId] error:nil];
     } else {
+        NSString *profile = TMClaudeProfilePath(accountId);
+        if (profile) [NSFileManager.defaultManager removeItemAtPath:[profile stringByAppendingPathComponent:@"bridge.json"] error:nil];
         TMClaudeSession *session = self.claudeSessions[accountId];
         [session destroy];
         [self.claudeSessions removeObjectForKey:accountId];
@@ -2412,6 +2424,66 @@ static NSDictionary *TMAlertDefaults(void) {
     }
 }
 
+#pragma mark - Claude Code : profils isolés et compteurs officiels
+
+- (void)connectClaudeCodeAccount:(NSString *)accountId {
+    NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
+    if (![account[@"provider"] isEqual:TMProviderClaude]) return;
+    if (!TMClaudeExecutable()) {
+        [self mergePayload:@{@"error":@"Installez Claude Code, puis cliquez à nouveau sur Se connecter."} forAccount:accountId];
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://code.claude.com/docs/en/setup"]];
+        [self pushData]; return;
+    }
+    NSString *helper = [NSBundle.mainBundle pathForResource:@"status-claude-collector" ofType:nil];
+    NSString *commandPath = nil; NSError *error = nil;
+    if (!TMPrepareClaudeProfile(accountId, helper, &commandPath, &error)) {
+        [self mergePayload:@{@"error":error.localizedDescription ?: @"Le profil Claude Code n’a pas pu être préparé. Sa configuration a été conservée."} forAccount:accountId];
+        [self pushData]; return;
+    }
+    self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"code");
+    [self saveAccountRegistry];
+    [self setPayload:@{@"source":@"claude_code_statusline", @"connected":@NO, @"windows":@[], @"error":@"", @"liveSource":@NO} forAccount:accountId];
+    [self pushData];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:commandPath]];
+    [self pollClaudeConnection:accountId attempts:24];
+}
+
+- (void)pollClaudeConnection:(NSString *)accountId attempts:(NSInteger)attempts {
+    if (attempts <= 0) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (![TMAccountWithID(self.accountRegistry, accountId)[@"claudeSource"] isEqual:@"code"]) return;
+        NSString *marker = [TMClaudeProfilePath(accountId) stringByAppendingPathComponent:@"bridge.json"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:marker]) return;
+        [self refreshClaudeAccount:accountId completion:^{
+            if (![[self knownPayload:accountId][@"capturedAt"] longLongValue]) [self pollClaudeConnection:accountId attempts:attempts - 1];
+        }];
+    });
+}
+
+- (void)openClaudeCodeAccount:(NSString *)accountId {
+    NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
+    if (![account[@"provider"] isEqual:TMProviderClaude] || ![account[@"claudeSource"] isEqual:@"code"]) return;
+    NSString *path = [TMClaudeProfilePath(accountId) stringByAppendingPathComponent:@"Ouvrir Claude.command"];
+    if (![NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]]) {
+        [self mergePayload:@{@"error":@"Impossible d’ouvrir ce profil. Reconnectez ce compte."} forAccount:accountId];
+        [self pushData];
+    }
+}
+
+- (void)disconnectClaudeCodeAccount:(NSString *)accountId {
+    NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
+    if (![account[@"provider"] isEqual:TMProviderClaude] || ![account[@"claudeSource"] isEqual:@"code"]) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        BOOL ok = TMLogoutClaudeProfile(accountId);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!TMAccountWithID(self.accountRegistry, accountId)) return;
+            [self setPayload:@{@"source":@"claude_code_statusline", @"connected":@NO, @"windows":@[], @"liveSource":@NO,
+                @"error":ok ? @"" : @"Suivi arrêté. La déconnexion Claude Code a échoué ; réessayez avant de retirer le compte."} forAccount:accountId];
+            [self pushData];
+        });
+    });
+}
+
 #pragma mark - Claude, une session claude.ai par compte
 
 // Cookie mémorisé : un seul accès au Trousseau par compte et par lancement. Le relire à chaque
@@ -2439,6 +2511,19 @@ static NSDictionary *TMAlertDefaults(void) {
 
 - (void)refreshClaudeAccount:(NSString *)accountId completion:(void (^)(void))completion {
     NSDictionary *entry = TMAccountWithID(self.accountRegistry, accountId);
+    if ([entry[@"claudeSource"] isEqual:@"code"]) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSDictionary *payload = TMClaudeBridgePayload(accountId);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if ([TMAccountWithID(self.accountRegistry, accountId)[@"claudeSource"] isEqual:@"code"]) {
+                    [self setPayload:payload forAccount:accountId];
+                    [self pushData];
+                }
+                if (completion) completion();
+            });
+        });
+        return;
+    }
     NSString *cookie = [self cookieForAccount:accountId];
     NSString *orgId = entry[@"orgId"];
 
@@ -2685,6 +2770,7 @@ static NSDictionary *TMAlertDefaults(void) {
 - (NSArray *)historyPairs {
     NSMutableArray *pairs = [NSMutableArray array];
     for (NSDictionary *payload in [self accountPayloadList]) {
+        if ([payload[@"claudeSource"] isEqual:@"code"]) continue;
         NSArray *windows = [payload[@"windows"] isKindOfClass:NSArray.class] ? payload[@"windows"] : @[];
         [pairs addObject:@[payload[@"provider"], payload[@"accountId"], windows]];
     }
@@ -2694,6 +2780,9 @@ static NSDictionary *TMAlertDefaults(void) {
 - (void)recordHistoryAndNotify {
     long long now = (long long)NSDate.date.timeIntervalSince1970;
     TMAppendHistory([self historyPairs], now);
+    for (NSDictionary *payload in [self accountPayloadList]) {
+        if ([payload[@"claudeSource"] isEqual:@"code"]) TMRecordClaudeBridgeHistory(payload[@"accountId"], payload);
+    }
     [self notifyQuotaChanges];
 }
 

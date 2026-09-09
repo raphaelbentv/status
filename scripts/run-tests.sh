@@ -26,4 +26,6 @@ else
   web_status=0
 fi
 
+python3 -m unittest discover -s "$ROOT/Tests" -p "test_claude_bridge.py"
+
 exit $(( native_status + web_status ))

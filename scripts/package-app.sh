@@ -12,7 +12,7 @@ clang -fobjc-arc -O2 -I "$ROOT/Native" \
   -framework Cocoa -framework WebKit -framework Security \
   -framework ServiceManagement -framework UserNotifications -framework IOKit \
   "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" \
-  "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusAwake.m" \
+  "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusClaudeBridge.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
   "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" -o "$BUILD"
@@ -28,6 +28,11 @@ cp "$ROOT/Resources/widget.html" "$OUTPUT/Contents/Resources/widget.html"
 cp "$ROOT/Resources/picker.html" "$OUTPUT/Contents/Resources/picker.html"
 cp "$ROOT/Resources/themes.css" "$OUTPUT/Contents/Resources/themes.css"
 cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"
+
+clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation \
+  "$ROOT/Native/StatusClaudeCollector.m" "$ROOT/Native/StatusClaudeBridge.m" \
+  "$ROOT/Native/StatusAccounts.m" "$ROOT/Native/StatusQuota.m" \
+  -o "$OUTPUT/Contents/Resources/status-claude-collector"
 
 xattr -cr "$OUTPUT"
 

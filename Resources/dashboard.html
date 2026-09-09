@@ -293,7 +293,7 @@ const countdown=timestamp=>{
   if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
   return `dans ${m} min`;
 };
-const isConnected=(id,account)=>id==='openai'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
+const isConnected=(id,account)=>id==='openai'||account?.claudeSource==='code'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
 // Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, qui garde sa
 // carte et son épinglage mais ne pilote aucun chiffre agrégé — en tête d'affiche, « 54 % » sans
@@ -439,7 +439,7 @@ const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; retur
 // Le coût équivalent API vient des logs locaux de `claude` et `codex`, qui ne portent aucune
 // identité de compte : il est à l'échelle de la machine. L'afficher sur chaque carte le ferait
 // compter plusieurs fois ; il reste donc au niveau du fournisseur, explicitement étiqueté.
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>${id==='claude'&&value!==null?`${Math.max(0,100-value)} % disponible · `:''}reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
@@ -485,7 +485,7 @@ function providerCostTotal(id){
 function accountBlock(account,history){
   const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':`Non connecté.<br><button class="account-action" onclick="goToView('connections')">Ouvrir Connexions</button>`}</div>`;
-  const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ figé · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
+  const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ mesure ancienne · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
   return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}<div class="quota-grid">${cards}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
@@ -648,7 +648,17 @@ function openAIPanel(account){
 // Panneau d'un compte Claude. Une seule source : le cookie de session claude.ai. Sans lui, rien
 // n'est lisible — d'où un panneau qui ne propose que ça.
 function claudePanel(account){
-  const action=`<button class="account-action ${account.cookieConfigured?'':'primary'}" onclick="send('configureClaudeCookie',{accountId:'${account.accountId}'})">${account.cookieConfigured?'Recoller le cookie':'Coller le cookie'}</button>`;
+  if(account.claudeSource==='code'||!account.cookieConfigured){
+    const connect=`<button class="account-action primary" onclick="send('connectClaudeCode',{accountId:'${account.accountId}'})">${account.connected?'Reconnecter':'Se connecter avec Claude Code'}</button>`;
+    const actions=account.connected?`<button class="account-action primary" onclick="send('openClaudeCode',{accountId:'${account.accountId}'})">Ouvrir Claude Code</button>${connect}<button class="account-action" onclick="send('disconnectClaudeCode',{accountId:'${account.accountId}'})">Déconnecter</button>`:connect;
+    const state=account.connected?'Connecté via Claude Code':'Connexion Claude Code requise';
+    const subtitle=[account.email,state].filter(Boolean).join(' · ');
+    const windows=(account.windows||[]).map(w=>quotaCard(w,account,appData?.history)).join('')||`<div class="quota-empty">${account.connected?'Aucun quota reçu. Ouvrez Claude Code avec ce bouton et attendez votre première réponse.':'Connectez ce compte dans le navigateur via Claude Code. Aucun cookie à copier.'}</div>`;
+    const freshness=account.capturedAt?`${account.stale?'Mesure ancienne':'Dernière mesure'} : ${ageLabel(account.capturedAt)}.`:'En attente de la première mesure.';
+    const note=`<div class="${account.stale?'quota-stale':'quota-empty'}">${freshness} Les quotas sont mis à jour pendant l’utilisation de ce profil Claude Code, puis relus par Status. Actualiser ne déclenche aucune consommation.</div>`;
+    return accountPanel(account,esc(account.label),subtitle,actions,windows,note);
+  }
+  const action=`<button class="account-action primary" onclick="send('connectClaudeCode',{accountId:'${account.accountId}'})">Passer à Claude Code</button><button class="account-action ${account.cookieConfigured?'':'primary'}" onclick="send('configureClaudeCookie',{accountId:'${account.accountId}'})">${account.cookieConfigured?'Recoller le cookie':'Coller le cookie'}</button>`;
   const state=account.cookieConfigured
     ?(account.orgId?`Session active${account.capturedAt?` · ${ageLabel(account.capturedAt)}`:' · en attente'}`:'Cookie posé · organisation à résoudre')
     :'Aucun cookie — quotas indisponibles';
@@ -690,7 +700,7 @@ function connectionsView(data){
     // fond sombre — présent, mais invisible.
     return `<article class="connection-panel" style="--provider:${providerColor(provider.id)}"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
   };
-  return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Quotas ChatGPT via un serveur Codex local par compte.',openAIPanel)}${section(PROVIDERS[1],'Quotas Claude lus sur claude.ai avec le cookie de session du compte (source non officielle).',claudePanel)}</div>`;
+  return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Quotas ChatGPT via un serveur Codex local par compte.',openAIPanel)}${section(PROVIDERS[1],'Connexion officielle Claude Code par compte · quotas 5 h et 7 jours mis à jour pendant son utilisation. Les anciennes connexions restent disponibles pendant la transition.',claudePanel)}</div>`;
 }
 function render(){
   if(!appData)return;

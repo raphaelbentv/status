@@ -167,15 +167,15 @@ function provider(id,name,accounts,metric){
   const windows=account?.windows||[];
   // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
   const weekly=mainWeekly(windows);
-  const connected=id==='openai'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
-  const action=id==='openai'?'loginOpenAI':'configureClaudeCookie';
-  const actionLabel=id==='openai'?'connecter':'coller le cookie';
+  const connected=id==='openai'||account?.claudeSource==='code'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
+  const action=id==='openai'?'loginOpenAI':'connectClaudeCode';
+  const actionLabel=id==='openai'?'connecter':'connecter Claude Code';
   // Badge de fraîcheur (feature 2). « figé » doit crier plus fort qu'une simple mesure ancienne :
   // c'est le signal qui manquait quand les jauges restaient périmées en silence.
   const noteText=(primaryValue)=>{
     if(!connected)return 'non connecté';
     if(account?.liveSource)return '⟳ en direct';
-    if(account?.stale)return `⚠ figé · ${ageLabel(account.capturedAt)}`;
+    if(account?.stale)return `⚠ mesure ancienne · ${ageLabel(account.capturedAt)}`;
     if(account?.capturedAt)return `mesure ${ageLabel(account.capturedAt)}`;
     return primaryValue===null?'connecté · en attente':'quota en direct';
   };

@@ -51,6 +51,7 @@ NSArray<NSDictionary *> *TMNormalizeAccountRegistry(id raw) {
             @"label": TMString(account[@"label"]),
             @"orgId": TMString(account[@"orgId"]),
             @"orgName": TMString(account[@"orgName"]),
+            @"claudeSource": TMString(account[@"claudeSource"]),
             @"order": @(kept.count)
         }];
     }

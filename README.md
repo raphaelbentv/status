@@ -9,7 +9,7 @@ facturée à l'API.
 | Fournisseur | Fenêtres affichées | Source |
 |---|---|---|
 | OpenAI / ChatGPT | Semaine | Codex app-server local (JSON-RPC, officiel) |
-| Claude | 5 h, semaine, par modèle (Fable) | Endpoint `/usage` de claude.ai (non officiel) |
+| Claude | 5 h, semaine | Status line officielle de Claude Code ; anciens comptes web conservés |
 
 OpenAI n'expose plus de fenêtre 5 h : seule la jauge hebdomadaire est affichée.
 
@@ -26,38 +26,28 @@ identité, ses jauges, son historique et ses alertes.
 se déconnecter dans Status **ne déconnecte pas** Codex ni l'app ChatGPT sur ce Mac. En contrepartie,
 il faut se connecter une fois par compte depuis Status.
 
-**Claude.** Chaque compte a son propre cookie de session claude.ai et sa propre session WebKit
-isolée (un `WKWebsiteDataStore` par compte). Cette isolation n'est pas cosmétique : les cookies de
-claude.ai portent les mêmes noms sur le même domaine, et un magasin partagé afficherait pour un
-compte les chiffres d'un autre — des chiffres plausibles, silencieux et faux.
+**Claude.** Les nouvelles connexions passent par Claude Code officiel. Chaque compte possède un
+`CLAUDE_CONFIG_DIR` privé et sa propre status line. Status reçoit uniquement les quotas 5 h / 7 jours
+et leur horodatage ; il ne collecte aucun jeton OAuth. Les comptes web existants restent disponibles
+jusqu’au clic sur **Passer à Claude Code**.
 
-## La source Claude, et ce qu'elle coûte
+## La source Claude et sa fraîcheur
 
-Les quotas Claude sont lus sur `GET /api/organizations/{org}/usage`, avec la session du compte.
-Cet endpoint est **non documenté**, peut casser sans préavis, et exige un cookie de session —
-équivalent à un accès complet au compte. Le cookie est conservé dans le Trousseau de ce Mac, n'est
-envoyé qu'à claude.ai, et se périme à la prochaine déconnexion.
+Le bridge consomme les champs officiels `rate_limits` de la status line. Il ne lance aucun prompt.
+Les mesures apparaissent après une réponse de Claude Code dans le profil du compte ; sans activité,
+elles ne se renouvellent pas. **Actualiser** relit les mesures et l’état de connexion, sans consommer
+de quota. Les fenêtres expirées sont masquées et les mesures de plus de 30 minutes signalées.
 
-C'est la seule source. Les versions précédentes retombaient sur la status line de Claude Code
-quand aucun cookie n'était configuré ; cette voie a été retirée avec le multi-comptes, car elle
-n'écrit qu'un seul `quota-snapshot.json`, accroché à l'installation locale de `claude` : elle ne
-peut refléter qu'un compte, celui auquel la CLI est connectée. La conserver pour ce seul compte
-aurait produit deux natures de comptes, deux modes de fraîcheur et deux jeux de bugs.
-
-Conséquence à assumer : **un cookie expiré n'éteint pas seulement le direct, il éteint le compte.**
-Celui-ci affiche alors son erreur et ses dernières fenêtres connues, et rien de plus. Le remède est
-de recoller son cookie depuis Connexions.
-
-Voir [`docs/quota-auth-research.md`](docs/quota-auth-research.md) § 6 pour l'historique de cet
-arbitrage, et [`docs/superpowers/specs/2026-09-03-multi-comptes-design.md`](docs/superpowers/specs/2026-09-03-multi-comptes-design.md)
-pour la conception du multi-comptes.
+Les anciennes connexions par cookie utilisent toujours l’endpoint privé de claude.ai, sans changement
+automatique de leurs sessions. Le bouton **Passer à Claude Code** prépare le nouveau profil et ouvre
+la connexion officielle dans Terminal. Les détails et limites sont dans
+[le guide du bridge](docs/claude-statusline-bridge.md).
 
 ## Prérequis
 
 - macOS 14 ou plus récent
 - **OpenAI** : Codex CLI (fourni par l'app ChatGPT, ou `codex` dans le `PATH`)
-- **Claude** : un cookie de session claude.ai par compte — aucune installation requise, la CLI
-  `claude` n'est plus utilisée
+- **Claude** : Claude Code natif installé (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`), une connexion par profil
 
 ## Signature stable (recommandé)
 
@@ -124,7 +114,7 @@ bloquera au premier lancement. Procédure :
    l'app, c'est voulu (ils vivent dans le Trousseau).
 
 Le prérequis (Codex CLI) s'applique sur chaque machine pour les quotas OpenAI, et chaque compte
-Claude y demande son cookie ; le Moniteur système, lui, fonctionne sans rien.
+Claude y ouvre la connexion officielle dans Terminal ; le Moniteur système, lui, fonctionne sans rien.
 
 ## Construire et lancer
 
@@ -144,9 +134,11 @@ Depuis l'onglet **Connexions** :
 - **OpenAI** → « Se connecter » : OAuth navigateur piloté par le Codex app-server du compte.
   Status ne voit jamais les jetons. « Déconnecter » n'efface que la session de ce compte, pas celle
   de Codex ni celle des autres comptes.
-- **Claude** → « Coller le cookie » : accepte un collage « Copier comme cURL » et n'en extrait que
-  le cookie, stocké dans le Trousseau sous une entrée propre au compte. L'organisation est ensuite
-  résolue depuis ce cookie ; si le compte en couvre plusieurs, Status demande laquelle suivre.
+- **Claude** → « Se connecter avec Claude Code » : connexion officielle puis session interactive.
+  « Ouvrir Claude Code » réutilise ce profil. « Déconnecter » appelle le logout officiel du profil.
+  Les comptes web existants proposent « Passer à Claude Code » ; leurs cookies ne sont pas importés.
+  Pour Claude Code, « Retirer » arrête le suivi et retire l’historique de quotas, mais conserve le
+  profil local : déconnectez et fermez ses terminaux auparavant pour terminer aussi sa session.
 - **Renommer** / **Retirer** : sur chaque compte. Retirer efface le secret ou le dossier de session
   du compte, ainsi que son historique de quotas.
 
@@ -176,6 +168,8 @@ Native/StatusQuota.{h,m}   logique pure : parsing quotas, fenêtres, cookies, hi
                            Foundation seul, aucune UI — c'est la partie testée.
 Native/StatusAccounts.{h,m}      registre des comptes : identités, ordre, plafond, migrations.
                                  Foundation seul, testé.
+Native/StatusClaudeBridge.{h,m}  profils CLI, lecture auth status, compteurs, fraîcheur, historique
+Native/StatusClaudeCollector.m   exécutable de status line, aucune lecture de credentials
 Native/StatusClaudeSession.{h,m} une session claude.ai par compte : WebView et magasin de
                                  données isolés, fetch /usage et /organizations
 Native/StatusCodexServer.{h,m}   app-server Codex, un par compte (CODEX_HOME dédié)
