@@ -689,6 +689,13 @@ NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
                     && previousUsed && previousUsed.doubleValue - used >= 20;
                 BOOL collapsed = previousUsed && previousUsed.doubleValue >= 25 && used <= 5;
                 BOOL alreadyFired = [next[firedKey] longLongValue] == resetsAt;
+                // Date de détection conservée par compte, indépendamment des notifications.
+                // Ne pas déduire une date passée en soustrayant sept jours à une fenêtre glissante.
+                NSString *observedPeriodKey = [NSString stringWithFormat:@"lastresetperiod:%@:%@", provider, identifier];
+                if ((rolled || collapsed) && [next[observedPeriodKey] longLongValue] != resetsAt) {
+                    next[observedPeriodKey] = @(resetsAt);
+                    next[[NSString stringWithFormat:@"lastresetobserved:%@", provider]] = @((long long)now);
+                }
                 if (weeklyResets && (rolled || collapsed) && !alreadyFired) {
                     next[firedKey] = @(resetsAt);
                     [events addObject:@{ @"kind": @"reset", @"provider": provider, @"label": label,

@@ -710,6 +710,16 @@ static void TestQuotaNotificationDecisions(void) {
     r = TMQuotaNotificationDecisions(state, pairs(weekly), levels, YES, now);
     CheckEqual(@([r[@"events"] count]), @0, @"même observation : plus rien");
 
+    NSDictionary *highReset = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 80, 1000000, 10080)), @[], NO, now)[@"state"];
+    NSDictionary *resetObserved = TMQuotaNotificationDecisions(highReset, pairs(TMWin(@"seven_day", @"Semaine", 2, 1600000, 10080)), @[], NO, 1100000);
+    CheckEqual(resetObserved[@"state"][@"lastresetobserved:Claude"], @1100000, @"date observée enregistrée même avec alertes désactivées");
+    CheckEqual(@([resetObserved[@"events"] count]), @0, @"enregistrer une date ne force pas une notification");
+    NSDictionary *sameReset = TMQuotaNotificationDecisions(resetObserved[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 2, 1600000, 10080)), @[], NO, 1100100);
+    CheckEqual(sameReset[@"state"][@"lastresetobserved:Claude"], @1100000, @"relecture conserve la date originale");
+    NSDictionary *otherAccount = TMQuotaNotificationDecisions(sameReset[@"state"], @[@[@"Claude#other", @[weekly]]], @[], NO, now);
+    Check(!otherAccount[@"state"][@"lastresetobserved:Claude#other"], @"date non partagée entre comptes");
+    Check(!highReset[@"lastresetobserved:Claude"], @"première mesure ne fabrique aucune date passée");
+
     // Montée au second seuil.
     r = TMQuotaNotificationDecisions(r[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 96, 1000000, 10080)),
                                      levels, YES, now);

@@ -2161,6 +2161,9 @@ static NSDictionary *TMAlertDefaults(void) {
     payload[@"provider"] = provider;
     payload[@"label"] = TMAccountDisplayLabel(account, index);
     payload[@"customLabel"] = account[@"label"] ?: @"";
+    NSString *resetKey = [NSString stringWithFormat:@"lastresetobserved:%@#%@", provider, accountId];
+    payload[@"lastWeeklyResetObservedAt"] = @([[NSUserDefaults.standardUserDefaults
+        dictionaryForKey:@"quotaNotificationState"][resetKey] longLongValue]);
     payload[@"orgId"] = account[@"orgId"] ?: @"";
     payload[@"orgName"] = account[@"orgName"] ?: @"";
     if ([provider isEqualToString:TMProviderClaude]) {

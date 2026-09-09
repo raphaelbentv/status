@@ -636,5 +636,12 @@ const webPanel=dashboard('claudePanel')(webClaude);
 check(webPanel.includes('suivi automatique')&&webPanel.includes('connectClaudeWeb'),'action de connexion web et mode automatique');
 check(!webPanel.includes('Recoller le cookie'),'aucun collage de cookie pour une session web');
 
+for(const surface of [dashboard,menubar]){
+  const resetLabel=surface('lastWeeklyReset');
+  check(resetLabel({}).includes('Non observée'),'date inconnue explicitement signalée');
+  check(resetLabel({lastWeeklyResetObservedAt:1700000000}).includes('2023'),'date complète du renouvellement affichée');
+  check(resetLabel({lastWeeklyResetObservedAt:Date.now()/1000+3600}).includes('Non observée'),'date future refusée');
+}
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

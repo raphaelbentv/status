@@ -232,3 +232,8 @@ GPT-6 Astra est inclus dans l’équivalent API, y compris les logs déjà enreg
 est recalculé à la mise à jour. Tarif standard vérifié le 9 septembre 2026 : 10 $ en entrée,
 1 $ en lecture de cache et 50 $ en sortie par million de tokens. Les majorations Fast et contexte
 long ne sont pas incluses dans cette estimation. [Source officielle](https://developers.openai.com/api/docs/models/gpt-6-astra).
+
+Chaque compte affiche la dernière réinitialisation hebdomadaire **observée**, avec date et heure
+locales, dans le tableau de bord, les connexions et le popup. Cette date de détection est persistée
+indépendamment de l’activation des notifications. Sans observation antérieure, « Non observée »
+est affiché ; aucune date n’est extrapolée depuis la prochaine échéance.

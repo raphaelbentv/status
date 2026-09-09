@@ -184,6 +184,12 @@ function quotaRail(window,primary=false){
   const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
   return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${esc(window.label||window.windowId||'Quota')} consommé" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${value} % consommé, ${100-value} % restant"><i style="width:${value}%;background:${color}"></i></div><div class="gauge-caption"><span>${value} % consommé</span><strong>${100-value} % restant</strong></div>`;
 }
+function lastWeeklyReset(account){
+  const t=account?.lastWeeklyResetObservedAt;
+  const valid=typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000;
+  const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
+  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
+}
 function provider(id,name,accounts,metric){
   const account=(accounts||[]).find(a=>a.accountId===popupSelection[id])||pickAccount(accounts,metric);
   const windows=(account?.windows||[]).filter(w=>typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
@@ -218,7 +224,7 @@ function provider(id,name,accounts,metric){
   const additional=windows.filter(w=>w!==weekly);
   const weekLabel=weekly?.label||'Semaine';
   return cells([nameHTML,valueHTML,`<div class="window">${esc(weekLabel)}</div>${quotaRail(weekly,true)}`,
-    `<div class="reset">Renouvellement ${reset(weekly)}</div>`,additional.map(subgauge).join(''),
+    `<div class="reset">Renouvellement ${reset(weekly)}</div>${lastWeeklyReset(account)}`,additional.map(subgauge).join(''),
     noteAndAction(weeklyValue),providerCost(id)]);
 }
 // Le clavier est dessiné, pas écrit : U+2328 (⌨) n'a pas de glyphe dans la police système et
