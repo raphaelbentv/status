@@ -234,10 +234,11 @@ const GLYPH_KEYBOARD='<svg viewBox="0 0 20 14" width="17" height="12" fill="none
   +'<rect x="1" y="1" width="18" height="12" rx="2"/><path d="M4.5 5h1M8 5h1M11.5 5h1M15 5h1M4.5 8h1M8 8h1M11.5 8h1M15 8h1M6.5 10.7h7" stroke-linecap="round"/></svg>';
 function tools(t){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
-  const awake=t?.awake||{},lock=t?.keyboardLock||{};
+  const awake=t?.awake||{},lock=t?.keyboardLock||{},lid=t?.lidMode||{};
   // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
   // après l'avoir accordée dans Réglages système.
-  return btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
+  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?'capot · '+Math.ceil((lid.remainingSeconds||0)/60)+' min':'capot fermé',lid.active&&!lid.unconfirmed)
+    +btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
     +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
 }
 // Un curseur par écran pilotable, les non-pilotables omis (popover trop dense pour l'état « sans

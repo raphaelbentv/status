@@ -237,3 +237,39 @@ Chaque compte affiche la dernière réinitialisation hebdomadaire **observée**,
 locales, dans le tableau de bord, les connexions et le popup. Cette date de détection est persistée
 indépendamment de l’activation des notifications. Sans observation antérieure, « Non observée »
 est affiché ; aucune date n’est extrapolée depuis la prochaine échéance.
+
+## Mode temporaire capot fermé
+
+Dans **Réglages → Système → Continuer capot fermé**, autoriser d’abord le service macOS,
+puis saisir une durée entière entre **1 et 240 minutes** et cliquer sur **Démarrer**.
+Le popup donne accès au réglage et affiche les minutes restantes quand il est actif.
+La première autorisation ne démarre rien. La fermeture du capot doit être testée physiquement
+sur le Mac concerné ; ni un build ni une assertion de veille ne prouvent ce fonctionnement.
+
+Le service impose la faible consommation sur batterie et secteur, et vérifie l’état effectif
+après chaque écriture. Il utilise le réglage global `pmset disablesleep` de macOS, qui affecte
+également la veille manuelle tant que le mode est actif. Ce réglage n’est pas une API publique
+garantie. Le service refuse d’intervenir s’il était déjà actif avant Status.
+
+Surveillance toutes les cinq secondes : arrêt à **30 % de batterie**, données batterie absentes,
+pression thermique macOS dès le niveau **fair**, échéance, réglages externes modifiés ou absence
+de contact de Status depuis plus de vingt secondes. Un signal thermique macOS n’est pas une
+mesure de température ambiante et ne rend pas sûr un fonctionnement dans un sac fermé :
+conserver une ventilation suffisante. Les tâches réseau exigent toujours une connexion.
+
+Le service restaure les réglages qu’il a changés, sans écraser un changement externe identifiable.
+Un journal root privé dans `/var/db/com.raphael.status.lid/` précède les modifications ; après
+interruption/redémarrage du service, il est restauré sans reprendre la session. En cas d’échec,
+le journal est conservé et la restauration réessayée. Ne pas désactiver le service macOS
+pendant une session/restauration ; arrêter le mode d’abord. Une panne du système ou l’arrêt forcé
+du service par un administrateur peut retarder ces protections.
+
+Le LaunchDaemon est enregistré via `SMAppService` et n’accepte que le processus Status signé
+par le même certificat (exigence XPC vérifiée sur les messages). L’app vérifie symétriquement le
+service. Les binaires sont signés avec Hardened Runtime ; une signature ad hoc ne permet pas
+l’activation. Aucun mot de passe n’est lu par Status. Le service n’exécute aucun chemin ni aucune
+commande fournis par le client : seulement les options de gestion d’énergie fixes.
+
+`Tests/lid-mode-tests.m` simule activation, durée libre, batterie, pression thermique, expiration,
+perte de contact, échec d’écriture, récupération après crash et restauration. Ces tests ne
+modifient aucun réglage d’énergie réel. Le helper accepte `--diagnose` pour la lecture seule.

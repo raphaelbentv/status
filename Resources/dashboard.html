@@ -659,6 +659,18 @@ function pinnedOptions(data,metric){
   });
   return rows.length?`<div class="pin-list"><small>Épingler un compte précis</small>${rows.join('')}</div>`:'';
 }
+let lidDuration=30;
+function updateLidDuration(value){lidDuration=Number(value);}
+function startLidMode(){
+  if(!Number.isInteger(lidDuration)||lidDuration<1||lidDuration>240)return;
+  send('startLidMode',{minutes:lidDuration});
+}
+function lidModeSettings(data){
+  const lid=data.tools?.lidMode||{},active=lid.active===true&&!lid.unconfirmed;
+  const pending=lid.restorationPending&&!active;
+  const end=active?new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(Date.now()+Math.max(0,lid.remainingSeconds||0)*1000)):'';
+  return `<section class="setting" data-group="system" style="display:block"><div class="setting-copy"><strong>Continuer capot fermé</strong><small>Mode temporaire, sur batterie ou secteur, sans écran externe. Faible consommation imposée. Arrêt à 30 % de batterie, dès une pression thermique signalée par macOS ou si Status ne répond plus. Les réglages précédents sont ensuite restaurés.</small><small>Gardez le Mac ventilé : ce mode ne garantit pas un usage sûr dans un sac fermé. Une connexion réseau reste nécessaire aux tâches en ligne.</small></div><div class="lid-controls" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:12px">${active?`<strong>Actif jusqu’à ${end}</strong><button class="button" onclick="send('stopLidMode')">Arrêter maintenant</button>`:pending||lid.unconfirmed?`<strong>État à vérifier</strong><button class="button" onclick="send('stopLidMode')">Arrêter et restaurer</button>`:`<label for="lidDuration">Durée (minutes)</label><input id="lidDuration" type="number" min="1" max="240" step="1" value="${Number.isFinite(lidDuration)?lidDuration:30}" oninput="updateLidDuration(this.value)" style="width:90px"/><span>1 à 240 min</span>${lid.authorized?`<button class="button" ${lid.busy?'disabled':''} onclick="startLidMode()">Démarrer</button>`:`<button class="button" ${lid.available===false?'disabled':''} onclick="send('authorizeLidMode')">${lid.approvalRequired?'Ouvrir l’autorisation macOS':'Autoriser le service macOS'}</button><span>L’autorisation n’active pas le mode.</span>`}`}</div><p class="connection-note" role="status">${esc(lid.message||'Désactivé.')}</p></section>`;
+}
 function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',cur=parseMetric(metric),
   // Un segment de fenêtre reste allumé quand un compte est épinglé dessus : c'est toujours cette
   // fenêtre qui pilote l'icône, seul le compte a été restreint. Sans cela la rangée paraissait
@@ -671,6 +683,7 @@ function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claud
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Forme et couleur de la jauge</strong><small>L’icône des consommations, celle qui accompagne le pourcentage. « Aucune » ne laisse que le texte. La couleur « auto » suit l’identité du fournisseur affiché — bleu OpenAI, violet Claude — ce qui indique de qui parle le chiffre ; une couleur choisie la remplace. Dans tous les cas, un quota en alerte passe en ambre puis en rouge.</small></div><div class="widget-config"><div class="wc-row"><span class="segmented wc-shapes">${GAUGE_SHAPES.map(([v,l])=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${l}</button>`).join('')}</span><span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${(p.menuBarIconColor||'auto')===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarIconColor',{value:'${c}'})"></button>`).join('')}</span></div></div></section>
 </div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></section>
+  ${lidModeSettings(data)}
   <section class="setting" data-group="system"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></section>
   <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></section>
   ${p.windowManager?`

@@ -1,3 +1,4 @@
+#import "StatusLidClient.h"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
@@ -354,6 +355,8 @@ static const CGFloat TMTitleBarHeight = 28;
 @property BOOL dashboardMetricsPrimed, popoverMetricsPrimed, widgetMetricsPrimed;
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
+@property TMLidClient *lidMode;
+@property NSTimer *lidTimer;
 @end
 
 // Sans bordure, une fenêtre refuse d'être clé — canBecomeKeyWindow vaut NO par défaut. Le
@@ -369,6 +372,12 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.awake = [TMAwake new];
+    self.lidMode = [TMLidClient new];
+    __weak typeof(self) weakSelf = self;
+    self.lidMode.onChange = ^{ [weakSelf pushData]; };
+    self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf.lidMode refresh];
+    }];
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     [defaults registerDefaults:@{
         @"refreshIntervalMinutes": @5,
@@ -443,6 +452,8 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
+    [self.lidTimer invalidate];
+    [self.lidMode invalidate];  // Le service indépendant restaure sur rupture XPC (ou après 20 s).
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.keyboardLock forceUnlock];
     [self removeGlobalShortcut];
@@ -1641,6 +1652,17 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
     if ([action isEqualToString:@"openDashboard"]) [self openDashboard:nil];
     if ([action isEqualToString:@"quit"]) [NSApp terminate:nil];
+    if ([action isEqualToString:@"authorizeLidMode"]) [self.lidMode requestAuthorization];
+    if ([action isEqualToString:@"startLidMode"]) {
+        NSNumber *minutes = [body[@"minutes"] isKindOfClass:NSNumber.class] ? body[@"minutes"] : nil;
+        if (minutes && minutes.doubleValue == minutes.integerValue && minutes.integerValue >= 1 && minutes.integerValue <= 240)
+            [self.lidMode startMinutes:minutes.integerValue];
+    }
+    if ([action isEqualToString:@"stopLidMode"]) [self.lidMode stop];
+    if ([action isEqualToString:@"showLidMode"]) {
+        [self openDashboard:nil];
+        [self.webView evaluateJavaScript:@"settingsTab='system'; goToView('settings');" completionHandler:nil];
+    }
     if ([action isEqualToString:@"toggleAwake"]) {
         self.awake.enabled = !self.awake.isEnabled;
         [self pushData];
@@ -1722,6 +1744,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         },
         @"tools": @{
         @"awake": @{ @"active": @(self.awake.isEnabled) },
+        @"lidMode": self.lidMode.snapshot ?: @{},
         @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
                                     : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
     },

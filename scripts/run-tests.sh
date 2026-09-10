@@ -17,6 +17,12 @@ clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit -frame
 "$BUILD/native-tests"
 native_status=$?
 
+echo "── Mode capot fermé (simulé, sans modifier la veille) ──"
+clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework Security \
+  "$ROOT/Tests/lid-mode-tests.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusLidProtocol.m" \
+  -o "$BUILD/lid-mode-tests"
+"$BUILD/lid-mode-tests"
+
 echo "── Tests des surfaces web (JavaScript) ──"
 if command -v node >/dev/null; then
   node "$ROOT/Tests/web-tests.mjs"

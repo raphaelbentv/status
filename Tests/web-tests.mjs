@@ -645,5 +645,16 @@ for(const surface of [dashboard,menubar]){
   check(resetLabel({lastWeeklyResetObservedAt:Date.now()/1000+3600}).includes('Non observée'),'date future refusée');
 }
 
+const lidSettings=dashboard('lidModeSettings');
+check(lidSettings({tools:{lidMode:{authorized:false,available:true}}}).includes('Autoriser le service macOS'),'autorisation distincte du démarrage');
+check(!lidSettings({tools:{lidMode:{authorized:false}}}).includes('onclick="startLidMode()"'),'aucun démarrage sans service autorisé');
+check(lidSettings({tools:{lidMode:{authorized:true}}}).includes('type="number"'),'durée personnalisée dans un champ');
+check(lidSettings({tools:{lidMode:{authorized:false}}}).includes('type="number"'),'durée saisissable avant autorisation');
+check(lidSettings({tools:{lidMode:{active:true,remainingSeconds:600}}}).includes('Arrêter maintenant'),'session active stoppable');
+check(lidSettings({tools:{lidMode:{unconfirmed:true,active:true}}}).includes('État à vérifier'),'perte de connexion ne prétend pas active');
+check(lidSettings({tools:{lidMode:{restorationPending:true}}}).includes('Arrêter et restaurer'),'restauration en attente visible');
+check(dashboard('settingsView')({prefs:{},accounts:[],tools:{lidMode:{}}},'system').includes('Continuer capot fermé'),'réglage disponible dans Système');
+check(menubar('tools')({lidMode:{active:true,remainingSeconds:120}}).includes('capot · 2 min'),'popup affiche durée restante');
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);
