@@ -31,15 +31,15 @@
   .r2{grid-row:2}.r3{grid-row:3}.r4{grid-row:4}.r5{grid-row:5}.r6{grid-row:6}
   .r7{grid-row:7;padding-bottom:14px}
   .r8{grid-row:8}
-  .name{font-size:10px;color:var(--provider);font-weight:700;margin-bottom:8px;text-transform:lowercase;letter-spacing:.06em;text-shadow:var(--value-glow,none)}
+  .name{font-size:12px;color:var(--provider);font-weight:700;margin-bottom:8px;text-transform:lowercase;letter-spacing:.06em;text-shadow:var(--value-glow,none)}
   /* Nom du compte retenu, quand il y en a plusieurs : sans lui le chiffre ne dit pas de qui il parle. */
-  .name-sub{display:block;color:var(--muted);font-weight:500;letter-spacing:0;text-transform:none;font-size:9px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .name-sub{display:block;color:var(--muted);font-weight:500;letter-spacing:0;text-transform:none;font-size:12px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .value .unit{font-size:.42em;margin-left:.08em;opacity:.65;font-weight:400}
   .value{font-size:44px;line-height:1;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--provider);text-shadow:var(--value-glow,none)}
   .window{font-size:13px;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
-  .reset{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:5px}
+  .reset{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:5px}
   .subgauge{border-top:1px solid var(--hair);margin-top:14px;padding-top:12px;text-align:left}
-  .subgauge-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em}
+  .subgauge-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
   .subgauge-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;text-shadow:var(--value-glow,none)}
   /* Même trame que la fenêtre principale : une mesure, pas une progression — hachure par
      défaut (blueprint/phosphore), qu'un thème peut remplacer par un aplat ou un dégradé
@@ -48,41 +48,41 @@
   .rail{height:10px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin-top:7px;overflow:hidden}
   .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);box-shadow:var(--edge-glow,none);transition:width .3s ease}
   .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
-  .account-note{margin-top:11px;color:var(--muted);font-size:9.5px;min-height:24px}
+  .account-note{margin-top:11px;color:var(--muted);font-size:12px;min-height:24px}
   .account-note.stale{color:var(--amber);font-weight:700}
   .account-note.live{color:var(--green)}
-  .mb-cost{margin-top:6px;font-size:10.5px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .mb-cost-lbl{color:var(--muted);font-weight:400;font-size:9px}
+  .mb-cost{margin-top:6px;font-size:12px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mb-cost-lbl{color:var(--muted);font-weight:400;font-size:12px}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
   .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
   .mtile{flex:1;background:var(--panel-bg-strong);padding:7px 8px 6px;min-width:0}
-  .mtile .mlabel{font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .mtile .mlabel{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
   .mtile .mvalue{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin:1px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .mtile svg{display:block;width:100%;height:14px}
   .mtile .line{fill:none;stroke-width:1.5;vector-effect:non-scaling-stroke}
   /* Outils machine — rien à voir avec les quotas, d'où la séparation visuelle nette. */
   .tools{display:flex;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
-  .tool{flex:1;border:0;background:var(--panel-bg-strong);color:var(--muted);padding:10px 6px;cursor:pointer;font:inherit;font-size:9.5px;display:flex;flex-direction:column;align-items:center;gap:5px;text-transform:lowercase;letter-spacing:.05em}
+  .tool{flex:1;border:0;background:var(--panel-bg-strong);color:var(--muted);padding:10px 6px;cursor:pointer;font:inherit;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:5px;text-transform:lowercase;letter-spacing:.05em}
   .tool:hover{background:var(--soft);color:var(--text)}
   .tool.on{color:var(--blue);background:rgba(103,232,249,.12)}
   .tool .glyph{font-size:15px;line-height:1;height:15px;display:flex;align-items:center;justify-content:center}
   /* Pleine largeur, segments à parts égales : la rangée leur appartient entièrement. */
   .segmented{display:flex;border:1px solid var(--hair-strong);overflow:hidden;flex:1}
-  .seg{flex:1;border:0;background:transparent;color:var(--muted);padding:6px 4px;cursor:pointer;font:inherit;font-size:9.5px;border-radius:0;white-space:nowrap;
+  .seg{flex:1;border:0;background:transparent;color:var(--muted);padding:6px 4px;cursor:pointer;font:inherit;font-size:12px;border-radius:0;white-space:nowrap;
     /* Un nom de compte peut être long (« contact@venio.paris's Organization ») : il se tronque
        plutôt que d'élargir son segment et d'écraser les autres. */
     overflow:hidden;text-overflow:ellipsis;min-width:0}
   .seg+.seg{border-left:1px solid var(--hair-strong)}
   .seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:rgba(103,232,249,.14);color:var(--blue);font-weight:700}
-  .account-action{border:1px solid var(--provider);color:var(--provider);background:color-mix(in srgb,var(--provider) 10%,transparent);border-radius:var(--radius);padding:6px 9px;margin-top:9px;cursor:pointer;font-size:10px;font-weight:700}
+  .account-action{border:1px solid var(--provider);color:var(--provider);background:color-mix(in srgb,var(--provider) 10%,transparent);border-radius:var(--radius);padding:6px 9px;margin-top:9px;cursor:pointer;font-size:12px;font-weight:700}
   /* Deux rangées, et non une : à six segments, le sélecteur ne laissait plus la place au message
      de backoff (« ⚠ pause · retry dans 39 min », 154 px) qui débordait alors le pied de page.
      Le popover a du vide vertical à revendre — mieux vaut le dépenser que tronquer une alerte. */
   .footer{border-top:1px solid var(--hair-strong);display:flex;flex-direction:column;gap:7px;padding:9px 10px;background:var(--panel-bg-strong);flex:none}
   .footer-row{display:flex;align-items:center;gap:6px}
-  .footer-row > button.sync{flex:1;min-width:0;text-align:left;color:var(--muted);font-size:9.5px;
+  .footer-row > button.sync{flex:1;min-width:0;text-align:left;color:var(--muted);font-size:12px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid transparent;background:transparent;
     padding:5px 6px;border-radius:var(--radius);cursor:pointer;font-family:inherit}
   .footer-row > button.sync:hover{color:var(--text);border-color:var(--hair);background:var(--soft)}
@@ -98,18 +98,28 @@
      dashboard pour l'état « sans réponse » détaillé) : le popover est trop dense pour l'expliquer. */
   .brightness{display:flex;flex-direction:column;gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong);flex:none}
   .b-row{display:flex;align-items:center;gap:8px;background:var(--panel-bg-strong);padding:7px 10px}
-  .b-sun{font-size:11px;color:var(--blue);flex:none;line-height:1}
+  .b-sun{font-size:12px;color:var(--blue);flex:none;line-height:1}
   /* 116 px, largeur fixe : de quoi lire un nom d'écran en entier (« Écran Retina intégré » tenait
      en « Écran R… » à 44 px), et identique d'une ligne à l'autre pour que les curseurs restent
      alignés quand plusieurs écrans sont branchés. */
-  .b-label{font-size:9.5px;color:var(--muted);width:116px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .b-label{font-size:12px;color:var(--muted);width:116px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .b-slider{flex:1;-webkit-appearance:none;appearance:none;height:10px;background:rgba(255,255,255,.04);border:1px solid var(--hair);cursor:pointer}
   .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:15px;background:var(--blue);border:1px solid var(--hair-strong);cursor:pointer}
-  .b-value{font-size:9.5px;color:var(--text);width:28px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
+  .b-value{font-size:12px;color:var(--text);width:28px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
+
+  .provider-picker{width:100%;padding:7px 6px;margin:8px 0 4px;background:var(--panel-bg-strong);color:var(--text);border:1px solid var(--hair-strong);border-radius:var(--radius);font:inherit;font-size:12px}
+  .gauge-caption{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin-top:6px;flex-wrap:wrap}
+  .primary-rail{margin-top:10px}.rail{height:12px;border-radius:3px}.rail i{background:var(--provider)}
+  .subgauge-head{text-transform:none;letter-spacing:0;gap:8px;align-items:flex-start}.subgauge-head span{min-width:0;overflow-wrap:anywhere}.subgauge-head strong{white-space:nowrap}
+  .reset{font-size:12px}.window{font-size:12px;letter-spacing:0;text-transform:none}.value{font-size:38px}
+  .popup-notice{padding:10px 12px;border-bottom:1px solid var(--amber);font-size:12px;color:var(--amber);display:flex;gap:10px;align-items:center;justify-content:space-between;flex:none}.popup-notice button{background:none;border:1px solid var(--amber);border-radius:var(--radius);padding:5px;cursor:pointer}
+  .mb-cost{white-space:normal;font-size:12px}.mb-cost-lbl{display:block}.segmented{flex-wrap:wrap}.footer .seg{flex:1 1 45px}.account-note{line-height:1.5}
+  button:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.popover{--muted:color-mix(in srgb,var(--text) 75%,var(--bg))}.mac-tools{flex:none;background:var(--panel-bg-strong);border-top:1px solid var(--hair-strong)}.mac-tools>summary{padding:9px 14px;color:var(--text);cursor:pointer}.name-sub{display:none}.value.critical{color:var(--danger)}.value.warning{color:var(--amber)}
 </style>
 </head>
 <body>
-<div class="popover"><div class="providers" id="providers"></div><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row" id="accountRow" hidden><span class="segmented" id="account"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row" id="accountRow" hidden><span class="segmented" id="account"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -119,8 +129,9 @@ const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.duration
 // jauge « Semaine » — le max avec lui ferait dire à la jauge autre chose que la carte 7 jours.
 // Le max reste voulu entre limites GÉNÉRALES (OpenAI en expose plusieurs : afficher la première
 // venue montrerait 1 % pendant que l'autre est à 84 %).
+const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
 const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
-const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
+const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
 const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
 const reset=w=>{
@@ -140,7 +151,8 @@ const fmtCost=v=>v>=10?`${Math.round(v).toLocaleString('fr-FR')} $`:`${v.toFixed
 function providerCost(id){
   const c=lastData?.costs; if(!c||c.scanning)return '';
   const d=id==='openai'?c.codex:c.claude; if(!d||d.total8d==null)return '';
-  return `<div class="mb-cost">${id==='openai'?'~ ':''}${fmtCost(d.total8d)}<span class="mb-cost-lbl"> · API 8 j</span></div>`;
+  const partial=Number(d.unpricedTokens)>0;
+  return `<div class="mb-cost">${id==='openai'?'~ ':''}${fmtCost(d.total8d)}<span class="mb-cost-lbl">API 8 j${partial?' · partiel':''}<br>Pas une facture</span></div>`;
 }
 // Le popover garde deux colonnes, une par fournisseur, et y montre le compte le plus contraint —
 // celui sur lequel il y a quelque chose à décider. La grille tient huit rangées en face l'une de
@@ -162,25 +174,43 @@ function pickAccount(accounts,metric){
   });
   return best||(accounts||[])[0]||null;
 }
+const popupSelection={};
+function selectPopupAccount(provider,accountId){
+  if(!lastData?.accounts?.some(a=>a.provider===provider&&a.accountId===accountId))return;
+  popupSelection[provider]=accountId;renderMenu(lastData);
+}
+function quotaRail(window,primary=false){
+  const value=used(window);
+  if(value===null||!Number.isFinite(value))return '';
+  const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
+  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${esc(window.label||window.windowId||'Quota')} consommé" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${value} % consommé, ${100-value} % restant"><i style="width:${value}%;background:${color}"></i></div><div class="gauge-caption"><strong>${100-value} % restant</strong></div>`;
+}
+function lastWeeklyReset(account){
+  const t=account?.lastWeeklyResetObservedAt;
+  const valid=typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000;
+  const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
+  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
+}
 function provider(id,name,accounts,metric){
-  const account=pickAccount(accounts,metric);
-  const windows=account?.windows||[];
+  const account=(accounts||[]).find(a=>a.accountId===popupSelection[id])||pickAccount(accounts,metric);
+  const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
   // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
   const weekly=mainWeekly(windows);
-  const connected=id==='openai'?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
-  const action=id==='openai'?'loginOpenAI':'configureClaudeCookie';
-  const actionLabel=id==='openai'?'connecter':'coller le cookie';
+  const connected=id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
+  const action=id==='openai'?'loginOpenAI':'connectClaudeWeb';
+  const actionLabel=id==='openai'?'connecter':'connecter Claude';
   // Badge de fraîcheur (feature 2). « figé » doit crier plus fort qu'une simple mesure ancienne :
   // c'est le signal qui manquait quand les jauges restaient périmées en silence.
   const noteText=(primaryValue)=>{
     if(!connected)return 'non connecté';
     if(account?.liveSource)return '⟳ en direct';
-    if(account?.stale)return `⚠ figé · ${ageLabel(account.capturedAt)}`;
+    if(account?.stale||(account?.capturedAt&&Date.now()/1000-account.capturedAt>1800))return `⚠ mesure ancienne · ${ageLabel(account.capturedAt)}`;
     if(account?.capturedAt)return `mesure ${ageLabel(account.capturedAt)}`;
     return primaryValue===null?'connecté · en attente':'quota en direct';
   };
   // ⟳ : la source directe répond, badge discret. classe .live pour la couleur verte.
-  const noteClass=account?.liveSource?'live':(account?.stale?'stale':'');
+  const old=account?.stale||(account?.capturedAt&&Date.now()/1000-account.capturedAt>1800);
+  const noteClass=account?.liveSource?'live':(old?'stale':'');
   const noteAndAction=(primaryValue)=>`<div class="account-note ${noteClass}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${account?action:'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?actionLabel:'ajouter un compte'}</button>`}`;
   const col=id==='openai'?'c1':'c2',ink=id==='openai'?'var(--blue)':'var(--purple)';
   // Les sept rangées, dans l'ordre, toujours toutes émises : une case vide tient la place de la
@@ -188,24 +218,14 @@ function provider(id,name,accounts,metric){
   const cells=rows=>rows.map((html,i)=>`<div class="cell ${col} r${i+1}" style="--provider:${ink}">${html}</div>`).join('')
     +`<div class="cell ${col} r8" style="--provider:${ink}"></div>`;
   const several=(accounts||[]).length>1;
-  const nameHTML=`<div class="name">${name}${several&&account?`<span class="name-sub">${esc(account.label)}</span>`:''}</div>`;
+  const nameHTML=`<div class="name">${name}${several&&account?`<span class="name-sub">${esc(account.label)}</span><select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value)">${accounts.map(a=>`<option value="${esc(a.accountId)}" ${a.accountId===account.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`:''}</div>`;
   const weeklyValue=used(weekly);
-  const valueHTML=`<div class="value ${weeklyValue===null?'empty-value':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div>`;
-  const subgauge=(label,value)=>`<div class="subgauge"><div class="subgauge-head"><span>${label}</span><strong>${value===null?'—':value+' %'}</strong></div><div class="rail"><i style="width:${value??0}%"></i></div></div>`;
-  if(id==='openai'){
-    // Pas de sous-jauge côté OpenAI : la fenêtre 5 h n'existe plus dans son offre. La rangée
-    // reste néanmoins émise, vide, pour que la note et le coût tombent en face de ceux de Claude.
-      return cells([nameHTML,valueHTML,'<div class="window">semaine</div>',
-      `<div class="reset">reset ${reset(weekly)}</div>`,'',noteAndAction(weeklyValue),providerCost(id)]);
-  }
-  const session=windows.find(isSession),fable=windows.find(isFable);
-  const sessionValue=used(session),fableValue=used(fable);
-  // La semaine en grand, comme pour OpenAI en face : c'est la fenêtre qui engage réellement,
-  // celle des 5 h se rechargeant d'elle-même dans la demi-journée. Les deux colonnes se lisent
-  // donc de la même façon, rangée par rangée.
-  return cells([nameHTML,valueHTML,'<div class="window">semaine</div>',
-    `<div class="reset">reset ${reset(weekly)}</div>`,
-    subgauge('5h',sessionValue)+(fable?subgauge('fable',fableValue):''),
+  const valueHTML=`<div class="value ${weeklyValue===null?'empty-value':weeklyValue>=95?'critical':weeklyValue>=80?'warning':''}">${weeklyValue===null?'—':(100-weeklyValue)+'<span class="unit">%</span>'}</div>`;
+  const subgauge=w=>`<div class="subgauge"><div class="subgauge-head"><span>${esc(w.label||(isSession(w)?'5 h':w.windowId))}</span></div>${quotaRail(w)}<div class="reset">Renouvellement ${reset(w)}</div></div>`;
+  const additional=windows.filter(w=>w!==weekly);
+  const weekLabel=weekly?.label||'Semaine';
+  return cells([nameHTML,valueHTML,`<div class="window">${esc(weekLabel)} · restant</div>${quotaRail(weekly,true)}`,
+    `<div class="reset">Renouvellement ${reset(weekly)}</div>${lastWeeklyReset(account)}`,additional.map(subgauge).join(''),
     noteAndAction(weeklyValue),providerCost(id)]);
 }
 // Le clavier est dessiné, pas écrit : U+2328 (⌨) n'a pas de glyphe dans la police système et
@@ -214,10 +234,11 @@ const GLYPH_KEYBOARD='<svg viewBox="0 0 20 14" width="17" height="12" fill="none
   +'<rect x="1" y="1" width="18" height="12" rx="2"/><path d="M4.5 5h1M8 5h1M11.5 5h1M15 5h1M4.5 8h1M8 8h1M11.5 8h1M15 8h1M6.5 10.7h7" stroke-linecap="round"/></svg>';
 function tools(t){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
-  const awake=t?.awake||{},lock=t?.keyboardLock||{};
+  const awake=t?.awake||{},lock=t?.keyboardLock||{},lid=t?.lidMode||{};
   // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
   // après l'avoir accordée dans Réglages système.
-  return btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
+  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?'capot · '+Math.ceil((lid.remainingSeconds||0)/60)+' min':'capot fermé',lid.active&&!lid.unconfirmed)
+    +btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
     +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
 }
 // Un curseur par écran pilotable, les non-pilotables omis (popover trop dense pour l'état « sans
@@ -283,6 +304,7 @@ function renderMenu(data){
   const accounts=data.accounts||[];
   const of=providerId=>accounts.filter(a=>a.provider===providerId);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
+  document.querySelector('#notificationNotice').innerHTML=data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>Alertes désactivées sur ce Mac</span><button onclick="send('openNotificationSettings')">Réglages</button></div>`:'';
   document.querySelector('#providers').innerHTML=provider('openai','OpenAI',of('openai'),metric)+provider('claude','Claude',of('claude'),metric);
   document.querySelector('#brightness').innerHTML=brightnessRow(data.displays);
   document.querySelector('#tools').innerHTML=tools(data.tools);

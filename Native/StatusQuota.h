@@ -50,7 +50,8 @@ BOOL TMWindowIsPrimaryWeekly(NSDictionary *window);
 #pragma mark - Notifications de quota
 
 // Décisions de notification entre deux observations des fenêtres : seuils franchis et
-// réinitialisations hebdomadaires. Pur — l'appelant poste les notifications et persiste l'état.
+// réinitialisations du quota hebdomadaire global uniquement. Les sous-quotas par modèle,
+// sessions 5 h et dépassements sont exclus des deux types d’événement. Pur — l'appelant poste les notifications et persiste l'état.
 //   state  : état persistant (plist-safe) — { "th:<provider>:<id>@<resetsAt>": niveau déjà notifié,
 //            "reset:<provider>:<id>": dernier resetsAt connu }. nil = première observation.
 //   pairs  : [[provider, fenêtres], …] — fenêtres normalisées (voir en tête de fichier).
@@ -171,3 +172,7 @@ BOOL TMHistoryKeyMatchesMetric(NSString *key, NSString *metric);
 
 // `pairs` : [ [provider, accountId, fenêtres] ].
 NSArray *TMAppendHistory(NSArray *pairs, long long now);
+
+// Renouvellements globaux détectés, isolés par compte. Au plus 64 dates sur 180 jours.
+// Estimation descriptive (médiane/plage observée), jamais une date garantie du fournisseur.
+NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *accountKey, NSTimeInterval now);

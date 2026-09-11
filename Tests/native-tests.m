@@ -344,6 +344,8 @@ static void TestAccountRegistry(void) {
           @"l'autre fournisseur n'est pas affecté");
 
     Section(@"TMAccountDisplayLabel — repli lisible");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider":TMProviderOpenAI,@"label":@"Perso",@"email":@"person@example.com"},0), @"person@example.com", @"OpenAI : email prioritaire sur le nom");
+    CheckEqual(TMAccountDisplayLabel(@{@"provider":TMProviderClaude,@"label":@"Jeudi",@"email":@"person@example.com"},0), @"Jeudi", @"Claude : nom conservé");
     CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderClaude, @"label": @""}, 1),
                @"Claude 2", @"sans label, une numérotation par fournisseur");
     CheckEqual(TMAccountDisplayLabel(@{@"provider": TMProviderOpenAI, @"label": @""}, 0),
@@ -689,6 +691,67 @@ static NSDictionary *TMWin(NSString *wid, NSString *label, double used, long lon
               @"remainingPercent": @(100 - used), @"resetsAt": @(resetsAt), @"durationMinutes": @(minutes) };
 }
 
+static void TestWeeklyResetStatistics(void) {
+    Section(@"Statistiques de renouvellement — observations globales par compte");
+    double day=86400, now=2000000000;
+    NSString *key=@"openai#one", *historyKey=@"resethistory:openai#one";
+    CheckEqual(TMWeeklyResetStatistics(nil,key,now)[@"status"],@"publicStale",@"référence publique expirée sans date inventée");
+    double fresh=1789084800;
+    NSDictionary *bootstrap=TMWeeklyResetStatistics(nil,key,fresh);
+    CheckEqual(bootstrap[@"status"],@"publicEstimated",@"statistiques publiques alimentent le démarrage");
+    CheckEqual(bootstrap[@"observationCount"],@0,@"aucun faux événement personnel");
+    CheckEqual(bootstrap[@"estimatedAt"],@(1788840353+4.8*86400),@"projection depuis le dernier reset public, jamais depuis maintenant");
+    CheckEqual(TMWeeklyResetStatistics(nil,key,fresh+7*day)[@"status"],@"publicOverdue",@"prévision publique dépassée sans report");
+    CheckEqual(TMWeeklyResetStatistics(nil,@"claude#one",fresh)[@"publicReference"][@"scope"],@"Max",@"périmètre Claude conservé");
+    NSDictionary *personal=@{historyKey:@[@(fresh-15*day),@(fresh-8*day),@(fresh-day)]};
+    CheckEqual(TMWeeklyResetStatistics(personal,key,fresh)[@"basis"],@"account",@"historique personnel prioritaire");
+    NSDictionary *legacy=@{@"lastresetobserved:openai#one":@(now-day)};
+    CheckEqual(TMWeeklyResetStatistics(legacy,key,now)[@"observationCount"],@1,@"ancienne dernière détection conservée comme un seul échantillon");
+    CheckEqual(TMWeeklyResetStatistics(legacy,@"openai#two",now)[@"observationCount"],@0,@"aucune mutualisation des comptes");
+    NSDictionary *regular=@{historyKey:@[@(now-15*day),@(now-8*day),@(now-day)]};
+    NSDictionary *stats=TMWeeklyResetStatistics(regular,key,now);
+    CheckEqual(stats[@"status"],@"estimated",@"trois observations permettent une estimation");
+    CheckEqual(stats[@"medianSeconds"],@(7*day),@"médiane des intervalles effectivement observés");
+    CheckEqual(stats[@"estimatedAt"],@(now+6*day),@"date centrale issue du dernier événement et de la médiane");
+    CheckEqual(stats[@"confidence"],@"low",@"deux intervalles restent peu fiables");
+    Check([stats[@"earliestAt"] doubleValue]<now+6*day && [stats[@"latestAt"] doubleValue]>now+6*day,@"plage avec marge au lieu d'une précision à la minute");
+    CheckEqual(TMWeeklyResetStatistics(regular,key,now+10*day)[@"status"],@"overdue",@"prévision manquée jamais reportée automatiquement d'une semaine");
+    NSMutableArray *dates=[NSMutableArray array];
+    for(int i=5;i>=0;i--) [dates addObject:@(now-day-i*7*day)];
+    CheckEqual(TMWeeklyResetStatistics(@{historyKey:dates},key,now)[@"confidence"],@"moderate",@"cinq intervalles réguliers : confiance modérée seulement");
+    NSDictionary *irregular=TMWeeklyResetStatistics(@{historyKey:@[@(now-20*day),@(now-19*day),@(now-day)]},key,now);
+    CheckEqual(irregular[@"status"],@"irregular",@"forte dispersion empêche une date trompeuse");
+    Check(!irregular[@"estimatedAt"],@"pas de prévision pour des intervalles trop irréguliers");
+    NSDictionary *dirty=@{historyKey:@[@(now-day),@(now-day),@(now+day),@(now-181*day),@"bad",NSNull.null,@(NAN)]};
+    CheckEqual(TMWeeklyResetStatistics(dirty,key,now)[@"observationCount"],@1,@"dates futures anciennes invalides et doublons exclus");
+    [dates removeAllObjects];
+    for(int i=100;i>0;i--) [dates addObject:@(now-i*day)];
+    CheckEqual(TMWeeklyResetStatistics(@{historyKey:dates},key,now)[@"observationCount"],@64,@"historique borné à 64 événements");
+    NSArray *(^pairs)(double,long long)=^NSArray *(double used,long long reset){ return @[@[key,@[TMWin(@"weekly",@"Semaine",used,reset,10080)]]]; };
+    NSDictionary *state=TMQuotaNotificationDecisions(nil,pairs(80,now+day),@[],NO,now-1000)[@"state"];
+    NSDictionary *drift=TMQuotaNotificationDecisions(state,pairs(81,now+8*day),@[],NO,now-500)[@"state"];
+    Check(!drift[historyKey],@"date annoncée qui avance sans baisse : aucun événement statistique");
+    NSDictionary *reset=TMQuotaNotificationDecisions(drift,pairs(2,now+8*day),@[],NO,now);
+    CheckEqual(reset[@"state"][historyKey],@[@(now)],@"baisse forte enregistrée même notifications désactivées");
+    CheckEqual(@([reset[@"events"] count]),@0,@"les statistiques ne créent aucune notification");
+    NSDictionary *repeat=TMQuotaNotificationDecisions(reset[@"state"],pairs(2,now+8*day),@[],NO,now+300)[@"state"];
+    CheckEqual(@([repeat[historyKey] count]),@1,@"relecture et redémarrage ne dupliquent pas le reset");
+    NSDictionary *again=TMQuotaNotificationDecisions(repeat,pairs(80,now+8*day),@[],NO,now+3*day-3600)[@"state"];
+    again=TMQuotaNotificationDecisions(again,pairs(81,now+8*day),@[],NO,now+3*day-1800)[@"state"];
+    again=TMQuotaNotificationDecisions(again,pairs(2,now+8*day),@[],NO,now+3*day)[@"state"];
+    CheckEqual(@([again[historyKey] count]),@2,@"recharge anticipée à 72 h comptée même échéance inchangée");
+    NSDictionary *oscillation=TMQuotaNotificationDecisions(repeat,pairs(80,now+8*day),@[],NO,now+3*day)[@"state"];
+    oscillation=TMQuotaNotificationDecisions(oscillation,pairs(2,now+8*day),@[],NO,now+3*day+300)[@"state"];
+    CheckEqual(@([oscillation[historyKey] count]),@1,@"source haute isolée ne fabrique pas un deuxième reset");
+    NSDictionary *scoped=TMQuotaNotificationDecisions(nil,@[@[key,@[TMWin(@"seven_day_scoped",@"Fable",90,now+day,10080)]]],@[],NO,now)[@"state"];
+    scoped=TMQuotaNotificationDecisions(scoped,@[@[key,@[TMWin(@"seven_day_scoped",@"Fable",0,now+8*day,10080)]]],@[],NO,now+300)[@"state"];
+    Check(!scoped[historyKey],@"renouvellement modèle exclu des statistiques");
+    NSDictionary *migrated=[legacy mutableCopy];
+    NSMutableDictionary *pre=[state mutableCopy]; [pre addEntriesFromDictionary:migrated];
+    NSDictionary *post=TMQuotaNotificationDecisions(pre,pairs(2,now+8*day),@[],NO,now)[@"state"];
+    CheckEqual(@([post[historyKey] count]),@2,@"ancienne détection intégrée au premier nouveau reset");
+}
+
 static void TestQuotaNotificationDecisions(void) {
     Section(@"TMQuotaNotificationDecisions — seuils et réinitialisations hebdo");
     NSArray *levels = @[@80, @95];
@@ -709,6 +772,16 @@ static void TestQuotaNotificationDecisions(void) {
     NSDictionary *state = r[@"state"];
     r = TMQuotaNotificationDecisions(state, pairs(weekly), levels, YES, now);
     CheckEqual(@([r[@"events"] count]), @0, @"même observation : plus rien");
+
+    NSDictionary *highReset = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 80, 1000000, 10080)), @[], NO, now)[@"state"];
+    NSDictionary *resetObserved = TMQuotaNotificationDecisions(highReset, pairs(TMWin(@"seven_day", @"Semaine", 2, 1600000, 10080)), @[], NO, 1100000);
+    CheckEqual(resetObserved[@"state"][@"lastresetobserved:Claude"], @1100000, @"date observée enregistrée même avec alertes désactivées");
+    CheckEqual(@([resetObserved[@"events"] count]), @0, @"enregistrer une date ne force pas une notification");
+    NSDictionary *sameReset = TMQuotaNotificationDecisions(resetObserved[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 2, 1600000, 10080)), @[], NO, 1100100);
+    CheckEqual(sameReset[@"state"][@"lastresetobserved:Claude"], @1100000, @"relecture conserve la date originale");
+    NSDictionary *otherAccount = TMQuotaNotificationDecisions(sameReset[@"state"], @[@[@"Claude#other", @[weekly]]], @[], NO, now);
+    Check(!otherAccount[@"state"][@"lastresetobserved:Claude#other"], @"date non partagée entre comptes");
+    Check(!highReset[@"lastresetobserved:Claude"], @"première mesure ne fabrique aucune date passée");
 
     // Montée au second seuil.
     r = TMQuotaNotificationDecisions(r[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 96, 1000000, 10080)),
@@ -793,6 +866,25 @@ static void TestQuotaNotificationDecisions(void) {
     NSDictionary *secondaryState = TMQuotaNotificationDecisions(nil, @[@[@"OpenAI", @[secondary(40)]]], levels, YES, now)[@"state"];
     r = TMQuotaNotificationDecisions(secondaryState, @[@[@"OpenAI", @[secondary(2)]]], levels, YES, now);
     CheckEqual(@([r[@"events"] count]), @0, @"limite OpenAI additionnelle : aucun reset annoncé");
+
+    // Les seuils suivent le même périmètre que les renouvellements : semaine globale seule.
+    NSArray *excluded = @[secondary(99),
+        TMWin(@"seven_day_scoped_fable", @"7 j · Fable", 99, 1000000, 10080),
+        TMWin(@"seven_day_scoped_opus", @"7 j · Opus", 99, 1000000, 10080),
+        TMWin(@"seven_day_scoped_sonnet", @"7 j · Sonnet", 99, 1000000, 10080),
+        TMWin(@"five_hour", @"5 h", 99, 1000000, 300),
+        TMWin(@"overage", @"Dépassement", 99, 1000000, 0)];
+    for (NSDictionary *window in excluded) {
+        NSDictionary *ignored = TMQuotaNotificationDecisions(nil, pairs(window), levels, YES, now);
+        CheckEqual(@([ignored[@"events"] count]), @0,
+                   [NSString stringWithFormat:@"%@ à 99 %% : aucune alerte", window[@"label"]]);
+        CheckEqual(@([ignored[@"state"] count]), @0, @"fenêtre exclue : aucun état de notification créé");
+    }
+    NSMutableArray *allWindows = [excluded mutableCopy];
+    [allWindows addObject:TMWin(@"seven_day", @"7 jours", 96, 1000000, 10080)];
+    NSDictionary *globalOnly = TMQuotaNotificationDecisions(nil, @[@[@"Claude", allWindows]], levels, YES, now);
+    CheckEqual(@([globalOnly[@"events"] count]), @1, @"relevé mixte : seul le seuil global notifie");
+    CheckEqual([globalOnly[@"events"] firstObject][@"label"], @"7 jours", @"alerte portée par la semaine globale");
 
     // …et la limite générale, elle, notifie toujours, drapeau explicite ou non.
     NSMutableDictionary *primaryHigh = [TMWin(@"codex-10080", @"Semaine", 40, 1000000, 10080) mutableCopy];
@@ -1776,6 +1868,18 @@ static void TestCostCacheSemantics(void) {
     Check(TMCostForTokens(vide, opus, TMCostProviderClaude) == 0, @"aucun token : coût nul");
 }
 
+static void TestClaudeWebIdentity(void) {
+    Section(@"Connexion web Claude — identité et sélection explicite");
+    NSDictionary *a = @{@"uuid":@"11111111-1111-4111-8111-111111111111", @"name":@"Compte A"};
+    NSDictionary *b = @{@"uuid":@"22222222-2222-4222-8222-222222222222", @"name":@"Compte B"};
+    CheckEqual(TMClaudeWebOrganization(@[a,b], a[@"uuid"]), a, @"retrouve l'organisation attendue parmi plusieurs");
+    Check(!TMClaudeWebOrganization(@[b], a[@"uuid"]), @"mauvais compte : refuse la migration");
+    Check(!TMClaudeWebOrganization(@[a,b], @""), @"sans identité préalable, plusieurs organisations exigent un choix");
+    CheckEqual(TMClaudeWebOrganization(@[b], @""), b, @"nouveau compte à une seule organisation");
+    Check(!TMClaudeWebOrganization(@[], @""), @"aucune organisation : aucune migration");
+    Check(!TMClaudeWebOrganization(@[@{@"uuid":@"../other"}, @"bad"], @""), @"identifiants invalides exclus");
+}
+
 static void TestPriceTable(void) {
     Section(@"TMPricesForModel — table datée, jamais de prix fabriqué");
     TMPrices p;
@@ -1785,6 +1889,12 @@ static void TestPriceTable(void) {
           @"opus : cache 1 h à 2× input (10), 5 min à 1,25× (6,25)");
     Check(TMPricesForModel(@"claude-fable-5", &p) && p.input == 10.0 && p.cacheWrite1h == 20.0, @"fable 5 : input 10, cache 1 h 20");
     Check(TMPricesForModel(@"claude-haiku-4-5", &p) && p.cacheWrite1h == 2.0, @"haiku : cache 1 h 2");
+    Check(TMPricesForModel(@"gpt-6-astra", &p) && p.input == 10 && p.output == 50 && p.cacheRead == 1,
+          @"Astra : tarif standard officiel 10 / 50 / 1 dollars par million");
+    TMPrices astra = {0};
+    TMPricesForModel(@"gpt-6-astra", &astra);
+    Check(fabs(TMCostForTokens((TMTokens){.input=1000000,.cacheRead=800000,.output=100000}, astra, TMCostProviderOpenAI)-7.8)<1e-9,
+          @"Astra : tokens historiques tarifés sans compter le cache deux fois");
     Check(!TMPricesForModel(@"gpt-5.4", &p), @"modèle sans tarif : refusé, pas de prix inventé");
     Check(!TMPricesForModel(@"", &p), @"chaîne vide refusée");
     Check(!TMPricesForModel(nil, &p), @"nil refusé");
@@ -1922,6 +2032,7 @@ int main(void) {
         TestFxRefresh();
         TestCostCacheSemantics();
         TestPriceTable();
+        TestClaudeWebIdentity();
         TestParseClaudeLine();
         TestParseCodex();
         TestHistoryCSV();
@@ -1929,6 +2040,7 @@ int main(void) {
         TestWatchdog();
         TestForecastExhaustion();
         TestQuotaNotificationDecisions();
+        TestWeeklyResetStatistics();
         TestMetricsDeltaPayload();
         TestTopProcesses();
         TestTopProcessesEnergy();

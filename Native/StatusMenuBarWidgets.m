@@ -139,7 +139,7 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         r[@"style"] = @"pie";
         if (value) {
             r[@"hasValue"] = @YES;
-            r[@"title"] = r[@"value"] = TMPct(value);
+            r[@"title"] = r[@"value"] = TMPct(@(100 - MIN(100, MAX(0, value.doubleValue))));
             r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
             r[@"series"] = TMFamilySeries(snapshot, widgetId, @"percent");
         }

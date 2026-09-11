@@ -18,11 +18,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface TMClaudeSession : NSObject <WKNavigationDelegate>
+@interface TMClaudeSession : NSObject <WKNavigationDelegate, WKUIDelegate, NSWindowDelegate>
 
 // `accountId` doit être un UUID : il identifie le magasin de données isolé.
 - (instancetype)initWithAccountID:(NSString *)accountId;
 @property (readonly, copy) NSString *accountId;
+
+// Connexion humaine dans le magasin WebKit isolé du compte, sans copier de cookie.
+- (void)showLoginForLabel:(NSString *)label completion:(void (^)(NSArray *organizations))completion;
+- (void)showLoginMessage:(NSString *)message;
+- (void)finishLogin;
+@property (readonly) BOOL loginVisible;
 
 // Compteurs de santé de la source, propres au compte : un cookie mort ne doit pas déclencher le
 // rechargement des WebViews des autres comptes.

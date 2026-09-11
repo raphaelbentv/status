@@ -17,6 +17,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Ne sélectionne jamais une autre organisation que celle attendue. Sans identité préalable,
+// seule une liste à une entrée est résolue automatiquement.
+NSDictionary * _Nullable TMClaudeWebOrganization(NSArray *organizations, NSString *expectedOrgId);
+
 extern NSString *const TMProviderOpenAI;
 extern NSString *const TMProviderClaude;
 

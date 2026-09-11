@@ -1,3 +1,4 @@
+#import "StatusLidClient.h"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
@@ -12,6 +13,7 @@
 #import "StatusCodexServer.h"
 #import "StatusAccounts.h"
 #import "StatusClaudeSession.h"
+#import "StatusClaudeBridge.h"
 #import "StatusWindowManager.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
@@ -353,6 +355,8 @@ static const CGFloat TMTitleBarHeight = 28;
 @property BOOL dashboardMetricsPrimed, popoverMetricsPrimed, widgetMetricsPrimed;
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
+@property TMLidClient *lidMode;
+@property NSTimer *lidTimer;
 @end
 
 // Sans bordure, une fenêtre refuse d'être clé — canBecomeKeyWindow vaut NO par défaut. Le
@@ -368,6 +372,12 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.awake = [TMAwake new];
+    self.lidMode = [TMLidClient new];
+    __weak typeof(self) weakSelf = self;
+    self.lidMode.onChange = ^{ [weakSelf pushData]; };
+    self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf.lidMode refresh];
+    }];
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     [defaults registerDefaults:@{
         @"refreshIntervalMinutes": @5,
@@ -433,6 +443,7 @@ static const CGFloat TMTitleBarHeight = 28;
     // cookie, et après tout ce qui a pu vider un magasin.
     for (NSDictionary *account in [self accountsForProvider:TMProviderClaude]) {
         NSString *accountId = account[@"accountId"];
+        if ([account[@"claudeSource"] isEqual:@"code"] || [account[@"claudeSource"] isEqual:@"web"]) continue;
         NSString *cookie = [self cookieForAccount:accountId];
         if (cookie.length) [[self claudeSessionForAccount:accountId] seedCookieIfNeeded:cookie];
     }
@@ -441,6 +452,8 @@ static const CGFloat TMTitleBarHeight = 28;
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
+    [self.lidTimer invalidate];
+    [self.lidMode invalidate];  // Le service indépendant restaure sur rupture XPC (ou après 20 s).
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.keyboardLock forceUnlock];
     [self removeGlobalShortcut];
@@ -559,7 +572,7 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusItem.button.action = @selector(toggleStatusPopover:);
     [self installHoverTracking];
 
-    NSRect frame = NSMakeRect(0, 0, 400, 540);  // 540 : le coût équivalent ajoute une rangée par fournisseur
+    NSRect frame = NSMakeRect(0, 0, 480, MIN(640, NSScreen.mainScreen.visibleFrame.size.height - 80));  // jauges et sélecteurs de comptes, contenu défilant
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.menuWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
@@ -870,9 +883,9 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
         for (NSDictionary *window in windows) {
             if (!TMWindowIsSession(window) && !TMWindowIsWeekly(window)) continue;
-            [lines addObject:[NSString stringWithFormat:@"%@ · %@ : %ld %% consommé",
+            [lines addObject:[NSString stringWithFormat:@"%@ · %@ : %ld %% restant",
                               account[@"label"], window[@"label"],
-                              (long)(TMNumber(window[@"usedPercent"]) + 0.5)]];
+                              (long)(100 - MIN(100, MAX(0, TMNumber(window[@"usedPercent"]))) + 0.5)]];
         }
     }
     self.statusItem.button.toolTip = lines.count
@@ -921,10 +934,11 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     BOOL isQuotaMetric = ![metric hasPrefix:@"system:"];
     TMSeverity severity = (hasValue && isQuotaMetric) ? TMSeverityForPercent(shown) : TMSeverityNormal;
     if (!hasValue) providerInk = nil;  // le tiret « pas de donnée » n'identifie personne
+    double textValue = isQuotaMetric ? 100 - MIN(100, MAX(0, shown)) : shown;
     NSString *suffix = [metric isEqualToString:@"system:temp"] ? @"°" : @"%";
     NSString *prefix = label ? [label stringByAppendingString:@" "] : @"";
     NSString *title = hasValue
-        ? [NSString stringWithFormat:@" %@%ld%@", prefix, (long)(shown + 0.5), suffix]
+        ? [NSString stringWithFormat:@" %@%ld%@", prefix, (long)(textValue + 0.5), suffix]
         : @" --";
     // Le libellé ne bouge pas d'un tick à l'autre (c'est un choix de réglage) ; seul le nombre
     // varie, de un à trois chiffres. Le gabarit réserve donc la place de « 100 ».
@@ -966,7 +980,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         NSDictionary *readout = @{
             @"style": @"ring", @"hasValue": @(hasValue), @"fraction": @(shown / 100.0),
             @"series": series,
-            @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(shown + 0.5), suffix] : @"—",
+            @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(textValue + 0.5), suffix] : @"—",
             @"valueTemplate": [NSString stringWithFormat:@"100%@", suffix], @"template": @"",
             @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @(severity),
         };
@@ -1603,6 +1617,15 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             [self pushData];
         }
     }
+    if ([action isEqualToString:@"openResetSource"]) {
+        NSDictionary *sources = @{
+            @"claude-study":@"https://claude-resets.com/",
+            @"claude-help":@"https://support.claude.com/en/articles/9797557-usage-limit-best-practices",
+            @"codex-monitor":@"https://codex-reset.com/",
+            @"codex-history":@"https://savemetibo.com/"};
+        NSString *source = [body[@"source"] isKindOfClass:NSString.class] ? sources[body[@"source"]] : nil;
+        if (source) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:source]];
+    }
     if ([action isEqualToString:@"toggleBrightnessKeys"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
@@ -1631,8 +1654,25 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [self startSystemMonitor];  // recrée le timer à la nouvelle cadence
         [self pushData];
     }
+    if ([action isEqualToString:@"openNotificationSettings"]) {
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.Notifications-Settings.extension"]];
+    }
+    if ([action isEqualToString:@"openStorageSettings"]) {
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.settings.Storage"]];
+    }
     if ([action isEqualToString:@"openDashboard"]) [self openDashboard:nil];
     if ([action isEqualToString:@"quit"]) [NSApp terminate:nil];
+    if ([action isEqualToString:@"authorizeLidMode"]) [self.lidMode requestAuthorization];
+    if ([action isEqualToString:@"startLidMode"]) {
+        NSNumber *minutes = [body[@"minutes"] isKindOfClass:NSNumber.class] ? body[@"minutes"] : nil;
+        if (minutes && minutes.doubleValue == minutes.integerValue && minutes.integerValue >= 1 && minutes.integerValue <= 240)
+            [self.lidMode startMinutes:minutes.integerValue];
+    }
+    if ([action isEqualToString:@"stopLidMode"]) [self.lidMode stop];
+    if ([action isEqualToString:@"showLidMode"]) {
+        [self openDashboard:nil];
+        [self.webView evaluateJavaScript:@"settingsTab='system'; goToView('settings');" completionHandler:nil];
+    }
     if ([action isEqualToString:@"toggleAwake"]) {
         self.awake.enabled = !self.awake.isEnabled;
         [self pushData];
@@ -1646,6 +1686,10 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if (!accountId.length) return;
     if ([action isEqualToString:@"loginOpenAI"]) [self loginOpenAIAccount:accountId];
     if ([action isEqualToString:@"logoutOpenAI"]) [self confirmLogoutOpenAIAccount:accountId];
+    if ([action isEqualToString:@"connectClaudeWeb"]) [self connectClaudeWebAccount:accountId];
+    if ([action isEqualToString:@"connectClaudeCode"]) [self connectClaudeCodeAccount:accountId];
+    if ([action isEqualToString:@"openClaudeCode"]) [self openClaudeCodeAccount:accountId];
+    if ([action isEqualToString:@"disconnectClaudeCode"]) [self disconnectClaudeCodeAccount:accountId];
     if ([action isEqualToString:@"configureClaudeCookie"]) [self configureClaudeCookieForAccount:accountId];
     if ([action isEqualToString:@"removeAccount"]) [self confirmRemoveAccount:accountId];
     if ([action isEqualToString:@"renameAccount"]) [self renameAccount:accountId];
@@ -1710,6 +1754,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         },
         @"tools": @{
         @"awake": @{ @"active": @(self.awake.isEnabled) },
+        @"lidMode": self.lidMode.snapshot ?: @{},
         @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
                                     : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
     },
@@ -2147,12 +2192,25 @@ static NSDictionary *TMAlertDefaults(void) {
     NSMutableDictionary *payload = [known mutableCopy];
     payload[@"accountId"] = accountId;
     payload[@"provider"] = provider;
-    payload[@"label"] = TMAccountDisplayLabel(account, index);
+    NSMutableDictionary *displayAccount = [account mutableCopy];
+    displayAccount[@"email"] = known[@"email"] ?: @"";
+    payload[@"label"] = TMAccountDisplayLabel(displayAccount, index);
     payload[@"customLabel"] = account[@"label"] ?: @"";
+    NSString *resetKey = [NSString stringWithFormat:@"lastresetobserved:%@#%@", provider, accountId];
+    payload[@"lastWeeklyResetObservedAt"] = @([[NSUserDefaults.standardUserDefaults
+        dictionaryForKey:@"quotaNotificationState"][resetKey] longLongValue]);
+    payload[@"weeklyResetStats"] = TMWeeklyResetStatistics(
+        [NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"],
+        [NSString stringWithFormat:@"%@#%@", provider, accountId], NSDate.date.timeIntervalSince1970);
     payload[@"orgId"] = account[@"orgId"] ?: @"";
     payload[@"orgName"] = account[@"orgName"] ?: @"";
     if ([provider isEqualToString:TMProviderClaude]) {
-        payload[@"cookieConfigured"] = @([self cookieForAccount:accountId].length > 0);
+        payload[@"claudeSource"] = account[@"claudeSource"] ?: @"";
+        payload[@"cookieConfigured"] = ([account[@"claudeSource"] isEqual:@"code"] || [account[@"claudeSource"] isEqual:@"web"]) ? @NO : @([self cookieForAccount:accountId].length > 0);
+        if ([account[@"claudeSource"] isEqual:@"code"]) {
+            payload[@"orgId"] = known[@"orgId"] ?: @"";
+            payload[@"orgName"] = @"";
+        }
     }
     return payload;
 }
@@ -2206,7 +2264,7 @@ static NSDictionary *TMAlertDefaults(void) {
     [self pushData];
     // Enchaîner sur la connexion : un compte ajouté sans identité ne dit rien et n'affiche rien.
     if ([provider isEqualToString:TMProviderOpenAI]) [self loginOpenAIAccount:accountId];
-    else [self configureClaudeCookieForAccount:accountId];
+    else [self connectClaudeWebAccount:accountId];
 }
 
 - (void)confirmRemoveAccount:(NSString *)accountId {
@@ -2218,7 +2276,7 @@ static NSDictionary *TMAlertDefaults(void) {
     alert.informativeText = [provider isEqualToString:TMProviderOpenAI]
         ? @"La session Codex propre à ce compte est effacée, ainsi que son historique de quotas. "
           @"Vos autres comptes et la session Codex du Mac ne sont pas touchés."
-        : @"Le cookie de ce compte est effacé du Trousseau, ainsi que son historique de quotas. "
+        : @"Fermez les sessions Claude Code de ce compte avant de le retirer. Son suivi et son historique de quotas seront retirés ; son profil local reste disponible sur ce Mac. "
           @"Vos autres comptes ne sont pas touchés.";
     [alert addButtonWithTitle:@"Supprimer"];
     [alert addButtonWithTitle:@"Annuler"];
@@ -2245,6 +2303,8 @@ static NSDictionary *TMAlertDefaults(void) {
         [self.openAILoginIDs removeObjectForKey:accountId];
         [NSFileManager.defaultManager removeItemAtPath:[self codexHomeForAccount:accountId] error:nil];
     } else {
+        NSString *profile = TMClaudeProfilePath(accountId);
+        if (profile) [NSFileManager.defaultManager removeItemAtPath:[profile stringByAppendingPathComponent:@"bridge.json"] error:nil];
         TMClaudeSession *session = self.claudeSessions[accountId];
         [session destroy];
         [self.claudeSessions removeObjectForKey:accountId];
@@ -2257,6 +2317,12 @@ static NSDictionary *TMAlertDefaults(void) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:history options:0 error:nil];
     [data writeToFile:TMHistoryPath() atomically:YES];
 
+    NSMutableDictionary *quotaState = [[NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"] mutableCopy];
+    NSString *suffix = [NSString stringWithFormat:@":%@#%@", provider, accountId];
+    for (NSString *key in quotaState.allKeys)
+        if ([key hasSuffix:suffix] || [key containsString:[suffix stringByAppendingString:@":"]])
+            [quotaState removeObjectForKey:key];
+    [NSUserDefaults.standardUserDefaults setObject:quotaState ?: @{} forKey:@"quotaNotificationState"];
     [self.accountPayloads removeObjectForKey:accountId];
     self.accountRegistry = TMRegistryRemoving(self.accountRegistry, accountId);
     [self saveAccountRegistry];
@@ -2412,6 +2478,118 @@ static NSDictionary *TMAlertDefaults(void) {
     }
 }
 
+#pragma mark - Claude Code : profils isolés et compteurs officiels
+
+- (void)connectClaudeCodeAccount:(NSString *)accountId {
+    NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
+    if (![account[@"provider"] isEqual:TMProviderClaude]) return;
+    if (!TMClaudeExecutable()) {
+        [self mergePayload:@{@"error":@"Installez Claude Code, puis cliquez à nouveau sur Se connecter."} forAccount:accountId];
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://code.claude.com/docs/en/setup"]];
+        [self pushData]; return;
+    }
+    NSString *helper = [NSBundle.mainBundle pathForResource:@"status-claude-collector" ofType:nil];
+    NSString *commandPath = nil; NSError *error = nil;
+    if (!TMPrepareClaudeProfile(accountId, helper, &commandPath, &error)) {
+        [self mergePayload:@{@"error":error.localizedDescription ?: @"Le profil Claude Code n’a pas pu être préparé. Sa configuration a été conservée."} forAccount:accountId];
+        [self pushData]; return;
+    }
+    self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"code");
+    [self saveAccountRegistry];
+    [self setPayload:@{@"source":@"claude_code_statusline", @"connected":@NO, @"windows":@[], @"error":@"", @"liveSource":@NO} forAccount:accountId];
+    [self pushData];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:commandPath]];
+    [self pollClaudeConnection:accountId attempts:24];
+}
+
+- (void)pollClaudeConnection:(NSString *)accountId attempts:(NSInteger)attempts {
+    if (attempts <= 0) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (![TMAccountWithID(self.accountRegistry, accountId)[@"claudeSource"] isEqual:@"code"]) return;
+        NSString *marker = [TMClaudeProfilePath(accountId) stringByAppendingPathComponent:@"bridge.json"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:marker]) return;
+        [self refreshClaudeAccount:accountId completion:^{
+            if (![[self knownPayload:accountId][@"capturedAt"] longLongValue]) [self pollClaudeConnection:accountId attempts:attempts - 1];
+        }];
+    });
+}
+
+- (void)openClaudeCodeAccount:(NSString *)accountId {
+    NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
+    if (![account[@"provider"] isEqual:TMProviderClaude] || ![account[@"claudeSource"] isEqual:@"code"]) return;
+    NSString *path = [TMClaudeProfilePath(accountId) stringByAppendingPathComponent:@"Ouvrir Claude.command"];
+    if (![NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]]) {
+        [self mergePayload:@{@"error":@"Impossible d’ouvrir ce profil. Reconnectez ce compte."} forAccount:accountId];
+        [self pushData];
+    }
+}
+
+- (void)disconnectClaudeCodeAccount:(NSString *)accountId {
+    NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
+    if (![account[@"provider"] isEqual:TMProviderClaude] || ![account[@"claudeSource"] isEqual:@"code"]) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        BOOL ok = TMLogoutClaudeProfile(accountId);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!TMAccountWithID(self.accountRegistry, accountId)) return;
+            [self setPayload:@{@"source":@"claude_code_statusline", @"connected":@NO, @"windows":@[], @"liveSource":@NO,
+                @"error":ok ? @"" : @"Suivi arrêté. La déconnexion Claude Code a échoué ; réessayez avant de retirer le compte."} forAccount:accountId];
+            [self pushData];
+        });
+    });
+}
+
+// La migration n'est appliquée qu'après vérification de l'organisation ET réception de quotas.
+- (void)connectClaudeWebAccount:(NSString *)accountId {
+    NSDictionary *entry = TMAccountWithID(self.accountRegistry, accountId);
+    if (![entry[@"provider"] isEqual:TMProviderClaude]) return;
+    NSString *source = entry[@"claudeSource"] ?: @"";
+    NSString *expected = [source isEqual:@"code"] ? [self knownPayload:accountId][@"orgId"] : entry[@"orgId"];
+    expected = expected ?: @"";
+    TMClaudeSession *session = [self claudeSessionForAccount:accountId];
+    [session showLoginForLabel:TMAccountDisplayLabel(entry, 0) completion:^(NSArray *organizations) {
+        NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
+        if (!current || ![(current[@"claudeSource"] ?: @"") isEqual:source]) { [session finishLogin]; return; }
+        NSDictionary *organization = TMClaudeWebOrganization(organizations, expected);
+        if (organization) { [self validateClaudeWebOrganization:organization account:accountId source:source session:session]; return; }
+        if (expected.length) {
+            [session showLoginMessage:@"Ce compte Claude ne correspond pas au profil suivi. Connectez le bon compte, puis validez."]; return;
+        }
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"Quelle organisation suivre pour ce compte ?";
+        NSPopUpButton *picker = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,360,28) pullsDown:NO];
+        for (NSDictionary *org in organizations) [picker addItemWithTitle:org[@"name"] ?: org[@"uuid"]];
+        alert.accessoryView = picker;
+        [alert addButtonWithTitle:@"Choisir"]; [alert addButtonWithTitle:@"Annuler"];
+        // La fenêtre de connexion reste visible pendant ce choix explicite.
+        [alert beginSheetModalForWindow:NSApp.keyWindow completionHandler:^(NSModalResponse response) {
+            if (response != NSAlertFirstButtonReturn || picker.indexOfSelectedItem < 0) {
+                [session showLoginMessage:@"Choix annulé. Le suivi précédent est conservé."]; return;
+            }
+            [self validateClaudeWebOrganization:organizations[picker.indexOfSelectedItem] account:accountId source:source session:session];
+        }];
+    }];
+}
+- (void)validateClaudeWebOrganization:(NSDictionary *)organization account:(NSString *)accountId
+    source:(NSString *)source session:(TMClaudeSession *)session {
+    NSString *orgId = organization[@"uuid"];
+    if (![[NSUUID alloc] initWithUUIDString:orgId]) { [session showLoginMessage:@"Organisation Claude invalide."]; return; }
+    [session fetchUsage:orgId completion:^(NSDictionary *json, NSError *error) {
+        NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
+        if (!session.loginVisible || !current || ![(current[@"claudeSource"] ?: @"") isEqual:source]) return;
+        NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
+        BOOL hasWeekly = NO;
+        for (NSDictionary *window in windows) if (TMWindowIsPrimaryWeekly(window)) hasWeekly = YES;
+        if (error || !hasWeekly) { [session showLoginMessage:error.localizedDescription ?: @"Quota hebdomadaire indisponible. Le suivi précédent est conservé."]; return; }
+        self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"orgId", orgId);
+        self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"web");
+        [self saveAccountRegistry];
+        [self setPayload:@{@"windows":windows, @"capturedAt":@((long long)NSDate.date.timeIntervalSince1970),
+            @"connected":@YES, @"liveSource":@YES, @"stale":@NO, @"error":@""} forAccount:accountId];
+        [session finishLogin];
+        [self recordHistoryAndNotify]; [self pushData];
+    }];
+}
+
 #pragma mark - Claude, une session claude.ai par compte
 
 // Cookie mémorisé : un seul accès au Trousseau par compte et par lancement. Le relire à chaque
@@ -2439,14 +2617,34 @@ static NSDictionary *TMAlertDefaults(void) {
 
 - (void)refreshClaudeAccount:(NSString *)accountId completion:(void (^)(void))completion {
     NSDictionary *entry = TMAccountWithID(self.accountRegistry, accountId);
-    NSString *cookie = [self cookieForAccount:accountId];
+    if ([entry[@"claudeSource"] isEqual:@"code"]) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSDictionary *payload = TMClaudeBridgePayload(accountId);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if ([TMAccountWithID(self.accountRegistry, accountId)[@"claudeSource"] isEqual:@"code"]) {
+                    [self setPayload:payload forAccount:accountId];
+                    [self pushData];
+                }
+                if (completion) completion();
+            });
+        });
+        return;
+    }
+    BOOL web = [entry[@"claudeSource"] isEqual:@"web"];
+    TMClaudeSession *activeSession = self.claudeSessions[accountId];
+    if (activeSession.loginVisible) { if (completion) completion(); return; }
+    NSString *cookie = web ? @"" : [self cookieForAccount:accountId];
     NSString *orgId = entry[@"orgId"];
 
-    if (!cookie.length) {
+    if (!cookie.length && !web) {
         [self mergePayload:@{ @"cookieConfigured": @NO, @"liveSource": @NO,
                               @"error": @"" } forAccount:accountId];
         if (completion) completion();
         return;
+    }
+    if (!orgId.length && web) {
+        [self mergePayload:@{@"connected":@NO, @"liveSource":@NO, @"error":@"Reconnectez ce compte Claude dans la fenêtre web."} forAccount:accountId];
+        if (completion) completion(); return;
     }
     if (!orgId.length) {
         // Cookie posé mais organisation encore inconnue : la résoudre est le seul chemin vers les
@@ -2462,7 +2660,7 @@ static NSDictionary *TMAlertDefaults(void) {
     [session seedCookieIfNeeded:cookie];
     // Un compte migré porte son org id sans son nom : celui-ci n'était renseigné qu'à la pose du
     // cookie. On le comble une fois, sinon le compte resterait un numéro sans rien pour le situer.
-    if (![entry[@"orgName"] length]) {
+    if (!web && ![entry[@"orgName"] length]) {
         [session fetchOrganizations:^(NSArray *organizations, NSError *organizationsError) {
             if (organizationsError) return;
             for (NSDictionary *organization in organizations) {
@@ -2476,6 +2674,9 @@ static NSDictionary *TMAlertDefaults(void) {
         }];
     }
     [session fetchUsage:orgId completion:^(NSDictionary *json, NSError *error) {
+        NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
+        if (!current || ![(current[@"claudeSource"] ?: @"") isEqual:(entry[@"claudeSource"] ?: @"")] ||
+            ![current[@"orgId"] isEqual:orgId]) { if (completion) completion(); return; }
         NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
         BOOL live = windows.count > 0;
         long long capturedAt = live ? (long long)NSDate.date.timeIntervalSince1970
@@ -2493,7 +2694,7 @@ static NSDictionary *TMAlertDefaults(void) {
         [self setPayload:@{
             @"windows": windows, @"capturedAt": @(capturedAt),
             @"stale": @(!live && capturedAt > 0 && age > 1800), @"liveSource": @(live),
-            @"cookieConfigured": @YES, @"orgId": orgId,
+            @"cookieConfigured": @(!web), @"connected": @(live || [[self knownPayload:accountId][@"connected"] boolValue]), @"orgId": orgId,
             @"error": error.localizedDescription ?: @""
         } forAccount:accountId];
         [self pushData];
@@ -2515,11 +2716,12 @@ static NSDictionary *TMAlertDefaults(void) {
 
     if (TMStaleAlertShouldFire(&wasStale, !live)) {
         [self postNotificationTitle:[NSString stringWithFormat:@"Jauges Claude figées · %@", label]
-                               body:@"La session claude.ai de ce compte ne répond plus. Recollez son cookie si cela persiste."];
+                               body:[entry[@"claudeSource"] isEqual:@"web"] ? @"La session web de ce compte ne répond plus. Ouvrez sa connexion web dans Status si cela persiste." : @"La session claude.ai de ce compte ne répond plus. Recollez son cookie si cela persiste."];
     }
     if (TMWatchdogShouldReload(&failures, live, 3)) {
-        [[self claudeSessionForAccount:accountId] hardReloadWithCookieHeader:[self cookieForAccount:accountId]
-                                                                 completion:^{ [self refresh:nil]; }];
+        if (![entry[@"claudeSource"] isEqual:@"web"])
+            [[self claudeSessionForAccount:accountId] hardReloadWithCookieHeader:[self cookieForAccount:accountId]
+                                                                     completion:^{ [self refresh:nil]; }];
     }
     session.wasStale = wasStale;
     session.failures = failures;
@@ -2685,6 +2887,7 @@ static NSDictionary *TMAlertDefaults(void) {
 - (NSArray *)historyPairs {
     NSMutableArray *pairs = [NSMutableArray array];
     for (NSDictionary *payload in [self accountPayloadList]) {
+        if ([payload[@"claudeSource"] isEqual:@"code"]) continue;
         NSArray *windows = [payload[@"windows"] isKindOfClass:NSArray.class] ? payload[@"windows"] : @[];
         [pairs addObject:@[payload[@"provider"], payload[@"accountId"], windows]];
     }
@@ -2694,6 +2897,9 @@ static NSDictionary *TMAlertDefaults(void) {
 - (void)recordHistoryAndNotify {
     long long now = (long long)NSDate.date.timeIntervalSince1970;
     TMAppendHistory([self historyPairs], now);
+    for (NSDictionary *payload in [self accountPayloadList]) {
+        if ([payload[@"claudeSource"] isEqual:@"code"]) TMRecordClaudeBridgeHistory(payload[@"accountId"], payload);
+    }
     [self notifyQuotaChanges];
 }
 

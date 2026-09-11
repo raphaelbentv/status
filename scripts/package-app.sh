@@ -11,8 +11,8 @@ mkdir -p "$ROOT/work" "$ROOT/outputs"
 clang -fobjc-arc -O2 -I "$ROOT/Native" \
   -framework Cocoa -framework WebKit -framework Security \
   -framework ServiceManagement -framework UserNotifications -framework IOKit \
-  "$ROOT/Native/Status.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" \
-  "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusAwake.m" \
+  "$ROOT/Native/Status.m" "$ROOT/Native/StatusLidClient.m" "$ROOT/Native/StatusLidProtocol.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" \
+  "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusClaudeBridge.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
   "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" -o "$BUILD"
@@ -29,6 +29,15 @@ cp "$ROOT/Resources/picker.html" "$OUTPUT/Contents/Resources/picker.html"
 cp "$ROOT/Resources/themes.css" "$OUTPUT/Contents/Resources/themes.css"
 cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"
 
+clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation \
+  "$ROOT/Native/StatusClaudeCollector.m" "$ROOT/Native/StatusClaudeBridge.m" \
+  "$ROOT/Native/StatusAccounts.m" "$ROOT/Native/StatusQuota.m" \
+  -o "$OUTPUT/Contents/Resources/status-claude-collector"
+
+mkdir -p "$OUTPUT/Contents/Library/LaunchDaemons" "$OUTPUT/Contents/Library/LaunchServices"
+cp "$ROOT/Resources/LaunchDaemons/com.raphael.status.lid-helper.plist" "$OUTPUT/Contents/Library/LaunchDaemons/"
+clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation -framework IOKit -framework Security   "$ROOT/Native/StatusLidHelper.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusLidProtocol.m"   -o "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
+
 xattr -cr "$OUTPUT"
 
 # Signature : une identité stable évite que macOS voie chaque build comme une app différente
@@ -42,7 +51,8 @@ SIGN_IDENTITY="${STATUS_SIGN_IDENTITY:-Status Local Signing}"
 # build à l'autre, pour que macOS reconnaisse la même app et conserve ses autorisations.
 # codesign, lui, accepte parfaitement une identité non approuvée.
 if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-  codesign --force --deep --sign "$SIGN_IDENTITY" "$OUTPUT"
+  codesign --force --options runtime --identifier com.raphael.status.lid-helper --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
+  codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$OUTPUT"
   echo "signé avec : $SIGN_IDENTITY"
 else
   codesign --force --deep --sign - "$OUTPUT"

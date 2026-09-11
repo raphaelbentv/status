@@ -1,7 +1,7 @@
 #import "StatusCost.h"
 #import "StatusQuota.h"  // TMNumber
 
-NSString *const TMPricesAsOfDate = @"19 juillet 2026";
+NSString *const TMPricesAsOfDate = @"19 juillet 2026 · Astra : 9 septembre 2026";
 const double TMEurPerUsd = 0.92;            // 1 $ ≈ 0,92 € — taux indicatif du 19 juillet 2026
 NSString *const TMFxAsOfDate = @"19 juillet 2026";
 
@@ -79,6 +79,8 @@ BOOL TMPricesForModel(NSString *model, TMPrices *outPrices) {
             @"claude-sonnet-4-6": @[@3.0,  @15.0, @0.3,   @3.75,   @6.0],
             @"claude-fable-5":    @[@10.0, @50.0, @1.0,   @12.50,  @20.0],
             @"claude-haiku-4-5":  @[@1.0,  @5.0,  @0.1,   @1.25,   @2.0],
+            // Standard API, vérifié le 09/09/2026 : https://developers.openai.com/api/docs/models/gpt-6-astra
+            @"gpt-6-astra":       @[@10.0, @50.0, @1.0, @12.5, @20.0],
             @"gpt-5.6-sol":       @[@5.0,  @30.0, @0.5,   @6.25,   @10.0],
             @"gpt-5.6-terra":     @[@2.5,  @15.0, @0.25,  @3.125,  @5.0],
             @"gpt-5.6-luna":      @[@1.0,  @6.0,  @0.1,   @1.25,   @2.0],
@@ -324,7 +326,8 @@ static void TMMergeBuckets(NSMutableDictionary *dst, NSDictionary *src) {
 // Version du format de token-usage.json. v3 : coûts recalculés avec le cache 1 h à 2× et sans
 // double-comptage du reasoning Codex. Un cache d'une autre version est ignoré (rescan complet),
 // pas migré — les coûts mémorisés d'une version antérieure seraient faux.
-static NSInteger const TMCostCacheVersion = 3;
+// v4 : rescanner aussi les anciens fichiers pour valoriser les tokens Astra déjà enregistrés.
+static NSInteger const TMCostCacheVersion = 4;
 
 NSDictionary *TMScanTerminalCosts(void) {
     NSDictionary *cache = [NSJSONSerialization JSONObjectWithData:

@@ -9,7 +9,7 @@ facturée à l'API.
 | Fournisseur | Fenêtres affichées | Source |
 |---|---|---|
 | OpenAI / ChatGPT | Semaine | Codex app-server local (JSON-RPC, officiel) |
-| Claude | 5 h, semaine, par modèle (Fable) | Endpoint `/usage` de claude.ai (non officiel) |
+| Claude | 5 h, semaine | Status line officielle de Claude Code ; anciens comptes web conservés |
 
 OpenAI n'expose plus de fenêtre 5 h : seule la jauge hebdomadaire est affichée.
 
@@ -26,38 +26,28 @@ identité, ses jauges, son historique et ses alertes.
 se déconnecter dans Status **ne déconnecte pas** Codex ni l'app ChatGPT sur ce Mac. En contrepartie,
 il faut se connecter une fois par compte depuis Status.
 
-**Claude.** Chaque compte a son propre cookie de session claude.ai et sa propre session WebKit
-isolée (un `WKWebsiteDataStore` par compte). Cette isolation n'est pas cosmétique : les cookies de
-claude.ai portent les mêmes noms sur le même domaine, et un magasin partagé afficherait pour un
-compte les chiffres d'un autre — des chiffres plausibles, silencieux et faux.
+**Claude.** Les nouvelles connexions passent par Claude Code officiel. Chaque compte possède un
+`CLAUDE_CONFIG_DIR` privé et sa propre status line. Status reçoit uniquement les quotas 5 h / 7 jours
+et leur horodatage ; il ne collecte aucun jeton OAuth. Les comptes web existants restent disponibles
+jusqu’au clic sur **Passer à Claude Code**.
 
-## La source Claude, et ce qu'elle coûte
+## La source Claude et sa fraîcheur
 
-Les quotas Claude sont lus sur `GET /api/organizations/{org}/usage`, avec la session du compte.
-Cet endpoint est **non documenté**, peut casser sans préavis, et exige un cookie de session —
-équivalent à un accès complet au compte. Le cookie est conservé dans le Trousseau de ce Mac, n'est
-envoyé qu'à claude.ai, et se périme à la prochaine déconnexion.
+Le bridge consomme les champs officiels `rate_limits` de la status line. Il ne lance aucun prompt.
+Les mesures apparaissent après une réponse de Claude Code dans le profil du compte ; sans activité,
+elles ne se renouvellent pas. **Actualiser** relit les mesures et l’état de connexion, sans consommer
+de quota. Les fenêtres expirées sont masquées et les mesures de plus de 30 minutes signalées.
 
-C'est la seule source. Les versions précédentes retombaient sur la status line de Claude Code
-quand aucun cookie n'était configuré ; cette voie a été retirée avec le multi-comptes, car elle
-n'écrit qu'un seul `quota-snapshot.json`, accroché à l'installation locale de `claude` : elle ne
-peut refléter qu'un compte, celui auquel la CLI est connectée. La conserver pour ce seul compte
-aurait produit deux natures de comptes, deux modes de fraîcheur et deux jeux de bugs.
-
-Conséquence à assumer : **un cookie expiré n'éteint pas seulement le direct, il éteint le compte.**
-Celui-ci affiche alors son erreur et ses dernières fenêtres connues, et rien de plus. Le remède est
-de recoller son cookie depuis Connexions.
-
-Voir [`docs/quota-auth-research.md`](docs/quota-auth-research.md) § 6 pour l'historique de cet
-arbitrage, et [`docs/superpowers/specs/2026-09-03-multi-comptes-design.md`](docs/superpowers/specs/2026-09-03-multi-comptes-design.md)
-pour la conception du multi-comptes.
+Les anciennes connexions par cookie utilisent toujours l’endpoint privé de claude.ai, sans changement
+automatique de leurs sessions. Le bouton **Passer à Claude Code** prépare le nouveau profil et ouvre
+la connexion officielle dans Terminal. Les détails et limites sont dans
+[le guide du bridge](docs/claude-statusline-bridge.md).
 
 ## Prérequis
 
 - macOS 14 ou plus récent
 - **OpenAI** : Codex CLI (fourni par l'app ChatGPT, ou `codex` dans le `PATH`)
-- **Claude** : un cookie de session claude.ai par compte — aucune installation requise, la CLI
-  `claude` n'est plus utilisée
+- **Claude** : Claude Code natif installé (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`), une connexion par profil
 
 ## Signature stable (recommandé)
 
@@ -124,7 +114,7 @@ bloquera au premier lancement. Procédure :
    l'app, c'est voulu (ils vivent dans le Trousseau).
 
 Le prérequis (Codex CLI) s'applique sur chaque machine pour les quotas OpenAI, et chaque compte
-Claude y demande son cookie ; le Moniteur système, lui, fonctionne sans rien.
+Claude y ouvre la connexion officielle dans Terminal ; le Moniteur système, lui, fonctionne sans rien.
 
 ## Construire et lancer
 
@@ -144,9 +134,11 @@ Depuis l'onglet **Connexions** :
 - **OpenAI** → « Se connecter » : OAuth navigateur piloté par le Codex app-server du compte.
   Status ne voit jamais les jetons. « Déconnecter » n'efface que la session de ce compte, pas celle
   de Codex ni celle des autres comptes.
-- **Claude** → « Coller le cookie » : accepte un collage « Copier comme cURL » et n'en extrait que
-  le cookie, stocké dans le Trousseau sous une entrée propre au compte. L'organisation est ensuite
-  résolue depuis ce cookie ; si le compte en couvre plusieurs, Status demande laquelle suivre.
+- **Claude** → « Se connecter avec Claude Code » : connexion officielle puis session interactive.
+  « Ouvrir Claude Code » réutilise ce profil. « Déconnecter » appelle le logout officiel du profil.
+  Les comptes web existants proposent « Passer à Claude Code » ; leurs cookies ne sont pas importés.
+  Pour Claude Code, « Retirer » arrête le suivi et retire l’historique de quotas, mais conserve le
+  profil local : déconnectez et fermez ses terminaux auparavant pour terminer aussi sa session.
 - **Renommer** / **Retirer** : sur chaque compte. Retirer efface le secret ou le dossier de session
   du compte, ainsi que son historique de quotas.
 
@@ -157,16 +149,25 @@ Actualisation automatique toutes les **5 minutes**, plus au lancement.
 - **Actualisation** : toutes les 5 min, au lancement, à l'ouverture du popover, et au réveil du Mac.
   En cas d'erreur répétée l'intervalle double jusqu'à 40 min (backoff), et repart à zéro dès qu'un
   clic manuel ou une réponse correcte survient.
-- **Alertes** : une notification à 80 % puis à 95 % de chaque fenêtre, une seule fois par période de
-  reset.
+- **Alertes** : une notification au seuil configuré (80 % par défaut), puis à 95 % du quota
+  hebdomadaire global, une seule fois par niveau et par période. Les renouvellements suivent ce
+  même périmètre : aucun seuil ni renouvellement des modèles spécifiques, fenêtres 5 h ou dépassements.
 - **Historique** : un point toutes les 5 min dans `~/Library/Application Support/Status/`
   (~2000 points, soit une semaine), rendu en sparkline sous chaque jauge. Ne contient que des
   identifiants de fenêtre et des pourcentages.
 - **Réglages** (onglet dédié) : lancement au démarrage, et choix de la jauge affichée dans la barre
   des menus. Les agrégats (« Claude sem. ») suivent le compte le plus contraint du fournisseur et
   changent donc de compte tout seuls ; un épinglage par compte est proposé dès qu'un fournisseur en
-  a plusieurs. Le popover de la barre des menus, lui, ne propose que les agrégats : avec dix comptes
-  possibles, une liste complète y serait illisible.
+  a plusieurs. Les réglages sont regroupés en Apparence, Quotas, Alertes, Système et Raccourcis.
+- **Popup** : sélecteur de compte indépendant pour chaque fournisseur, jauges de consommation et
+  pourcentage restant pour chaque fenêtre active, avec date de renouvellement. Ce choix ne modifie
+  pas la jauge épinglée dans la barre des menus. Les outils du Mac sont repliables.
+- **Vue d’ensemble** : disponibilité selon les mesures récentes, compte le plus disponible et
+  prochain renouvellement hebdomadaire par fournisseur ; tri par disponibilité, renouvellement ou nom.
+  Les comptes sans mesure récente restent à actualiser ; leurs quotas ne sont jamais additionnés.
+- **Lisibilité** : connexions compactes, coûts API explicitement estimatifs et partiels lorsque des
+  tokens ne sont pas tarifés, espace disque libre/total et accès aux réglages de stockage. Un bandeau
+  signale les notifications refusées par macOS. Fable n’est proposé que si une fenêtre est reçue.
 
 ## Architecture
 
@@ -176,6 +177,8 @@ Native/StatusQuota.{h,m}   logique pure : parsing quotas, fenêtres, cookies, hi
                            Foundation seul, aucune UI — c'est la partie testée.
 Native/StatusAccounts.{h,m}      registre des comptes : identités, ordre, plafond, migrations.
                                  Foundation seul, testé.
+Native/StatusClaudeBridge.{h,m}  profils CLI, lecture auth status, compteurs, fraîcheur, historique
+Native/StatusClaudeCollector.m   exécutable de status line, aucune lecture de credentials
 Native/StatusClaudeSession.{h,m} une session claude.ai par compte : WebView et magasin de
                                  données isolés, fetch /usage et /organizations
 Native/StatusCodexServer.{h,m}   app-server Codex, un par compte (CODEX_HOME dédié)
@@ -222,3 +225,94 @@ Developer ID Apple, hors sujet ici.
 `legacy-swiftui-prototype.tar.gz` archive un prototype SwiftUI antérieur (`Sources/`,
 `Package.swift`, ses tests), jamais compilé par le packaging et resté sur l'architecture par clés
 API supprimée depuis. Conservé faute de dépôt Git ; supprimable sans risque.
+
+### Tarif Astra
+
+GPT-6 Astra est inclus dans l’équivalent API, y compris les logs déjà enregistrés : le cache
+est recalculé à la mise à jour. Tarif standard vérifié le 9 septembre 2026 : 10 $ en entrée,
+1 $ en lecture de cache et 50 $ en sortie par million de tokens. Les majorations Fast et contexte
+long ne sont pas incluses dans cette estimation. [Source officielle](https://developers.openai.com/api/docs/models/gpt-6-astra).
+
+Chaque compte affiche la dernière réinitialisation hebdomadaire **observée**, avec date et heure
+locales, dans le tableau de bord, les connexions et le popup. Cette date de détection est persistée
+indépendamment de l’activation des notifications. Sans observation antérieure, « Non observée »
+est affiché ; aucune date n’est extrapolée depuis la prochaine échéance.
+
+## Mode temporaire capot fermé
+
+Dans **Réglages → Système → Continuer capot fermé**, autoriser d’abord le service macOS,
+puis saisir une durée entière entre **1 et 240 minutes** et cliquer sur **Démarrer**.
+Le popup donne accès au réglage et affiche les minutes restantes quand il est actif.
+La première autorisation ne démarre rien. La fermeture du capot doit être testée physiquement
+sur le Mac concerné ; ni un build ni une assertion de veille ne prouvent ce fonctionnement.
+
+Le service impose la faible consommation sur batterie et secteur, et vérifie l’état effectif
+après chaque écriture. Il utilise le réglage global `pmset disablesleep` de macOS, qui affecte
+également la veille manuelle tant que le mode est actif. Ce réglage n’est pas une API publique
+garantie. Le service refuse d’intervenir s’il était déjà actif avant Status.
+
+Surveillance toutes les cinq secondes : arrêt à **30 % de batterie**, données batterie absentes,
+pression thermique macOS dès le niveau **fair**, échéance, réglages externes modifiés ou absence
+de contact de Status depuis plus de vingt secondes. Un signal thermique macOS n’est pas une
+mesure de température ambiante et ne rend pas sûr un fonctionnement dans un sac fermé :
+conserver une ventilation suffisante. Les tâches réseau exigent toujours une connexion.
+
+Le service restaure les réglages qu’il a changés, sans écraser un changement externe identifiable.
+Un journal root privé dans `/var/db/com.raphael.status.lid/` précède les modifications ; après
+interruption/redémarrage du service, il est restauré sans reprendre la session. En cas d’échec,
+le journal est conservé et la restauration réessayée. Ne pas désactiver le service macOS
+pendant une session/restauration ; arrêter le mode d’abord. Une panne du système ou l’arrêt forcé
+du service par un administrateur peut retarder ces protections.
+
+Le LaunchDaemon est enregistré via `SMAppService` et n’accepte que le processus Status signé
+par le même certificat (exigence XPC vérifiée sur les messages). L’app vérifie symétriquement le
+service. Les binaires sont signés avec Hardened Runtime ; une signature ad hoc ne permet pas
+l’activation. Aucun mot de passe n’est lu par Status. Le service n’exécute aucun chemin ni aucune
+commande fournis par le client : seulement les options de gestion d’énergie fixes.
+
+`Tests/lid-mode-tests.m` simule activation, durée libre, batterie, pression thermique, expiration,
+perte de contact, échec d’écriture, récupération après crash et restauration. Ces tests ne
+modifient aucun réglage d’énergie réel. Le helper accepte `--diagnose` pour la lecture seule.
+
+## Estimation des renouvellements (0.7.0)
+
+Chaque compte affiche une prévision compacte sous ses jauges dans le tableau de bord uniquement.
+Le popup et les connexions ne montrent pas de prédiction. La fréquence observée est accessible
+dans l’infobulle de la prévision du quota **hebdomadaire global**. Les observations sont persistées
+indépendamment des notifications : 64 dates maximum, sur 180 jours, purgées au retrait du compte.
+La dernière date connue des versions précédentes est conservée ; aucun passé n'est reconstitué
+à partir des échéances annoncées. Les modèles spécifiques et les fenêtres 5 h sont exclus.
+
+Après trois détections, Status calcule la médiane des intervalles et une plage allant du plus
+court au plus long intervalle, élargie de 15 % de la médiane (au moins un jour). Cette plage est
+une extrapolation descriptive, pas un intervalle probabiliste calibré. Confiance faible, puis
+modérée à partir de cinq intervalles dont l'étendue ne dépasse pas 25 % de la médiane. Si
+l'étendue dépasse la médiane ou si un intervalle est inférieur à un jour, aucune date n'est
+proposée. Une plage dépassée n'est jamais repoussée automatiquement d'une semaine.
+
+Le détecteur conserve les baisses corroborantes existantes. Il enregistre aussi une recharge
+à échéance inchangée au moins 24 h après la précédente si le compteur était remonté à 25 %
+ou plus sur plusieurs relevés, avec au moins 30 min depuis sa confirmation haute, puis tombe
+à 5 % ou moins. La déduplication des notifications par période reste inchangée. Ces dates sont
+celles de **détection** : une longue absence, un usage faible, une correction du compteur ou
+une recharge manuelle peuvent affecter les statistiques. Ce n'est pas un calendrier garanti.
+
+### Références publiques prédictives (0.7.3)
+
+Avant trois observations personnelles, un instantané vérifié le 11/09/2026 alimente la
+prévision : dernier reset public + intervalle moyen, avec confiance faible et libellé
+« repère public ». Il concerne une possibilité de reset exceptionnel, pas une échéance
+contractuelle du compte. Aucun intervalle de confiance n'est inventé.
+
+- [Claude Reset Tracker](https://claude-resets.com/) : 11 événements depuis avril ; moyenne
+  14,1 jours, maximum 50,7 jours ; dernier reset le 04/09 à 20:08:45 UTC, Max uniquement.
+- [Codex Reset](https://codex-reset.com/) : 8 derniers intervalles ; moyenne 4,8 jours,
+  maximum 11 jours ; dernier reset le 08/09 à 04:05:53 UTC. La médiane sur 30 jours
+  (5,5 jours) est affichée en contexte mais n'est pas mélangée à cette moyenne.
+- La médiane SaveMeTibo de 2,2 jours n'alimente pas le calcul car son archive inclut
+  des crédits de reset offerts.
+
+L'historique personnel prend la priorité dès trois observations, y compris lorsqu'il est
+irrégulier ou sa prévision dépassée. Aucun événement public n'est inséré dans l'historique
+ou les notifications. Un repère dépassé n'est pas reporté ; l'instantané expire après
+30 jours et affiche « à actualiser ». Il est embarqué, sans synchronisation automatique.

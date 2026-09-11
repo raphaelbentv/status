@@ -620,6 +620,84 @@ NSArray<NSHTTPCookie *> *TMCookiesFromHeader(NSString *header) {
     return cookies;
 }
 
+static NSArray<NSNumber *> *TMResetDates(NSDictionary *state, NSString *key, double now) {
+    id stored = state[[@"resethistory:" stringByAppendingString:key]];
+    NSMutableSet *unique = [NSMutableSet set];
+    NSArray *values = [stored isKindOfClass:NSArray.class] ? stored : @[];
+    id legacy = state[[@"lastresetobserved:" stringByAppendingString:key]];
+    if ([legacy isKindOfClass:NSNumber.class]) values = [values arrayByAddingObject:legacy];
+    for (id value in values) {
+        if (![value isKindOfClass:NSNumber.class]) continue;
+        double date = [value doubleValue];
+        if (isfinite(date) && date > 0 && date <= now && date >= now - 180 * 86400)
+            [unique addObject:@(date)];
+    }
+    NSArray *dates = [[unique allObjects] sortedArrayUsingSelector:@selector(compare:)];
+    return dates.count > 64 ? [dates subarrayWithRange:NSMakeRange(dates.count - 64, 64)] : dates;
+}
+static NSDictionary *TMLocalWeeklyResetStatistics(NSDictionary *state, NSString *key, NSTimeInterval now) {
+    NSArray<NSNumber *> *dates = TMResetDates(state, key, now);
+    NSMutableDictionary *stats = [@{@"observationCount":@(dates.count), @"dates":dates,
+        @"status":@"insufficient", @"confidence":@"low"} mutableCopy];
+    if (dates.count < 3) return stats;
+    NSMutableArray<NSNumber *> *intervals = [NSMutableArray array];
+    for (NSUInteger i=1; i<dates.count; i++)
+        [intervals addObject:@(dates[i].doubleValue - dates[i-1].doubleValue)];
+    [intervals sortUsingSelector:@selector(compare:)];
+    NSUInteger n = intervals.count;
+    double median = (intervals[(n-1)/2].doubleValue + intervals[n/2].doubleValue) / 2;
+    double minimum = intervals.firstObject.doubleValue, maximum = intervals.lastObject.doubleValue;
+    stats[@"medianSeconds"] = @(median);
+    stats[@"minSeconds"] = @(minimum); stats[@"maxSeconds"] = @(maximum);
+    stats[@"intervalCount"] = @(n);
+    // Les dates sont celles de détection, pas des instants exacts. Marge descriptive minimale
+    // d'un jour ; aucune probabilité ni précision à la minute. Ne jamais avancer une prévision
+    // manquée d'un nombre supposé de semaines : une absence d'observation n'est pas un reset.
+    double margin = MAX(86400, median * 0.15);
+    double earliest = dates.lastObject.doubleValue + MAX(0, minimum-margin);
+    double latest = dates.lastObject.doubleValue + maximum+margin;
+    if (maximum-minimum > median || minimum < 86400) {
+        stats[@"status"] = @"irregular"; return stats;
+    }
+    if (now > latest) { stats[@"status"] = @"overdue"; return stats; }
+    stats[@"status"] = @"estimated";
+    stats[@"earliestAt"] = @(earliest); stats[@"latestAt"] = @(latest);
+    stats[@"estimatedAt"] = @(dates.lastObject.doubleValue + median);
+    if (n >= 5 && (maximum-minimum)/median <= 0.25) stats[@"confidence"] = @"moderate";
+    return stats;
+}
+
+// Public announcement snapshot, checked 2026-09-11. Never inserted into account history
+// or notification state. Public gaps describe exceptional resets, not weekly schedules.
+NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *key, NSTimeInterval now) {
+    NSMutableDictionary *stats = [TMLocalWeeklyResetStatistics(state, key, now) mutableCopy];
+    BOOL claude = [key hasPrefix:@"claude#"], openai = [key hasPrefix:@"openai#"];
+    if (!claude && !openai) return stats;
+    NSTimeInterval checkedAt = 1789084800; // 2026-09-11 00:00 UTC
+    NSDictionary *reference = @{
+        @"sourceURL":claude ? @"https://claude-resets.com/" : @"https://codex-reset.com/",
+        @"checkedAt":@(checkedAt), @"meanGapDays":claude ? @14.1 : @4.8,
+        @"maximumGapDays":claude ? @50.7 : @11,
+        @"sampleCount":claude ? @11 : @8,
+        @"sampleUnit":claude ? @"events" : @"intervals",
+        @"lastResetAt":claude ? @1788552525 : @1788840353,
+        @"scope":claude ? @"Max" : @"global"
+    };
+    stats[@"publicReference"] = reference;
+    stats[@"basis"] = @"account";
+    // Keep personal irregular/overdue findings; only bootstrap insufficient history.
+    if (![stats[@"status"] isEqual:@"insufficient"]) return stats;
+    stats[@"basis"] = @"public";
+    if (now < checkedAt || now > checkedAt + 30*86400) {
+        stats[@"status"] = @"publicStale";
+        return stats;
+    }
+    double estimate = [reference[@"lastResetAt"] doubleValue] + [reference[@"meanGapDays"] doubleValue]*86400;
+    stats[@"estimatedAt"] = @(estimate);
+    stats[@"status"] = now > estimate ? @"publicOverdue" : @"publicEstimated";
+    return stats;
+}
+
 NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
                                            NSArray<NSNumber *> *levels, BOOL weeklyResets,
                                            NSTimeInterval now) {
@@ -640,6 +718,9 @@ NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
         NSString *provider = pair[0];
         for (NSDictionary *window in pair[1]) {
             if (![window isKindOfClass:NSDictionary.class]) continue;
+            // Tous les événements de quota partagent ce filtre : ni modèle spécifique,
+            // ni session 5 h, ni dépassement ne doit déclencher une alerte de consommation.
+            if (!TMWindowIsPrimaryWeekly(window)) continue;
             NSString *identifier = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"]
                                  : ([window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : nil);
             long long resetsAt = TMInteger(window[@"resetsAt"]);
@@ -686,6 +767,29 @@ NSDictionary *TMQuotaNotificationDecisions(NSDictionary *state, NSArray *pairs,
                     && previousUsed && previousUsed.doubleValue - used >= 20;
                 BOOL collapsed = previousUsed && previousUsed.doubleValue >= 25 && used <= 5;
                 BOOL alreadyFired = [next[firedKey] longLongValue] == resetsAt;
+                // Date de détection conservée par compte, indépendamment des notifications.
+                // Ne pas déduire une date passée en soustrayant sept jours à une fenêtre glissante.
+                NSString *observedPeriodKey = [NSString stringWithFormat:@"lastresetperiod:%@:%@", provider, identifier];
+                NSString *highKey = [@"resethighsince:" stringByAppendingString:provider];
+                double highSince = [next[highKey] doubleValue];
+                NSArray *previousDates = TMResetDates(next, provider, now);
+                double lastDetected = [previousDates.lastObject doubleValue];
+                // Les recharges anticipées peuvent conserver la même échéance annoncée.
+                // Pour les compter de nouveau : au moins 24 h depuis la précédente et un
+                // compteur haut revu sur >= 30 min, afin de filtrer les sources qui oscillent.
+                BOOL repeated = collapsed && lastDetected > 0 && now-lastDetected >= 86400 &&
+                    highSince > 0 && now-highSince >= 1800;
+                if ((rolled || collapsed) && ([next[observedPeriodKey] longLongValue] != resetsAt || repeated)) {
+                    NSMutableArray *dates = [previousDates mutableCopy];
+                    if (now > lastDetected) [dates addObject:@((long long)now)];
+                    if (dates.count > 64) [dates removeObjectsInRange:NSMakeRange(0, dates.count-64)];
+                    next[[@"resethistory:" stringByAppendingString:provider]] = dates;
+                    next[observedPeriodKey] = @(resetsAt);
+                    next[[NSString stringWithFormat:@"lastresetobserved:%@", provider]] = @((long long)now);
+                }
+                if (used >= 25 && previousUsed.doubleValue >= 25 && !highSince)
+                    next[highKey] = @(now);
+                if (used < 25) [next removeObjectForKey:highKey];
                 if (weeklyResets && (rolled || collapsed) && !alreadyFired) {
                     next[firedKey] = @(resetsAt);
                     [events addObject:@{ @"kind": @"reset", @"provider": provider, @"label": label,
