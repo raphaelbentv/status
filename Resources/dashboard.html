@@ -508,33 +508,29 @@ function providerCostTotal(id){
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
 function weeklyResetEstimate(account){
   const s=account?.weeklyResetStats||{},count=Number.isInteger(s.observationCount)?s.observationCount:0;
-  const date=t=>new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(t*1000));
-  const days=t=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:1}).format(t/86400)+' j';
-  let line=`Estimation du renouvellement : historique insuffisant (${count}/3 observations minimum).`;
-  const valid=typeof s.medianSeconds==='number'&&Number.isFinite(s.medianSeconds)&&s.medianSeconds>0;
-  if(valid&&count>=3){
-    const cadence=`${count} renouvellements détectés · intervalle médian ${days(s.medianSeconds)}`;
-    if(s.status==='estimated'&&Number.isFinite(s.earliestAt)&&Number.isFinite(s.latestAt)&&s.latestAt>=s.earliestAt){
-      line=`Renouvellement estimé : du ${date(s.earliestAt)} au ${date(s.latestAt)} · confiance ${s.confidence==='moderate'?'modérée':'faible'}. ${cadence}.`;
-    }else if(s.status==='overdue')line=`Estimation dépassée, en attente d’une nouvelle observation. ${cadence}.`;
-    else if(s.status==='irregular')line=`Rythme trop irrégulier pour dater le prochain renouvellement. ${cadence}.`;
+  const date=t=>new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit'}).format(new Date(t*1000));
+  let line=`Prévision : en apprentissage (${count}/3)`;
+  if(count>=3){
+    if(s.status==='estimated'&&Number.isFinite(s.earliestAt)&&Number.isFinite(s.latestAt)&&s.latestAt>=s.earliestAt)
+      line=`Reset estimé : ${date(s.earliestAt)} – ${date(s.latestAt)} · confiance ${s.confidence==='moderate'?'modérée':'faible'}`;
+    else if(s.status==='overdue')line='Prévision dépassée · en attente du reset';
+    else if(s.status==='irregular')line='Prévision indisponible · rythme irrégulier';
   }
-  const dates=(Array.isArray(s.dates)?s.dates:[]).filter(t=>typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000).slice(-6).reverse();
-  const history=dates.length?`<details style="margin-top:4px"><summary>Dernières détections (${dates.length})</summary>${dates.map(t=>esc(new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)))).join('<br>')}</details>`:'';
-  return `<div class="weekly-reset-estimate" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0"><div>${esc(line)}</div><small>Quota hebdomadaire global de ce compte · dates de détection sur 180 jours. Estimation indicative, distincte de l’échéance annoncée ; des renouvellements peuvent ne pas être détectés.</small>${history}</div>`;
+  const cadence=Number.isFinite(s.medianSeconds)&&s.medianSeconds>0?` Intervalle médian : ${new Intl.NumberFormat('fr-FR',{maximumFractionDigits:1}).format(s.medianSeconds/86400)} j.`:'';
+  return `<div class="weekly-reset-estimate" style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px" title="${esc(`${count} renouvellements observés sur 180 jours.${cadence} Estimation indicative du quota hebdomadaire global, distincte de l’échéance annoncée.`)}">${esc(line)}</div>`;
 }
 function lastWeeklyReset(account){
   const t=account?.lastWeeklyResetObservedAt;
   const valid=typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000;
   const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
-  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>${weeklyResetEstimate(account)}`;
+  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
 }
 function accountBlock(account,history){
   const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':`Non connecté.<br><button class="account-action" onclick="goToView('connections')">Ouvrir Connexions</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ mesure ancienne · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
-  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${lastWeeklyReset(account)}<div class="quota-grid">${cards}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
+  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${lastWeeklyReset(account)}<div class="quota-grid">${cards}</div>${weeklyResetEstimate(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 function publicResetContext(provider){
   const claude=provider==='claude';

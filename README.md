@@ -276,8 +276,9 @@ modifient aucun réglage d’énergie réel. Le helper accepte `--diagnose` pour
 
 ## Estimation des renouvellements (0.7.0)
 
-Chaque compte affiche, dans le tableau de bord, les connexions et le popup, sa fréquence
-observée de renouvellement du quota **hebdomadaire global**. Les observations sont persistées
+Chaque compte affiche une prévision compacte sous ses jauges dans le tableau de bord uniquement.
+Le popup et les connexions ne montrent pas de prédiction. La fréquence observée est accessible
+dans l’infobulle de la prévision du quota **hebdomadaire global**. Les observations sont persistées
 indépendamment des notifications : 64 dates maximum, sur 180 jours, purgées au retrait du compte.
 La dernière date connue des versions précédentes est conservée ; aucun passé n'est reconstitué
 à partir des échéances annoncées. Les modèles spécifiques et les fenêtres 5 h sont exclus.
