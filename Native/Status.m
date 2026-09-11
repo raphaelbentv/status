@@ -883,9 +883,9 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
         for (NSDictionary *window in windows) {
             if (!TMWindowIsSession(window) && !TMWindowIsWeekly(window)) continue;
-            [lines addObject:[NSString stringWithFormat:@"%@ · %@ : %ld %% consommé",
+            [lines addObject:[NSString stringWithFormat:@"%@ · %@ : %ld %% restant",
                               account[@"label"], window[@"label"],
-                              (long)(TMNumber(window[@"usedPercent"]) + 0.5)]];
+                              (long)(100 - MIN(100, MAX(0, TMNumber(window[@"usedPercent"]))) + 0.5)]];
         }
     }
     self.statusItem.button.toolTip = lines.count
@@ -934,10 +934,11 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     BOOL isQuotaMetric = ![metric hasPrefix:@"system:"];
     TMSeverity severity = (hasValue && isQuotaMetric) ? TMSeverityForPercent(shown) : TMSeverityNormal;
     if (!hasValue) providerInk = nil;  // le tiret « pas de donnée » n'identifie personne
+    double textValue = isQuotaMetric ? 100 - MIN(100, MAX(0, shown)) : shown;
     NSString *suffix = [metric isEqualToString:@"system:temp"] ? @"°" : @"%";
     NSString *prefix = label ? [label stringByAppendingString:@" "] : @"";
     NSString *title = hasValue
-        ? [NSString stringWithFormat:@" %@%ld%@", prefix, (long)(shown + 0.5), suffix]
+        ? [NSString stringWithFormat:@" %@%ld%@", prefix, (long)(textValue + 0.5), suffix]
         : @" --";
     // Le libellé ne bouge pas d'un tick à l'autre (c'est un choix de réglage) ; seul le nombre
     // varie, de un à trois chiffres. Le gabarit réserve donc la place de « 100 ».
@@ -979,7 +980,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         NSDictionary *readout = @{
             @"style": @"ring", @"hasValue": @(hasValue), @"fraction": @(shown / 100.0),
             @"series": series,
-            @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(shown + 0.5), suffix] : @"—",
+            @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(textValue + 0.5), suffix] : @"—",
             @"valueTemplate": [NSString stringWithFormat:@"100%@", suffix], @"template": @"",
             @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @(severity),
         };

@@ -183,7 +183,7 @@ function quotaRail(window,primary=false){
   const value=used(window);
   if(value===null||!Number.isFinite(value))return '';
   const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
-  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${esc(window.label||window.windowId||'Quota')} consommé" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${value} % consommé, ${100-value} % restant"><i style="width:${value}%;background:${color}"></i></div><div class="gauge-caption"><span>${value} % consommé</span><strong>${100-value} % restant</strong></div>`;
+  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${esc(window.label||window.windowId||'Quota')} consommé" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${value} % consommé, ${100-value} % restant"><i style="width:${value}%;background:${color}"></i></div><div class="gauge-caption"><strong>${100-value} % restant</strong></div>`;
 }
 function weeklyResetEstimate(account){
   const s=account?.weeklyResetStats||{},count=Number.isInteger(s.observationCount)?s.observationCount:0;
@@ -237,11 +237,11 @@ function provider(id,name,accounts,metric){
   const several=(accounts||[]).length>1;
   const nameHTML=`<div class="name">${name}${several&&account?`<span class="name-sub">${esc(account.label)}</span><select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value)">${accounts.map(a=>`<option value="${esc(a.accountId)}" ${a.accountId===account.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`:''}</div>`;
   const weeklyValue=used(weekly);
-  const valueHTML=`<div class="value ${weeklyValue===null?'empty-value':weeklyValue>=95?'critical':weeklyValue>=80?'warning':''}">${weeklyValue===null?'—':weeklyValue+'<span class="unit">%</span>'}</div>`;
+  const valueHTML=`<div class="value ${weeklyValue===null?'empty-value':weeklyValue>=95?'critical':weeklyValue>=80?'warning':''}">${weeklyValue===null?'—':(100-weeklyValue)+'<span class="unit">%</span>'}</div>`;
   const subgauge=w=>`<div class="subgauge"><div class="subgauge-head"><span>${esc(w.label||(isSession(w)?'5 h':w.windowId))}</span></div>${quotaRail(w)}<div class="reset">Renouvellement ${reset(w)}</div></div>`;
   const additional=windows.filter(w=>w!==weekly);
   const weekLabel=weekly?.label||'Semaine';
-  return cells([nameHTML,valueHTML,`<div class="window">${esc(weekLabel)}</div>${quotaRail(weekly,true)}`,
+  return cells([nameHTML,valueHTML,`<div class="window">${esc(weekLabel)} · restant</div>${quotaRail(weekly,true)}`,
     `<div class="reset">Renouvellement ${reset(weekly)}</div>${lastWeeklyReset(account)}`,additional.map(subgauge).join(''),
     noteAndAction(weeklyValue),providerCost(id)]);
 }

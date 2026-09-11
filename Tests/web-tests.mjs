@@ -357,7 +357,7 @@ section('sous-quotas scoped — exclus des chiffres agrégés');
   const data = JSON.stringify({ accounts: [claudeAccount('a', 'Perso', claudeWindows)],
                                 history: [], updatedAt: 0 });
   const hero = dashboard(`overview(${data})`).split('hero-detail')[0];
-  check(hero.includes('hero-value">37<span'), 'héros : la semaine générale (37) donne le chiffre');
+  check(hero.includes('hero-value">63<span'), 'héros : la semaine générale affiche 63 % restant');
   check(!hero.includes('54'), 'héros : le sous-quota Fable (54) ne le pilote pas');
   const mw = menubar(`mainWeekly(${JSON.stringify(claudeWindows)})`);
   checkEqual(mw?.windowId, 'seven_day', 'popover : la jauge hebdo suit la semaine générale');
@@ -385,7 +385,7 @@ section('accountsOf / historyKey — la liste de comptes');
 
   section('overview — le héros nomme le compte, pas seulement le fournisseur');
   const view = dashboard(`overview(${json})`);
-  check(view.includes('hero-value">72<span'), 'le compte le plus contraint donne le chiffre');
+  check(view.includes('hero-value">28<span'), 'le compte le plus contraint donne le chiffre');
   check(view.split('hero-detail')[1].includes('Pro'), 'et le héros le nomme');
   check(view.includes('Perso') && view.includes('Boulot'), 'tous les comptes sont rendus');
 

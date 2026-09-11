@@ -462,7 +462,7 @@ const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; retur
 // Le coût équivalent API vient des logs locaux de `claude` et `codex`, qui ne portent aucune
 // identité de compte : il est à l'échelle de la machine. L'afficher sur chaque carte le ferait
 // compter plusieurs fois ; il reste donc au niveau du fournisseur, explicitement étiqueté.
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':value+' % consommé'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>${id==='claude'&&value!==null?`${Math.max(0,100-value)} % disponible · `:''}reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
@@ -638,11 +638,11 @@ function overview(data){
   }));
   entries.sort((a,b)=>b.used-a.used);
   const max=entries[0];
-  const heroValue=max?`${max.used}<span class="unit">%</span>`:'—';
-  const heroLabel=max?'consommation mesurée la plus élevée':'quotas en attente';
+  const heroValue=max?`${100-max.used}<span class="unit">%</span>`:'—';
+  const heroLabel=max?'restant sur le compte le plus contraint':'quotas en attente';
   // Avec plusieurs comptes, nommer le fournisseur ne suffit plus : « Claude · semaine à 72 % »
   // ne dit pas de quel compte il s'agit, donc ne dit pas quoi faire.
-  const heroDetail=max?`<strong>${esc(max.account.label)}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Ajoutez un compte dans Connexions pour afficher les volumes consommés.';
+  const heroDetail=max?`<strong>${esc(max.account.label)}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Ajoutez un compte dans Connexions pour afficher les volumes disponibles.';
   const heroColor=max?providerColor(max.account.provider):'var(--blue)';
   const backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';
   return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div>${notificationsNotice(data)}<div class="summary-grid">${PROVIDERS.map(p=>providerSummary(p,accountsOf(data,p.id))).join('')}</div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="sort-row"><label for="accountSort">Trier les comptes</label><select id="accountSort" onchange="setAccountSort(this.value)">${[['remaining','Les plus disponibles'],['reset','Prochain renouvellement'],['name','Nom']].map(([v,l])=>`<option value="${v}" ${accountSort===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,sortedAccounts(accountsOf(data,p.id)),data.history)).join('')}</div>${weeklyChart(data)}`;
