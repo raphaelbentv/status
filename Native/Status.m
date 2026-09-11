@@ -1619,9 +1619,9 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
     if ([action isEqualToString:@"openResetSource"]) {
         NSDictionary *sources = @{
-            @"claude-study":@"https://gist.github.com/monperrus/3ac4b303a84946bbeaf2b1123ee99491",
+            @"claude-study":@"https://claude-resets.com/",
             @"claude-help":@"https://support.claude.com/en/articles/9797557-usage-limit-best-practices",
-            @"codex-monitor":@"https://codexreset.org/",
+            @"codex-monitor":@"https://codex-reset.com/",
             @"codex-history":@"https://savemetibo.com/"};
         NSString *source = [body[@"source"] isKindOfClass:NSString.class] ? sources[body[@"source"]] : nil;
         if (source) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:source]];

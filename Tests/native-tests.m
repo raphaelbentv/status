@@ -695,7 +695,16 @@ static void TestWeeklyResetStatistics(void) {
     Section(@"Statistiques de renouvellement — observations globales par compte");
     double day=86400, now=2000000000;
     NSString *key=@"openai#one", *historyKey=@"resethistory:openai#one";
-    CheckEqual(TMWeeklyResetStatistics(nil,key,now)[@"status"],@"insufficient",@"pas d'historique, pas de date inventée");
+    CheckEqual(TMWeeklyResetStatistics(nil,key,now)[@"status"],@"publicStale",@"référence publique expirée sans date inventée");
+    double fresh=1789084800;
+    NSDictionary *bootstrap=TMWeeklyResetStatistics(nil,key,fresh);
+    CheckEqual(bootstrap[@"status"],@"publicEstimated",@"statistiques publiques alimentent le démarrage");
+    CheckEqual(bootstrap[@"observationCount"],@0,@"aucun faux événement personnel");
+    CheckEqual(bootstrap[@"estimatedAt"],@(1788840353+4.8*86400),@"projection depuis le dernier reset public, jamais depuis maintenant");
+    CheckEqual(TMWeeklyResetStatistics(nil,key,fresh+7*day)[@"status"],@"publicOverdue",@"prévision publique dépassée sans report");
+    CheckEqual(TMWeeklyResetStatistics(nil,@"claude#one",fresh)[@"publicReference"][@"scope"],@"Max",@"périmètre Claude conservé");
+    NSDictionary *personal=@{historyKey:@[@(fresh-15*day),@(fresh-8*day),@(fresh-day)]};
+    CheckEqual(TMWeeklyResetStatistics(personal,key,fresh)[@"basis"],@"account",@"historique personnel prioritaire");
     NSDictionary *legacy=@{@"lastresetobserved:openai#one":@(now-day)};
     CheckEqual(TMWeeklyResetStatistics(legacy,key,now)[@"observationCount"],@1,@"ancienne dernière détection conservée comme un seul échantillon");
     CheckEqual(TMWeeklyResetStatistics(legacy,@"openai#two",now)[@"observationCount"],@0,@"aucune mutualisation des comptes");

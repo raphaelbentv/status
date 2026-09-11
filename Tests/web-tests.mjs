@@ -656,7 +656,7 @@ for(const surface of [dashboard,menubar]){
   check(!dashboard('lastWeeklyReset')({weeklyResetStats:regular}).includes('weekly-reset-estimate'),'historique séparé de la prévision');
 }
 
-check(dashboard('publicResetContext')('claude').includes('72 h'),'relevé public Claude avec cadence documentée');
+check(dashboard('publicResetContext')('claude').includes('14,1 jours'),'relevé public Claude actualisé');
 check(dashboard('publicResetContext')('openai').includes('crédits de reset'),'repères Codex signalent le périmètre distinct');
 check(dashboard('publicResetContext')('claude').includes('ne sont pas ajoutées'),'sources externes séparées des détections personnelles');
 const lidSettings=dashboard('lidModeSettings');
@@ -669,6 +669,14 @@ check(lidSettings({tools:{lidMode:{unconfirmed:true,active:true}}}).includes('É
 check(lidSettings({tools:{lidMode:{restorationPending:true}}}).includes('Arrêter et restaurer'),'restauration en attente visible');
 check(dashboard('settingsView')({prefs:{},accounts:[],tools:{lidMode:{}}},'system').includes('Continuer capot fermé'),'réglage disponible dans Système');
 check(menubar('tools')({lidMode:{active:true,remainingSeconds:120}}).includes('capot · 2 min'),'popup affiche durée restante');
+
+
+{
+  const render=dashboard('weeklyResetEstimate');
+  check(render({weeklyResetStats:{basis:'public',status:'publicEstimated',estimatedAt:1789770765}}).includes('repère public'),'prévision publique visible sans observations');
+  check(render({weeklyResetStats:{basis:'public',status:'publicOverdue'}}).includes('dépassé'),'repère public dépassé jamais repoussé');
+  check(render({weeklyResetStats:{basis:'public',status:'publicStale'}}).includes('actualiser'),'référence périmée signalée');
+}
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

@@ -635,7 +635,7 @@ static NSArray<NSNumber *> *TMResetDates(NSDictionary *state, NSString *key, dou
     NSArray *dates = [[unique allObjects] sortedArrayUsingSelector:@selector(compare:)];
     return dates.count > 64 ? [dates subarrayWithRange:NSMakeRange(dates.count - 64, 64)] : dates;
 }
-NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *key, NSTimeInterval now) {
+static NSDictionary *TMLocalWeeklyResetStatistics(NSDictionary *state, NSString *key, NSTimeInterval now) {
     NSArray<NSNumber *> *dates = TMResetDates(state, key, now);
     NSMutableDictionary *stats = [@{@"observationCount":@(dates.count), @"dates":dates,
         @"status":@"insufficient", @"confidence":@"low"} mutableCopy];
@@ -664,6 +664,37 @@ NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *key, NSTime
     stats[@"earliestAt"] = @(earliest); stats[@"latestAt"] = @(latest);
     stats[@"estimatedAt"] = @(dates.lastObject.doubleValue + median);
     if (n >= 5 && (maximum-minimum)/median <= 0.25) stats[@"confidence"] = @"moderate";
+    return stats;
+}
+
+// Public announcement snapshot, checked 2026-09-11. Never inserted into account history
+// or notification state. Public gaps describe exceptional resets, not weekly schedules.
+NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *key, NSTimeInterval now) {
+    NSMutableDictionary *stats = [TMLocalWeeklyResetStatistics(state, key, now) mutableCopy];
+    BOOL claude = [key hasPrefix:@"claude#"], openai = [key hasPrefix:@"openai#"];
+    if (!claude && !openai) return stats;
+    NSTimeInterval checkedAt = 1789084800; // 2026-09-11 00:00 UTC
+    NSDictionary *reference = @{
+        @"sourceURL":claude ? @"https://claude-resets.com/" : @"https://codex-reset.com/",
+        @"checkedAt":@(checkedAt), @"meanGapDays":claude ? @14.1 : @4.8,
+        @"maximumGapDays":claude ? @50.7 : @11,
+        @"sampleCount":claude ? @11 : @8,
+        @"sampleUnit":claude ? @"events" : @"intervals",
+        @"lastResetAt":claude ? @1788552525 : @1788840353,
+        @"scope":claude ? @"Max" : @"global"
+    };
+    stats[@"publicReference"] = reference;
+    stats[@"basis"] = @"account";
+    // Keep personal irregular/overdue findings; only bootstrap insufficient history.
+    if (![stats[@"status"] isEqual:@"insufficient"]) return stats;
+    stats[@"basis"] = @"public";
+    if (now < checkedAt || now > checkedAt + 30*86400) {
+        stats[@"status"] = @"publicStale";
+        return stats;
+    }
+    double estimate = [reference[@"lastResetAt"] doubleValue] + [reference[@"meanGapDays"] doubleValue]*86400;
+    stats[@"estimatedAt"] = @(estimate);
+    stats[@"status"] = now > estimate ? @"publicOverdue" : @"publicEstimated";
     return stats;
 }
 

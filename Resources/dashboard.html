@@ -516,8 +516,14 @@ function weeklyResetEstimate(account){
     else if(s.status==='overdue')line='Prévision dépassée · en attente du reset';
     else if(s.status==='irregular')line='Prévision indisponible · rythme irrégulier';
   }
+  if(s.basis==='public'){
+    if(s.status==='publicEstimated'&&Number.isFinite(s.estimatedAt))line=`Reset possible vers le ${date(s.estimatedAt)} · repère public · confiance faible`;
+    else if(s.status==='publicOverdue')line='Repère public dépassé · en attente';
+    else if(s.status==='publicStale')line='Repère public à actualiser';
+  }
+  const publicNote=s.publicReference?` Référence publique au 11/09/2026 : moyenne ${s.publicReference.meanGapDays} j, maximum ${s.publicReference.maximumGapDays} j. Resets exceptionnels${s.publicReference.scope==='Max'?' ; dernier annoncé pour Max uniquement':''}, sans garantie pour ce compte.`:'';
   const cadence=Number.isFinite(s.medianSeconds)&&s.medianSeconds>0?` Intervalle médian : ${new Intl.NumberFormat('fr-FR',{maximumFractionDigits:1}).format(s.medianSeconds/86400)} j.`:'';
-  return `<div class="weekly-reset-estimate" style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px" title="${esc(`${count} renouvellements observés sur 180 jours.${cadence} Estimation indicative du quota hebdomadaire global, distincte de l’échéance annoncée.`)}">${esc(line)}</div>`;
+  return `<div class="weekly-reset-estimate" style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px" title="${esc(`${count} renouvellements observés sur 180 jours.${cadence}${publicNote} Estimation indicative du quota hebdomadaire global, distincte de l’échéance annoncée.`)}">${esc(line)}</div>`;
 }
 function lastWeeklyReset(account){
   const t=account?.lastWeeklyResetObservedAt;
@@ -535,9 +541,9 @@ function accountBlock(account,history){
 function publicResetContext(provider){
   const claude=provider==='claude';
   const text=claude
-    ? 'Un relevé communautaire de juin 2026 décrit trois intervalles proches de 72 h. La discussion rapporte ensuite des cadences différentes et leur interruption. Ce rythme ne constitue pas une règle applicable à tous les comptes.'
-    : 'SaveMeTibo publie une médiane de 2,2 jours entre les événements de son archive, qui inclut aussi des crédits de reset. Codex Reset Monitor suit les resets globaux exceptionnels. Ces chiffres ne donnent pas la date de renouvellement de votre compte.';
-  return `<details class="public-reset-context" style="padding:12px 16px;color:var(--muted);font-size:12px;line-height:1.6"><summary>Fréquences publiées en ligne · repères au 11/09/2026</summary><p>${text}</p><p>Les estimations ci-dessous apprennent des baisses de quota détectées sur chaque compte. Les annonces publiques ne sont pas ajoutées à votre historique personnel.</p><button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-study':'codex-monitor'}'})">${claude?'Voir le relevé et la discussion':'Voir la cartographie Codex'}</button> <button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-help':'codex-history'}'})">${claude?'Règles Claude':'Voir les fréquences publiées'}</button></details>`;
+    ? 'Claude Reset Tracker : 11 resets depuis avril, moyenne 14,1 jours, pause maximale 50,7 jours. Dernier reset : 04/09, Max uniquement.'
+    : 'Codex Reset : moyenne 4,8 jours sur les 8 derniers intervalles, maximum 11 jours ; médiane sur 30 jours : 5,5 jours. Dernier reset : 08/09. Les crédits de reset offerts sont exclus de cette référence.';
+  return `<details class="public-reset-context" style="padding:12px 16px;color:var(--muted);font-size:12px;line-height:1.6"><summary>Fréquences publiées en ligne · repères au 11/09/2026</summary><p>${text}</p><p>Ces repères alimentent la prévision avant 3 observations personnelles, puis votre historique prend le relais. Ils expirent après 30 jours. Les annonces ne sont pas ajoutées à votre historique personnel.</p><button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-study':'codex-monitor'}'})">${claude?'Voir le relevé et la discussion':'Voir la cartographie Codex'}</button> <button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-help':'codex-history'}'})">${claude?'Règles Claude':'Voir les fréquences publiées'}</button></details>`;
 }
 function providerBlock(provider,accounts,history){
   const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name}.<br><button class="account-action" onclick="goToView('connections')">Ajouter un compte</button></div>`;
