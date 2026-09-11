@@ -1616,6 +1616,15 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             [self pushData];
         }
     }
+    if ([action isEqualToString:@"openResetSource"]) {
+        NSDictionary *sources = @{
+            @"claude-study":@"https://gist.github.com/monperrus/3ac4b303a84946bbeaf2b1123ee99491",
+            @"claude-help":@"https://support.claude.com/en/articles/9797557-usage-limit-best-practices",
+            @"codex-monitor":@"https://codexreset.org/",
+            @"codex-history":@"https://savemetibo.com/"};
+        NSString *source = [body[@"source"] isKindOfClass:NSString.class] ? sources[body[@"source"]] : nil;
+        if (source) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:source]];
+    }
     if ([action isEqualToString:@"toggleBrightnessKeys"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
@@ -2189,6 +2198,9 @@ static NSDictionary *TMAlertDefaults(void) {
     NSString *resetKey = [NSString stringWithFormat:@"lastresetobserved:%@#%@", provider, accountId];
     payload[@"lastWeeklyResetObservedAt"] = @([[NSUserDefaults.standardUserDefaults
         dictionaryForKey:@"quotaNotificationState"][resetKey] longLongValue]);
+    payload[@"weeklyResetStats"] = TMWeeklyResetStatistics(
+        [NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"],
+        [NSString stringWithFormat:@"%@#%@", provider, accountId], NSDate.date.timeIntervalSince1970);
     payload[@"orgId"] = account[@"orgId"] ?: @"";
     payload[@"orgName"] = account[@"orgName"] ?: @"";
     if ([provider isEqualToString:TMProviderClaude]) {
@@ -2304,6 +2316,12 @@ static NSDictionary *TMAlertDefaults(void) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:history options:0 error:nil];
     [data writeToFile:TMHistoryPath() atomically:YES];
 
+    NSMutableDictionary *quotaState = [[NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"] mutableCopy];
+    NSString *suffix = [NSString stringWithFormat:@":%@#%@", provider, accountId];
+    for (NSString *key in quotaState.allKeys)
+        if ([key hasSuffix:suffix] || [key containsString:[suffix stringByAppendingString:@":"]])
+            [quotaState removeObjectForKey:key];
+    [NSUserDefaults.standardUserDefaults setObject:quotaState ?: @{} forKey:@"quotaNotificationState"];
     [self.accountPayloads removeObjectForKey:accountId];
     self.accountRegistry = TMRegistryRemoving(self.accountRegistry, accountId);
     [self saveAccountRegistry];

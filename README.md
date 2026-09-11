@@ -273,3 +273,44 @@ commande fournis par le client : seulement les options de gestion d’énergie f
 `Tests/lid-mode-tests.m` simule activation, durée libre, batterie, pression thermique, expiration,
 perte de contact, échec d’écriture, récupération après crash et restauration. Ces tests ne
 modifient aucun réglage d’énergie réel. Le helper accepte `--diagnose` pour la lecture seule.
+
+## Estimation des renouvellements (0.7.0)
+
+Chaque compte affiche, dans le tableau de bord, les connexions et le popup, sa fréquence
+observée de renouvellement du quota **hebdomadaire global**. Les observations sont persistées
+indépendamment des notifications : 64 dates maximum, sur 180 jours, purgées au retrait du compte.
+La dernière date connue des versions précédentes est conservée ; aucun passé n'est reconstitué
+à partir des échéances annoncées. Les modèles spécifiques et les fenêtres 5 h sont exclus.
+
+Après trois détections, Status calcule la médiane des intervalles et une plage allant du plus
+court au plus long intervalle, élargie de 15 % de la médiane (au moins un jour). Cette plage est
+une extrapolation descriptive, pas un intervalle probabiliste calibré. Confiance faible, puis
+modérée à partir de cinq intervalles dont l'étendue ne dépasse pas 25 % de la médiane. Si
+l'étendue dépasse la médiane ou si un intervalle est inférieur à un jour, aucune date n'est
+proposée. Une plage dépassée n'est jamais repoussée automatiquement d'une semaine.
+
+Le détecteur conserve les baisses corroborantes existantes. Il enregistre aussi une recharge
+à échéance inchangée au moins 24 h après la précédente si le compteur était remonté à 25 %
+ou plus sur plusieurs relevés, avec au moins 30 min depuis sa confirmation haute, puis tombe
+à 5 % ou moins. La déduplication des notifications par période reste inchangée. Ces dates sont
+celles de **détection** : une longue absence, un usage faible, une correction du compteur ou
+une recharge manuelle peuvent affecter les statistiques. Ce n'est pas un calendrier garanti.
+
+### Recherche publique consultée le 11 septembre 2026
+
+- [SaveMeTibo](https://savemetibo.com/) publie une médiane de 2,2 jours sur son archive Codex,
+  mais celle-ci mélange resets globaux et attributions de crédits à utiliser plus tard.
+- [Codex Reset Monitor](https://codexreset.org/) archive des resets globaux et leurs annonces.
+  Une annonce et sa confirmation peuvent concerner le même événement : ne pas compter les posts.
+- [Relevé Claude de monperrus](https://gist.github.com/monperrus/3ac4b303a84946bbeaf2b1123ee99491) :
+  trois intervalles proches de 72 h en juin ; la discussion signale ensuite des cadences différentes
+  et l'arrêt du phénomène. Cela ne justifie pas une règle universelle « tous les trois jours ».
+- [Reset Tracker](https://github.com/cwveysey/reset-tracker) distingue reset, grant et increase.
+  Son export consulté couvre jusqu'au 10 juillet 2026, trop ancien pour une prévision en septembre.
+- [OpenAI : reset acheté](https://help.openai.com/en/articles/20001507-paid-weekly-work-and-codex-rate-limit-resets) :
+  cette opération déplace l'échéance à sept jours après la première requête suivante ; ce cas
+  ne prouve pas une cadence automatique pour les resets exceptionnels.
+
+Les repères publics sont accessibles par fournisseur depuis le tableau de bord, datés et
+séparés de l'estimation personnelle. Aucun flux communautaire n'est synchronisé automatiquement,
+aucune annonce publique n'est comptée comme un renouvellement réellement reçu sur un compte.

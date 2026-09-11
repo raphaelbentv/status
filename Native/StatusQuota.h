@@ -172,3 +172,7 @@ BOOL TMHistoryKeyMatchesMetric(NSString *key, NSString *metric);
 
 // `pairs` : [ [provider, accountId, fenêtres] ].
 NSArray *TMAppendHistory(NSArray *pairs, long long now);
+
+// Renouvellements globaux détectés, isolés par compte. Au plus 64 dates sur 180 jours.
+// Estimation descriptive (médiane/plage observée), jamais une date garantie du fournisseur.
+NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *accountKey, NSTimeInterval now);

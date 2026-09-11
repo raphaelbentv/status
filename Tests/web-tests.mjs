@@ -645,6 +645,22 @@ for(const surface of [dashboard,menubar]){
   check(resetLabel({lastWeeklyResetObservedAt:Date.now()/1000+3600}).includes('Non observée'),'date future refusée');
 }
 
+for(const surface of [dashboard,menubar]){
+  const render=surface('weeklyResetEstimate'),now=Date.now()/1000;
+  check(render({}).includes('historique insuffisant'),'statistiques absentes : pas de prévision');
+  const regular={observationCount:3,status:'estimated',medianSeconds:604800,earliestAt:now+86400,latestAt:now+3*86400,confidence:'low',dates:[now-86400]};
+  const html=render({weeklyResetStats:regular});
+  check(html.includes('Renouvellement estimé : du')&&html.includes('confiance faible'),'plage et confiance explicites');
+  check(html.includes('intervalle médian 7 j')&&html.includes('Dernières détections'),'cadence et historique consultables');
+  check(html.includes('distincte de l’échéance annoncée'),'statistiques distinctes de la date fournisseur');
+  check(render({weeklyResetStats:{...regular,status:'overdue'}}).includes('Estimation dépassée'),'prévision dépassée signalée');
+  check(!render({weeklyResetStats:{...regular,status:'irregular'}}).includes('Renouvellement estimé : du'),'rythme irrégulier sans date inventée');
+  check(surface('lastWeeklyReset')({weeklyResetStats:regular}).includes('weekly-reset-estimate'),'statistiques intégrées aux affichages de compte');
+}
+
+check(dashboard('publicResetContext')('claude').includes('72 h'),'relevé public Claude avec cadence documentée');
+check(dashboard('publicResetContext')('openai').includes('crédits de reset'),'repères Codex signalent le périmètre distinct');
+check(dashboard('publicResetContext')('claude').includes('ne sont pas ajoutées'),'sources externes séparées des détections personnelles');
 const lidSettings=dashboard('lidModeSettings');
 check(lidSettings({tools:{lidMode:{authorized:false,available:true}}}).includes('Autoriser le service macOS'),'autorisation distincte du démarrage');
 check(!lidSettings({tools:{lidMode:{authorized:false}}}).includes('onclick="startLidMode()"'),'aucun démarrage sans service autorisé');

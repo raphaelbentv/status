@@ -506,11 +506,28 @@ function providerCostTotal(id){
   return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">Équivalent API sur ${label} · tous comptes${partial?' · estimation partielle':id==='openai'?' · approximatif':''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}<div class="summary-note">Estimation au tarif API, pas une facture. Usage terminal uniquement.${id==='openai'?' Tarif standard ; majorations Fast et contexte long non incluses.':''}</div>${modelBreakdown(p)}</div>`;
 }
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
+function weeklyResetEstimate(account){
+  const s=account?.weeklyResetStats||{},count=Number.isInteger(s.observationCount)?s.observationCount:0;
+  const date=t=>new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(t*1000));
+  const days=t=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:1}).format(t/86400)+' j';
+  let line=`Estimation du renouvellement : historique insuffisant (${count}/3 observations minimum).`;
+  const valid=typeof s.medianSeconds==='number'&&Number.isFinite(s.medianSeconds)&&s.medianSeconds>0;
+  if(valid&&count>=3){
+    const cadence=`${count} renouvellements détectés · intervalle médian ${days(s.medianSeconds)}`;
+    if(s.status==='estimated'&&Number.isFinite(s.earliestAt)&&Number.isFinite(s.latestAt)&&s.latestAt>=s.earliestAt){
+      line=`Renouvellement estimé : du ${date(s.earliestAt)} au ${date(s.latestAt)} · confiance ${s.confidence==='moderate'?'modérée':'faible'}. ${cadence}.`;
+    }else if(s.status==='overdue')line=`Estimation dépassée, en attente d’une nouvelle observation. ${cadence}.`;
+    else if(s.status==='irregular')line=`Rythme trop irrégulier pour dater le prochain renouvellement. ${cadence}.`;
+  }
+  const dates=(Array.isArray(s.dates)?s.dates:[]).filter(t=>typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000).slice(-6).reverse();
+  const history=dates.length?`<details style="margin-top:4px"><summary>Dernières détections (${dates.length})</summary>${dates.map(t=>esc(new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)))).join('<br>')}</details>`:'';
+  return `<div class="weekly-reset-estimate" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0"><div>${esc(line)}</div><small>Quota hebdomadaire global de ce compte · dates de détection sur 180 jours. Estimation indicative, distincte de l’échéance annoncée ; des renouvellements peuvent ne pas être détectés.</small>${history}</div>`;
+}
 function lastWeeklyReset(account){
   const t=account?.lastWeeklyResetObservedAt;
   const valid=typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000;
   const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
-  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
+  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>${weeklyResetEstimate(account)}`;
 }
 function accountBlock(account,history){
   const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
@@ -519,12 +536,19 @@ function accountBlock(account,history){
   const identity=accountIdentity(account);
   return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${lastWeeklyReset(account)}<div class="quota-grid">${cards}</div>${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
+function publicResetContext(provider){
+  const claude=provider==='claude';
+  const text=claude
+    ? 'Un relevé communautaire de juin 2026 décrit trois intervalles proches de 72 h. La discussion rapporte ensuite des cadences différentes et leur interruption. Ce rythme ne constitue pas une règle applicable à tous les comptes.'
+    : 'SaveMeTibo publie une médiane de 2,2 jours entre les événements de son archive, qui inclut aussi des crédits de reset. Codex Reset Monitor suit les resets globaux exceptionnels. Ces chiffres ne donnent pas la date de renouvellement de votre compte.';
+  return `<details class="public-reset-context" style="padding:12px 16px;color:var(--muted);font-size:12px;line-height:1.6"><summary>Fréquences publiées en ligne · repères au 11/09/2026</summary><p>${text}</p><p>Les estimations ci-dessous apprennent des baisses de quota détectées sur chaque compte. Les annonces publiques ne sont pas ajoutées à votre historique personnel.</p><button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-study':'codex-monitor'}'})">${claude?'Voir le relevé et la discussion':'Voir la cartographie Codex'}</button> <button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-help':'codex-history'}'})">${claude?'Règles Claude':'Voir les fréquences publiées'}</button></details>`;
+}
 function providerBlock(provider,accounts,history){
   const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name}.<br><button class="account-action" onclick="goToView('connections')">Ajouter un compte</button></div>`;
   // Le fournisseur annonce combien de comptes il porte et ouvre l'endroit où on en ajoute : sans
   // ce chemin, « voir Connexions » n'était qu'une phrase, et l'ajout restait à découvrir.
   const manage=`<button class="provider-manage" onclick="goToView('connections')" title="Gérer les comptes ${provider.name}">gérer</button>`;
-  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
+  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${publicResetContext(provider.id)}${blocks}${providerCostTotal(provider.id)}</section>`;
 }
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur
 // une semaine glissante, à partir de l'historique horodaté. OpenAI y figure au même titre que
