@@ -68,6 +68,16 @@ int main(void){@autoreleasepool{
     Check(!m.active&&m.restorationPending&&b.writes==0,@"journal invalide bloque sans écrire");
     b=[FakePower new];b.unreadable=YES;m=Mode(b);Start(m);Check(!m.active&&b.writes==0,@"lecture initiale échouée refuse");
     b=[FakePower new];m=Mode(b);[m startMinutes:0 battery:80 thermal:0 now:100];Check(b.writes==0,@"entrée invalide sans effets");
+    // Le minuteur seul reste actif jusqu'à l'échéance, indépendamment de toute sonde SMC.
+    b=[FakePower new];m=Mode(b);[m startMinutes:1 battery:80 thermal:0 now:100];
+    [m heartbeatAt:159];[m tickBattery:80 thermal:0 now:159];
+    Check(m.active&&m.deadline==160,@"une minute reste active avant son échéance");
+    [m heartbeatAt:160];[m tickBattery:80 thermal:0 now:160];
+    Check(!m.active&&!m.restorationPending&&[b.power[@"sleepDisabled"]isEqual:@0],@"une minute restaure à 60 secondes exactement");
+    b=[FakePower new];m=Mode(b);[m startMinutes:240 battery:80 thermal:0 now:100];
+    Check(m.active&&m.deadline==14500,@"durée maximale de quatre heures");
+    [m stop:@"test"];
+    Check([b.power isEqual:@{@"sleepDisabled":@0,@"batteryMode":@0,@"acMode":@2}],@"arrêt anticipé de la durée maximale restaure");
     // Le binaire de test est ad hoc : il ne peut pas définir une autorité XPC valable.
     Check(TMLidPeerRequirement(@"com.raphael.status")==nil,@"signature ad hoc ne peut pas autoriser le service");
     printf("Capot fermé : %d vérifications, %d échecs (aucun réglage réel modifié).\n",checks,failures);

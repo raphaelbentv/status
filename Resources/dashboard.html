@@ -16,7 +16,7 @@
   .nav button,.sidebar-bottom button{position:relative;width:100%;border:1px solid transparent;background:transparent;border-radius:var(--radius);padding:9px 12px 9px 32px;text-align:left;color:var(--muted);cursor:pointer;margin-bottom:3px}
   .nav button:hover,.sidebar-bottom button:hover{background:var(--soft);border-color:var(--hair);color:var(--text)}
   .nav button::before{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.6;font-size:12px;line-height:1}
-  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="connections"]::before{content:"02"}.nav button[data-view="monitor"]::before{content:"03"}.nav button[data-view="displays"]::before{content:"04"}.nav button[data-view="settings"]::before{content:"05"}
+  .nav button[data-view="overview"]::before{content:"01"}.nav button[data-view="monitor"]::before{content:"02"}.nav button[data-view="displays"]::before{content:"03"}.nav button[data-view="settings"]::before{content:"04"}
   .nav button.active{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--blue);font-weight:700}
   .nav button.active::before{opacity:1;color:var(--blue)}
   .sidebar-spacer{flex:1}.sidebar-bottom{border-top:1px solid var(--hair);padding-top:10px}
@@ -29,13 +29,6 @@
   .button{border:1px solid var(--hair-strong);border-radius:var(--radius);background:var(--soft);padding:7px 10px;cursor:pointer;color:var(--blue)}
   .button:hover{background:var(--soft-hover)}.button[disabled]{opacity:.52;cursor:default}
   /* Cartouche de plan : le chiffre clé encadré, comme une cote sur un dessin technique. */
-  .hero{position:relative;padding:24px 20px;border-bottom:1px solid var(--hair-strong);border-left:1px solid var(--hair);border-right:1px solid var(--hair);margin-top:-1px;background:linear-gradient(90deg,color-mix(in srgb,var(--hero,var(--blue)) 7%,transparent),transparent 60%);clip-path:var(--clip,none);box-shadow:var(--edge-glow,none)}
-  .hero:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:repeating-linear-gradient(0deg,var(--hero,var(--blue)) 0 4px,transparent 4px 8px)}
-  .hero-line{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}
-  .hero-value .unit{font-size:.4em;margin-left:.08em;opacity:.65;font-weight:400}
-  .hero-value{font-size:52px;font-weight:700;line-height:.94;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--hero,var(--blue));text-shadow:var(--value-glow,none)}
-  .hero-label{font-size:13px;color:var(--muted)}
-  .hero-detail{font-size:12px;color:var(--muted);margin:16px 0 0}.hero-detail strong{color:var(--hero,var(--blue));font-weight:700}
   /* align-items:start — OpenAI n'a qu'une fenêtre contre trois à Claude ; sans cela son bloc
      s'étirerait à vide sur toute la hauteur de la rangée. */
   .provider-blocks{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px;align-items:start}
@@ -96,6 +89,8 @@
   .quota-empty{padding:13px;border:1px dashed var(--hair-strong);border-radius:var(--radius)}
   .quota-error,.quota-stale{font-size:12px;margin-top:10px}.quota-error{color:var(--danger)}.quota-stale{color:var(--amber)}
   .quota-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:2px}.quota-foot small{flex:1;min-width:0}
+  .manual-reset{margin-top:7px;font-size:11px;line-height:1.35;color:var(--muted)}
+  .manual-reset.available{color:var(--green);font-weight:700}
   .spark{width:132px;height:26px;flex:none;overflow:visible}.spark .area{fill:color-mix(in srgb,var(--c) 12%,transparent);stroke:none}.spark .line{fill:none;stroke:var(--c);stroke-width:1;vector-effect:non-scaling-stroke}.spark .tip{fill:var(--c)}
   .toolbar-warn{font-size:12px;color:var(--amber);white-space:nowrap}
   .settings{display:flex;flex-direction:column;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:var(--radius);overflow:hidden}
@@ -136,7 +131,7 @@
   .theme-swatch:hover{background:var(--soft-hover);border-color:var(--hair-strong)}
   .theme-swatch.on{border-color:var(--hair-strong);background:var(--soft-hover);font-weight:700}
   .theme-swatch .dot{width:7px;height:7px;border-radius:50%;flex:none}
-  @media(max-width:970px){.shell{grid-template-columns:178px 1fr}main{padding-left:22px;padding-right:22px}.provider-blocks,.connections{grid-template-columns:1fr}.hero-value{font-size:44px}.spark{display:none}}
+  @media(max-width:970px){.shell{grid-template-columns:178px 1fr}main{padding-left:22px;padding-right:22px}.provider-blocks,.connections{grid-template-columns:1fr}.spark{display:none}}
   /* Moniteur — cartes métriques. Marques fines, grilles discrètes, le texte en encre, jamais
      en couleur de série : la couleur n'appartient qu'aux tracés. */
   .metric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:20px}
@@ -253,10 +248,6 @@
   .brightness-value{width:44px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);flex:none}
   .display-unavailable{color:var(--muted);font-size:12px;margin-top:2px}
 
-  .summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:20px 0}
-  .provider-summary{border:1px solid var(--hair-strong);border-top:3px solid var(--provider);background:var(--panel-bg);padding:18px;border-radius:var(--radius)}
-  .provider-summary h2{margin:0 0 8px;font-size:15px;color:var(--provider)}
-  .summary-main{display:block;font-size:23px;margin:8px 0}.summary-note{color:var(--muted);font-size:12px;line-height:1.6}
   .sort-row{display:flex;gap:12px;align-items:center;margin:16px 0;flex-wrap:wrap}
   .sort-row select{background:var(--panel-bg-strong);border:1px solid var(--hair-strong);border-radius:var(--radius);padding:8px 12px}
   .notice{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid var(--amber);border-radius:var(--radius);background:var(--panel-bg);margin:16px 0;font-size:12px}
@@ -266,13 +257,62 @@
   .account-menu[open]{z-index:10}.account-menu-items{position:absolute;right:0;top:100%;width:190px;padding:7px;display:flex;flex-direction:column;gap:5px;background:var(--bg);border:1px solid var(--hair-strong);border-radius:var(--radius);box-shadow:0 10px 30px #0005}
   .account-menu-items button{text-align:left;width:100%}.connections .quota-block{padding:16px 0}.connections .account-row{margin-bottom:0;align-items:center;gap:12px}
   .connection-note{margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.5}
-  .settings-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0}.settings-tabs button{padding:9px 15px;border:1px solid var(--hair-strong);border-radius:var(--radius);background:var(--soft);cursor:pointer}.settings-tabs button.on{color:var(--blue);background:var(--soft-hover)}
+  /* Réglages : sous-navigation verticale à gauche, une catégorie à la fois à droite. Les comptes
+     (ex-onglet Connexions) en sont la première catégorie. */
+  .settings-layout{display:grid;grid-template-columns:184px minmax(0,1fr);gap:32px;margin-top:26px;align-items:start}
+  .settings-nav{position:sticky;top:20px;display:flex;flex-direction:column;gap:2px}
+  .settings-nav button{position:relative;text-align:left;border:0;background:transparent;color:var(--muted);padding:9px 12px 9px 14px;border-radius:var(--radius);cursor:pointer;font:inherit;font-size:13px}
+  .settings-nav button:hover{background:var(--soft);color:var(--text)}
+  .settings-nav button.on{background:var(--soft-hover);color:var(--text);font-weight:700}
+  .settings-nav button.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;background:var(--blue)}
+  .settings-pane{min-width:0}
+  .settings-pane-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px}
+  .settings-pane-head>div{flex:1;min-width:0}
+  .settings-pane-head h2{font-size:16px;margin:0 0 6px;font-weight:700;color:var(--text);letter-spacing:.01em}
+  .settings-pane-head p{margin:0;color:var(--muted);font-size:12px;line-height:1.5;max-width:68ch}
+  .settings-pane .settings{gap:12px;background:transparent;border:0;border-radius:0;overflow:visible}
+  .settings-pane .setting{border:1px solid var(--hair);border-radius:var(--radius);padding:18px 20px;gap:24px}
+  .settings-pane .setting[style*="display:block"]>*+*{margin-top:14px}
+  .settings-pane .setting-copy{min-width:0}
+  .settings-pane .setting-copy strong{font-size:13px;margin-bottom:5px}
+  .settings-pane .setting-copy small{max-width:72ch}
+  .settings-pane .setting>.button,.settings-pane .setting>.segmented,.settings-pane .setting>.setting-state{flex:none;margin-left:auto}
+  .settings-pane .setting>.segmented{flex:0 1 auto}
+  .settings-pane .setting>.button{min-width:96px;text-align:center}
+  .settings-pane .connections{grid-template-columns:1fr;gap:12px}
+  .settings-pane .connection-panel{min-height:0;padding:20px}
+  @media(max-width:970px){.settings-layout{grid-template-columns:1fr;gap:16px}.settings-nav{position:static;flex-direction:row;flex-wrap:wrap}.settings-nav button.on::before{left:12px;right:12px;top:auto;bottom:2px;width:auto;height:2px}.settings-pane .setting{flex-wrap:wrap}}
   .settings .setting{gap:20px;flex-wrap:wrap}.settings .setting-copy{min-width:240px}.segmented{flex-wrap:wrap}.pin-name{min-width:90px}
   .storage-summary{font-size:14px;line-height:1.7;margin:8px 0}.storage-summary strong{color:var(--text)}
   button:focus-visible,summary:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
-  .hero{padding:14px 18px}.hero-value{font-size:30px!important}
-  @media(max-width:970px){.summary-grid{grid-template-columns:1fr}.account-actions{flex-wrap:wrap}.notice{align-items:flex-start;flex-wrap:wrap}}
+  @media(max-width:970px){.account-actions{flex-wrap:wrap}.notice{align-items:flex-start;flex-wrap:wrap}}
 .shell{--muted:color-mix(in srgb,var(--text) 75%,var(--bg))}
+  /* Moniteur : bandeau de signes vitaux, puis cartes regroupées par thème. */
+  .vitals{display:flex;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:var(--radius);overflow:hidden;margin-top:22px}
+  .vital{flex:1 1 0;display:flex;flex-direction:column;gap:3px;align-items:flex-start;text-align:left;border:0;background:var(--panel-bg-strong);color:var(--text);padding:11px 13px 9px;cursor:pointer;font:inherit;min-width:0}
+  .vital:hover{background:var(--soft-hover)}
+  .vital-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .vital-value{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .vital-value small{font-size:11px;font-weight:400;color:var(--muted);margin-left:3px}
+  .vital svg{width:100%;height:22px;display:block;margin-top:2px}
+  .vital svg path{fill:none;stroke:var(--chart-a);stroke-width:1.5;vector-effect:non-scaling-stroke}
+  .vital.warn .vital-value{color:var(--amber)}.vital.warn svg path{stroke:var(--amber)}
+  .vital.crit .vital-value{color:var(--danger)}.vital.crit svg path{stroke:var(--danger)}
+  .vital.boost .vital-value{color:var(--blue)}
+  .monitor-section{margin-top:26px}
+  .monitor-section>h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 10px}
+  .monitor-section .metric-grid{margin-top:0;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+  .monitor-section .metric-card{border-radius:var(--radius);background:var(--panel-bg);padding:16px 18px}
+  .monitor-section .metric-chart svg{height:72px}
+  .metric-chart .gridline{stroke:var(--hair);stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
+  .metric-card-wide .core-schematic{margin-top:12px}
+  .fan-panel{margin-top:12px;padding-top:10px;border-top:1px solid var(--hair);display:flex;flex-direction:column;gap:9px}
+  .fan-meter{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:12px}
+  .fan-meter span{color:var(--muted)}.fan-meter b{font-variant-numeric:tabular-nums}
+  .fan-meter .quota-track{grid-column:1/-1;margin:0;height:6px}
+  .fan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+  .fan-actions strong{flex:1;font-size:12px;color:var(--blue)}
+  .fan-actions .seg{padding:5px 8px;font-size:12px}
 </style>
 </head>
 <body>
@@ -281,7 +321,6 @@
     <div class="product">Status</div>
     <nav class="nav">
       <button class="active" data-view="overview">Status</button>
-      <button data-view="connections">Connexions</button>
       <button data-view="monitor">Moniteur</button>
       <button data-view="displays">Écrans</button>
       <button data-view="settings">Réglages</button>
@@ -293,7 +332,6 @@
   </aside>
   <main>
     <section class="view active" id="overview"></section>
-    <section class="view" id="connections"></section>
     <section class="view" id="monitor"></section>
     <section class="view" id="displays"></section>
     <section class="view" id="settings"></section>
@@ -366,6 +404,7 @@ const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','bar','text'],gpu:['bars',
   claudeWeek:['pie','ring','bars','graph','bar','text'],codexWeek:['pie','ring','bars','graph','bar','text']};
 // Formes de la jauge des consommations (ids alignés sur updateStatusMenu côté natif). Les quatre
 // dernières viennent du moteur des widgets : une forme ajoutée là profite aux deux.
+const ICON_DESIGNS=[['doubleRing','Double anneau'],['capsules','Capsules'],['doubleArc','Double arc'],['boldRing','Anneau épais'],['reservoir','Réservoir'],['segments','5 segments']];
 const GAUGE_SHAPES=[['ring','Anneau'],['spark','Courbe'],['bars','Barres'],['pie','Camembert'],
   ['bar','Jauge'],['none','Aucune']];
 // Palette (alignée sur TMWidgetNamedColor). « auto » = neutre adaptatif + alerte.
@@ -462,7 +501,22 @@ const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; retur
 // Le coût équivalent API vient des logs locaux de `claude` et `codex`, qui ne portent aucune
 // identité de compte : il est à l'échelle de la machine. L'afficher sur chaque carte le ferait
 // compter plusieurs fois ; il reste donc au niveau du fournisseur, explicitement étiqueté.
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}</div>`}
+function manualResetLine(w,account){
+  const primary=account.provider==='openai'?w.primaryLimit!==false&&isWeekly(w):!isScopedWeekly(w)&&(isWeekly(w)||String(w.windowId)==='five_hour');
+  if(!primary)return '';
+  const reset=account.manualReset||{},fresh=Number.isFinite(reset.observedAt)&&Date.now()/1000-reset.observedAt<600&&reset.observedAt<=Date.now()/1000+5;
+  const status=fresh?reset.status:'unknown';
+  if(status==='available'){
+    if(account.provider==='claude'&&reset.scope==='weekly'&&!isWeekly(w))return '';
+    if(account.provider==='claude'&&reset.scope==='session'&&isWeekly(w))return '';
+    const count=Number.isInteger(reset.count)&&reset.count>0?`${reset.count} disponible${reset.count>1?'s':''}`:'disponible';
+    const detail=account.provider==='claude'&&reset.scope==='unknown'?' · portée à voir dans Claude':'';
+    return `<div class="manual-reset available">Reset manuel : ${count}${detail}</div>`;
+  }
+  if(status==='none')return '<div class="manual-reset">Reset manuel : aucun disponible</div>';
+  return `<div class="manual-reset">Reset manuel : ${account.provider==='claude'?'à vérifier dans Claude':'statut non vérifié'}</div>`;
+}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}${manualResetLine(w,account)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
@@ -531,12 +585,31 @@ function lastWeeklyReset(account){
   const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
   return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
 }
+function extraCreditsCard(account){
+  const c=account.extraCredits||{},known=c.status==='known';
+  const fmt=n=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(n);
+  const money=(n,currency=c.currency)=>{if(typeof n!=='number'||!Number.isFinite(n))return 'indisponible';
+    return /^[A-Z]{3}$/.test(currency||'')?new Intl.NumberFormat('fr-FR',{style:'currency',currency}).format(n):`${fmt(n)} (devise non fournie)`;};
+  let value='Solde indisponible',detail='';
+  if(known&&c.unit==='credits'){
+    value=c.unlimited?'Crédits illimités':typeof c.balance==='number'?`${fmt(c.balance)} crédits restants`:c.hasCredits?'Crédits disponibles · solde non fourni':'Aucun crédit supplémentaire';
+  }else if(known){
+    value=typeof c.balance==='number'?(c.balance===0?'Aucun crédit supplémentaire':`${money(c.balance,c.balanceCurrency||c.currency)} restants`):'Solde prépayé indisponible';
+    const rows=[];
+    if(typeof c.used==='number')rows.push(`${money(c.used)} consommés ce mois`);
+    if(typeof c.monthlyLimit==='number')rows.push(`plafond mensuel ${money(c.monthlyLimit)}`);
+    if(c.enabled===false)rows.push('usage supplémentaire désactivé');
+    detail=rows.join(' · ');
+  }
+  if(c.observedAt&&Date.now()/1000-c.observedAt>120)detail=[detail,`dernier relevé ${ageLabel(c.observedAt)}`].filter(Boolean).join(' · ');
+  return `<div class="extra-credits" style="padding:12px 14px;margin-top:12px;border:1px solid var(--hair);border-radius:8px;background:var(--panel-bg)"><span style="font-size:12px;color:var(--muted)">Crédits supplémentaires</span><strong style="display:block;margin-top:4px">${esc(value)}</strong>${detail?`<small style="display:block;margin-top:4px;color:var(--muted)">${esc(detail)}</small>`:''}</div>`;
+}
 function accountBlock(account,history){
   const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':`Non connecté.<br><button class="account-action" onclick="goToView('connections')">Ouvrir Connexions</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ mesure ancienne · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
-  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${lastWeeklyReset(account)}<div class="quota-grid">${cards}</div>${weeklyResetEstimate(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
+  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${lastWeeklyReset(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${weeklyResetEstimate(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 function publicResetContext(provider){
   const claude=provider==='claude';
@@ -614,7 +687,7 @@ function availability(account){
   if(account.provider==='claude'&&!session.length)return null;
   return {remaining:Math.max(0,100-week),available:week<100&&session.every(w=>w.usedPercent<100),reset:Math.min(...weekly.map(w=>Number(w.resetsAt)))};
 }
-let accountSort='remaining';
+let accountSort='reset';
 function setAccountSort(value){if(['remaining','reset','name'].includes(value)){accountSort=value;render();}}
 function sortedAccounts(accounts,mode=accountSort){return [...accounts].sort((a,b)=>{
   const aa=availability(a),bb=availability(b);
@@ -623,31 +696,12 @@ function sortedAccounts(accounts,mode=accountSort){return [...accounts].sort((a,
   if(mode==='reset')return aa.reset-bb.reset;
   return Number(bb.available)-Number(aa.available)||bb.remaining-aa.remaining;
 });}
-function providerSummary(provider,accounts){
-  const measured=accounts.map(a=>({account:a,state:availability(a)}));
-  const available=measured.filter(x=>x.state?.available).sort((a,b)=>b.state.remaining-a.state.remaining);
-  const best=available[0],unknown=measured.filter(x=>!x.state).length;
-  const nextReset=measured.filter(x=>x.state).sort((a,b)=>a.state.reset-b.state.reset)[0];
-  const resetAt=nextReset?.state.reset;
-  const headline=best?`${Math.round(best.state.remaining)} % restant cette semaine`:measured.some(x=>x.state)?'Aucun compte disponible':'Mesure récente requise';
-  return `<section class="provider-summary" style="--provider:${providerColor(provider.id)}"><h2>${provider.name}</h2><span>${available.length} compte${available.length>1?'s':''} disponible${available.length>1?'s':''} sur ${accounts.length}</span><strong class="summary-main">${headline}</strong><div class="summary-note">${best?`Compte le plus disponible : <strong>${esc(best.account.label)}</strong><br>`:''}${Number.isFinite(resetAt)?`Prochain renouvellement hebdo : ${esc(nextReset.account.label)} ${countdown(resetAt)} · ${resetFull(resetAt)}<br>`:''}${unknown?`${unknown} compte${unknown>1?'s':''} à actualiser ou connecter. `:''}Disponibilité selon les dernières mesures. Les quotas des comptes ne s’additionnent pas.</div></section>`;
-}
 function notificationsNotice(data){return data.prefs?.notificationsAuthorized===false?`<aside class="notice"><div><strong>Alertes désactivées sur ce Mac</strong><p>Les seuils sont conservés, mais macOS n’autorise pas Status à envoyer des notifications.</p></div><button class="button" onclick="send('openNotificationSettings')">Ouvrir les réglages</button></aside>`:'';}
 function overview(data){
-  const entries=[];
-  PROVIDERS.forEach(p=>accountsOf(data,p.id).forEach(account=>{
-    usableWindows(account).filter(w=>!isScopedWeekly(w)&&!(p.id==='openai'&&isCodexSpark(w))).forEach(w=>entries.push({account,window:w,used:used(w)}));
-  }));
-  entries.sort((a,b)=>b.used-a.used);
-  const max=entries[0];
-  const heroValue=max?`${100-max.used}<span class="unit">%</span>`:'—';
-  const heroLabel=max?'restant sur le compte le plus contraint':'quotas en attente';
-  // Avec plusieurs comptes, nommer le fournisseur ne suffit plus : « Claude · semaine à 72 % »
-  // ne dit pas de quel compte il s'agit, donc ne dit pas quoi faire.
-  const heroDetail=max?`<strong>${esc(max.account.label)}</strong> · fenêtre ${esc(max.window.label)} · reset ${countdown(max.window.resetsAt)}`:'Ajoutez un compte dans Connexions pour afficher les volumes disponibles.';
-  const heroColor=max?providerColor(max.account.provider):'var(--blue)';
-  const backoff=data.backoffUntil?`<span class="toolbar-warn">⚠ nouvelle tentative ${countdown(data.backoffUntil/1000)}</span>`:'';
-  return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernière synchronisation : ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div>${notificationsNotice(data)}<div class="summary-grid">${PROVIDERS.map(p=>providerSummary(p,accountsOf(data,p.id))).join('')}</div><div class="hero" style="--hero:${heroColor}"><div class="hero-line"><strong class="hero-value">${heroValue}</strong><span class="hero-label">— ${heroLabel}</span></div><p class="hero-detail">${heroDetail}</p></div><div class="sort-row"><label for="accountSort">Trier les comptes</label><select id="accountSort" onchange="setAccountSort(this.value)">${[['remaining','Les plus disponibles'],['reset','Prochain renouvellement'],['name','Nom']].map(([v,l])=>`<option value="${v}" ${accountSort===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,sortedAccounts(accountsOf(data,p.id)),data.history)).join('')}</div>${weeklyChart(data)}`;
+  // Les synthèses par fournisseur et le « compte le plus contraint » ont été retirés : les blocs par
+  // compte ci-dessous disent déjà tout, et c'est le volume hebdo par compte qui compte.
+  const backoff=data.backoffCount?`<span class="toolbar-warn">⚠ ${data.backoffCount} compte${data.backoffCount>1?'s':''} en pause après erreur</span>`:'';
+  return `<div class="toolbar"><h1>Status</h1>${backoff}<span class="toolbar-meta">Dernier relevé : ${data.updatedAt?new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt)):'en attente'}</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">${data.refreshing?'Actualisation…':'Actualiser'}</button></div>${notificationsNotice(data)}<div class="sort-row"><label for="accountSort">Trier les comptes</label><select id="accountSort" onchange="setAccountSort(this.value)">${[['remaining','Les plus disponibles'],['reset','Prochain renouvellement'],['name','Nom']].map(([v,l])=>`<option value="${v}" ${accountSort===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="provider-blocks">${PROVIDERS.map(p=>providerBlock(p,sortedAccounts(accountsOf(data,p.id)),data.history)).join('')}</div>${weeklyChart(data)}`;
 }
 // Grammaire de menuBarMetric, identique au natif (StatusQuota.h) et au popover.
 function parseMetric(metric){
@@ -678,38 +732,58 @@ function pinnedOptions(data,metric){
       const kinds=p.id==='openai'?[['weekly','sem.']]:[['weekly','sem.'],['session','5 h'],...(hasFable([account])?[['weekly-fable','Fable']]:[])];
       const buttons=kinds.map(([kind,label])=>{
         const value=`acct:${account.provider}:${account.accountId}:${kind}`;
-        return `<button class="seg ${metric===value?'on':''}" onclick="send('setMenuBarMetric',{value:'${value}'})">${label}</button>`;
+        return `<button class="seg ${(data.prefs?.providerMenuMetrics?.[account.provider]||metric)===value?'on':''}" onclick="send('setMenuBarMetric',{value:'${value}'})">${label}</button>`;
       }).join('');
       rows.push(`<div class="pin-row"><span class="pin-name">${esc(account.label)}</span><div class="segmented">${buttons}</div></div>`);
     });
   });
   return rows.length?`<div class="pin-list"><small>Épingler un compte précis</small>${rows.join('')}</div>`:'';
 }
-let lidDuration=30;
-function updateLidDuration(value){lidDuration=Number(value);}
+let lidMinutes=30;
 function startLidMode(){
-  if(!Number.isInteger(lidDuration)||lidDuration<1||lidDuration>240)return;
-  send('startLidMode',{minutes:lidDuration});
+  if(!Number.isInteger(lidMinutes)||lidMinutes<1||lidMinutes>240)return;
+  send('startLidMode',{minutes:lidMinutes});
 }
 function lidModeSettings(data){
   const lid=data.tools?.lidMode||{},active=lid.active===true&&!lid.unconfirmed;
   const pending=lid.restorationPending&&!active;
-  const end=active?new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(Date.now()+Math.max(0,lid.remainingSeconds||0)*1000)):'';
-  return `<section class="setting" data-group="system" style="display:block"><div class="setting-copy"><strong>Continuer capot fermé</strong><small>Mode temporaire, sur batterie ou secteur, sans écran externe. Faible consommation imposée. Arrêt à 30 % de batterie, dès une pression thermique signalée par macOS ou si Status ne répond plus. Les réglages précédents sont ensuite restaurés.</small><small>Gardez le Mac ventilé : ce mode ne garantit pas un usage sûr dans un sac fermé. Une connexion réseau reste nécessaire aux tâches en ligne.</small></div><div class="lid-controls" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:12px">${active?`<strong>Actif jusqu’à ${end}</strong><button class="button" onclick="send('stopLidMode')">Arrêter maintenant</button>`:pending||lid.unconfirmed?`<strong>État à vérifier</strong><button class="button" onclick="send('stopLidMode')">Arrêter et restaurer</button>`:`<label for="lidDuration">Durée (minutes)</label><input id="lidDuration" type="number" min="1" max="240" step="1" value="${Number.isFinite(lidDuration)?lidDuration:30}" oninput="updateLidDuration(this.value)" style="width:90px"/><span>1 à 240 min</span>${lid.authorized?`<button class="button" ${lid.busy?'disabled':''} onclick="startLidMode()">Démarrer</button>`:`<button class="button" ${lid.available===false?'disabled':''} onclick="send('authorizeLidMode')">${lid.approvalRequired?'Ouvrir l’autorisation macOS':'Autoriser le service macOS'}</button><span>L’autorisation n’active pas le mode.</span>`}`}</div><p class="connection-note" role="status">${esc(lid.message||'Désactivé.')}</p></section>`;
+  return `<section class="setting" data-group="system" style="display:block"><div class="setting-copy"><strong>Continuer capot fermé</strong><small>Choisissez une durée de 1 à 240 minutes. Faible consommation pendant la session, puis restauration des réglages. Arrêt anticipé si la batterie atteint 30 %, si macOS signale une pression thermique ou si Status ne répond plus.</small></div><div class="lid-controls" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:12px">${!active&&!pending&&!lid.unconfirmed?`<label style="display:inline-flex;gap:6px">Durée <input aria-label="Durée en minutes" type="number" min="1" max="240" step="1" value="${lidMinutes}" oninput="lidMinutes=Number(this.value)" style="width:75px"> min</label>`:''}${active?`<strong>${Math.ceil((lid.remainingSeconds||0)/60)} min restantes</strong><button class="button" onclick="send('stopLidMode')">Arrêter maintenant</button>`:pending||lid.unconfirmed?`<strong>État à vérifier</strong><button class="button" onclick="send('stopLidMode')">Arrêter et restaurer</button>${lid.unconfirmed&&lid.installerAvailable?`<button class="button" onclick="send('authorizeLidMode')">Réinstaller le service</button>`:''}`:lid.authorized?`<button class="button" ${lid.busy?'disabled':''} onclick="startLidMode()">Démarrer</button>`:`<button class="button" ${lid.available===false?'disabled':''} onclick="send('authorizeLidMode')">${lid.approvalRequired?'Ouvrir l’autorisation macOS':'Autoriser le service macOS'}</button><span>L’autorisation n’active pas le mode.</span>`}</div><p class="connection-note" role="status">${esc(lid.message||'Désactivé.')}</p></section>`;
+}
+let fanPercent=100,fanMinutes=15;
+const FAN_LEVELS=[[60,'60 %'],[80,'80 %'],[100,'Maximum']],FAN_DURATIONS=[15,30,60];
+function setFanChoice(kind,value){if(kind==='percent')fanPercent=value;else fanMinutes=value;render();}
+function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.some(([p])=>p===fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
+function fanBoostSettings(data){
+  const lid=data.tools?.lidMode||{},f=lid.fanBoost||{},service=lid.authorized&&f.version===2&&!lid.unconfirmed;
+  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost;
+  const rpm=(f.fans||[]).map((v,i)=>`Ventilateur ${i+1} : ${Math.round(v.rpm).toLocaleString('fr-FR')} tr/min${v.mode===1?' (manuel)':''}`).join(' · ');
+  const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="setFanChoice('${kind}',${value})">${label}</button>`;
+  let controls,note=f.message||'';
+  if(needsStop){
+    const state=lid.unconfirmed?'État à vérifier':active?`${f.verified?'Boost actif':'Montée en vitesse'} · ${(f.percent||100)>=100?'maximum':f.percent+' %'} · ${Math.ceil((f.remainingSeconds||0)/60)} min restantes`:f.manualOutsideBoost?'Ventilateur resté en manuel':'Retour à vérifier';
+    controls=`<button class="button" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">Auto Apple</button><strong>${state}</strong>`;
+    if(lid.unconfirmed)note=lid.message||note;
+  }else if(service){
+    controls=`<div class="segmented">${FAN_LEVELS.map(([p,l])=>seg('percent',p,l,fanPercent===p)).join('')}</div><div class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' min',fanMinutes===m)).join('')}</div><button class="button" ${lid.busy?'disabled':''} onclick="startFanBoost()">Boost temporaire</button>`;
+    note=note&&note!=='Auto Apple'?note:'Auto Apple · macOS pilote les ventilateurs.';
+  }else{
+    controls=`<button class="button" onclick="send('authorizeLidMode')">${lid.authorized?'Mettre le service à jour':'Autoriser le service macOS'}</button>`;
+    note='Service à mettre à jour · vitesse non relevée.';
+  }
+  return `<section class="setting" data-group="system" style="display:block"><div class="setting-copy"><strong>Ventilateurs · Auto Apple / Boost temporaire</strong><small>Vitesse fixée à 60 %, 80 % ou au maximum prévu par le Mac, jamais en dessous de la vitesse du moment, pendant 15 à 60 minutes. Status prend la main sur la gestion thermique de macOS le temps du boost puis la lui rend : à l’échéance, si Status ne répond plus, ou si le Mac chauffe à un palier partiel. Si macOS refuse, le boost est annulé.</small></div><p class="connection-note">${esc(rpm)}</p><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${controls}</div><p class="connection-note" role="status">${esc(note)}</p></section>`;
 }
 function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',cur=parseMetric(metric),
   // Un segment de fenêtre reste allumé quand un compte est épinglé dessus : c'est toujours cette
   // fenêtre qui pilote l'icône, seul le compte a été restreint. Sans cela la rangée paraissait
   // vide dès qu'un compte était épinglé.
   opt=(v,l)=>{const m=parseMetric(v);const on=m.system||m.lowest?metric===v:(cur.provider===m.provider&&cur.kind===m.kind);
-    const target=m.system||m.lowest?v:metricForWindow(metric,m.provider,m.kind);
+    const target=m.system||m.lowest?v:metricForWindow(p.providerMenuMetrics?.[m.provider]||metric,m.provider,m.kind);
     return `<button class="seg ${on?'on':''}" onclick="send('setMenuBarMetric',{value:'${target}'})">${l}</button>`},theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Barre des menus</h2><p>Ce que Status affiche en haut de l’écran, en permanence.</p></div></div><div class="settings">
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Icônes système dans la barre des menus</strong><small><strong>Cliquez un nom pour afficher ou masquer son icône.</strong> Pastille pleine : elle est visible dans la barre. Chaque icône est indépendante ; forme, couleur et contenu de son panneau se règlent sur la même ligne (« Panneau »). Les flèches ← → donnent l’ordre d’affichage (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône dans la barre pour ouvrir son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>
-  <section class="setting" data-group="quotas" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${hasFable(accountsOf(data,'claude'))?opt('claude:weekly-fable','Claude Fable'):''}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Forme et couleur de la jauge</strong><small>L’icône des consommations, celle qui accompagne le pourcentage. « Aucune » ne laisse que le texte. La couleur « auto » suit l’identité du fournisseur affiché — bleu OpenAI, violet Claude — ce qui indique de qui parle le chiffre ; une couleur choisie la remplace. Dans tous les cas, un quota en alerte passe en ambre puis en rouge.</small></div><div class="widget-config"><div class="wc-row"><span class="segmented wc-shapes">${GAUGE_SHAPES.map(([v,l])=>`<button class="seg ${(p.menuBarIconStyle||'ring')===v?'on':''}" onclick="send('setMenuBarIconStyle',{value:'${v}'})">${l}</button>`).join('')}</span><span class="wc-colors">${WIDGET_COLORS.map(([c,cl,hex])=>`<button class="wc-swatch ${(p.menuBarIconColor||'auto')===c?'on':''}" title="${cl}" style="background:${hex}" onclick="send('setMenuBarIconColor',{value:'${c}'})"></button>`).join('')}</span></div></div></section>
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${hasFable(accountsOf(data,'claude'))?opt('claude:weekly-fable','Claude Fable'):''}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</section>
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>Icônes des fournisseurs</strong><small>OpenAI en bleu à gauche, Claude en orange à droite. La partie pleine représente le quota restant du compte sélectionné dans le popup, ou du compte le plus contraint en mode « tous ». Aucun symbole à côté. Un tiret indique une donnée indisponible.</small></div>${['openai','claude'].map(provider=>`<div style="margin-top:16px"><strong>${provider==='openai'?'OpenAI':'Claude'}</strong><div class="segmented" style="margin:8px 0;flex-wrap:wrap">${ICON_DESIGNS.map(([v,l])=>`<button class="seg ${(p.providerIconStyles?.[provider]||'boldRing')===v?'on':''}" onclick="send('setProviderMenuIconStyle',{provider:'${provider}',value:'${v}'})">${l}</button>`).join('')}</div><button class="button" onclick="send('previewMenuIcons',{provider:'${provider}'})">Comparer pour ${provider==='openai'?'OpenAI':'Claude'}</button></div>`).join('')}<button class="button" style="margin-top:12px" onclick="send('closeMenuIconPreviews')">Fermer l’aperçu</button><div class="hint">Cliquer sur un aperçu choisit le dessin pour le fournisseur sélectionné. Niveaux fictifs dans l’aperçu.</div></section>
 </div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></section>
-  ${lidModeSettings(data)}
   <section class="setting" data-group="system"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></section>
   <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>Gestionnaire de fenêtres</strong><small>Placer la fenêtre active au clavier. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.windowManager&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les raccourcis ne répondront pas.</strong>':''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${p.windowManager?'Activé':'Désactivé'}</button></section>
   ${p.windowManager?`
@@ -720,21 +794,37 @@ function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claud
   `:''}
   <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>Piloter la luminosité au clavier</strong><small>F1/F2 ajustent aussi les écrans externes en DDC/CI, en plus de l’écran interne géré nativement par macOS. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.brightnessKeys&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : les touches ne piloteront que l’écran interne.</strong>':''}</small></div><button class="button ${p.brightnessKeys?'on':''}" onclick="send('toggleBrightnessKeys')">${p.brightnessKeys?'Activé':'Désactivé'}</button></section>
   <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>Raccourci clavier global</strong><small>⌘⇧S ouvre et ferme le panneau depuis n’importe quelle application. Nécessite l’autorisation d’Accessibilité — la même que le verrou clavier.${p.globalShortcut&&!p.accessibilityTrusted?' <strong style="color:var(--amber)">Autorisation manquante : le raccourci ne répondra pas.</strong>':''}</small></div><button class="button ${p.globalShortcut?'on':''}" onclick="send('toggleGlobalShortcut')">${p.globalShortcut?'Activé':'Désactivé'}</button></section>
-  <section class="setting" data-group="system"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence d’échantillonnage CPU/GPU/RAM/réseau/disque. L’historique garde toujours 300 points : 5 min à 1 s, 25 min à 5 s. Plus lent = plus sobre.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></section>
+  <section class="setting" data-group="system"><div class="setting-copy"><strong>Moniteur système en arrière-plan</strong><small>Désactivé, les relevés CPU/GPU/RAM/réseau/disque ne tournent que dans Moniteur ou pour une icône système activée. Les alertes matérielles et l’historique 24 h sont alors en pause ; les quotas OpenAI et Claude restent actualisés.</small></div><button class="button ${p.monitorInBackground?'on':''}" onclick="send('toggleMonitorInBackground')">${p.monitorInBackground?'Activé':'Désactivé'}</button></section>
+  <section class="setting" data-group="system"><div class="setting-copy"><strong>Cadence du moniteur système</strong><small>Fréquence des relevés quand le moniteur est actif. L’historique garde 300 points : 5 min à 1 s, 25 min à 5 s.</small></div><div class="segmented">${[1,2,5].map(s=>`<button class="seg ${(p.metricsInterval||1)===s?'on':''}" onclick="send('setMetricsInterval',{value:${s}})">${s} s</button>`).join('')}</div></section>
+  ${lidModeSettings(data)}
+  ${fanBoostSettings(data)}
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>Aperçu au survol</strong><small>Afficher les chiffres en passant la souris sur l’icône, sans cliquer. Un clic épingle le panneau.</small></div><button class="button ${p.hoverPopover?'on':''}" onclick="send('toggleHoverPopover')">${p.hoverPopover?'Activé':'Désactivé'}</button></section>
   <section class="setting" data-group="quotas"><div class="setting-copy"><strong>Coût équivalent API</strong><small>Calculé sur les logs de session terminal (Claude Code, Codex). L\'usage web n\'est pas journalisé et n\'est pas inclus. Tarifs relevés le ${data.costs?.asOf||'—'} ; Codex approximatif. Taux de change USD→EUR indicatif (BCE), relevé du ${data.costs?.fxAsOf||'—'}, rafraîchi automatiquement.</small></div><span class="setting-state">${data.costs?.scanning?'calcul en cours':'actif'}</span></section>
   <section class="setting" data-group="quotas"><div class="setting-copy"><strong>Exporter l\'historique</strong><small>Toute la consommation enregistrée, au format CSV (une ligne par instant et par fenêtre) — pour l\'analyser ailleurs.</small></div><button class="button" onclick="send('exportHistoryCSV')">Exporter…</button></section>
   <section class="setting" data-group="alerts"><div class="setting-copy"><strong>Alertes de seuil</strong><small>Seuil réglable, puis rappel à 95 % du quota hebdomadaire global uniquement. Aucune alerte pour les modèles spécifiques ni la fenêtre de 5 h.</small></div><span class="setting-state ${p.notificationsAuthorized?'ok':''}">${p.notificationsAuthorized?'Autorisées':'Refusées — voir Réglages système › Notifications'}</span></section>
   <section class="setting" data-group="alerts" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Alertes</strong><small>Notifications : quota hebdomadaire global qui se remplit (puis rappel à 95 %), renouvellement de ce quota, et machine hors de son régime normal. Chaque alerte s’active et se règle séparément ; aucune ne se répète tant que la situation n’a pas nettement changé.</small></div><div class="widget-config">${alertRows(p)}</div></section>
-  <section class="setting" data-group="quotas"><div class="setting-copy"><strong>Actualisation</strong><small>Toutes les 5 min, à l’ouverture du popover, et au réveil du Mac. En cas d’erreur répétée, l’intervalle double jusqu’à 40 min.</small></div><span class="setting-state">${data.backoffUntil?`en pause ${countdown(data.backoffUntil/1000)}`:'active'}</span></section>
+  <section class="setting" data-group="quotas"><div class="setting-copy"><strong>Actualisation des quotas</strong><small>OpenAI et Claude sont relevés même quand le Moniteur système est désactivé. Aussi au lancement, à l’ouverture du popup et au réveil du Mac. Après une erreur, seul le compte concerné ralentit temporairement.</small></div><div class="segmented">${[[30,'30 s'],[60,'1 min'],[120,'2 min'],[300,'5 min']].map(([s,label])=>`<button class="seg ${(p.quotaRefreshIntervalSeconds||60)===s?'on':''}" onclick="send('setQuotaRefreshInterval',{value:${s}})">${label}</button>`).join('')}</div><span class="setting-state">${data.backoffCount?`${data.backoffCount} compte${data.backoffCount>1?'s':''} en pause`:'active'}</span></section>
 </div>`}
-let settingsTab='appearance';
-const SETTINGS_GROUPS=[['appearance','Apparence'],['quotas','Quotas'],['alerts','Alertes'],['system','Système'],['shortcuts','Raccourcis']];
+let settingsTab='accounts';
+const SETTINGS_GROUPS=[
+  ['accounts','Comptes','Connexions OpenAI et Claude. Chaque compte a sa propre session : le déconnecter ou le retirer n’affecte ni les autres, ni les outils installés sur ce Mac.'],
+  ['appearance','Affichage','Ce que Status montre en haut de l’écran, et son habillage.'],
+  ['quotas','Quotas','Fréquence des relevés, coût équivalent API et export de l’historique.'],
+  ['alerts','Alertes','Notifications de seuil, de renouvellement et d’état du Mac.'],
+  ['system','Mac','Démarrage, moniteur système, capot fermé et ventilateurs.'],
+  ['shortcuts','Clavier','Raccourcis globaux, luminosité et gestionnaire de fenêtres.']];
 function setSettingsTab(value){if(SETTINGS_GROUPS.some(([id])=>id===value)){settingsTab=value;render();}}
 function settingsView(data,selected=settingsTab){
-  const sections=settingsAll(data).match(/<section class="setting"[\s\S]*?<\/section>/g)||[];
-  const content=sections.filter(html=>html.includes(`data-group="${selected}"`)).join('');
-  return `<div class="toolbar"><h1>Réglages</h1></div>${notificationsNotice(data)}<nav class="settings-tabs" aria-label="Catégories des réglages">${SETTINGS_GROUPS.map(([id,label])=>`<button class="${selected===id?'on':''}" aria-pressed="${selected===id}" onclick="setSettingsTab('${id}')">${label}</button>`).join('')}</nav><div class="settings">${content}</div>`;
+  const group=SETTINGS_GROUPS.find(([id])=>id===selected)||SETTINGS_GROUPS[0];
+  let content;
+  if(group[0]==='accounts')content=connectionsView(data);
+  else{
+    const sections=settingsAll(data).match(/<section class="setting"[\s\S]*?<\/section>/g)||[];
+    content=`<div class="settings">${sections.filter(html=>html.includes(`data-group="${group[0]}"`)).join('')}</div>`;
+  }
+  const refresh=group[0]==='accounts'?`<button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button>`:'';
+  const nav=SETTINGS_GROUPS.map(([id,label])=>`<button class="${group[0]===id?'on':''}" aria-current="${group[0]===id?'page':'false'}" onclick="setSettingsTab('${id}')">${label}</button>`).join('');
+  return `<div class="toolbar"><h1>Réglages</h1></div>${notificationsNotice(data)}<div class="settings-layout"><nav class="settings-nav" aria-label="Catégories des réglages">${nav}</nav><div class="settings-pane"><header class="settings-pane-head"><div><h2>${group[1]}</h2><p>${group[2]}</p></div>${refresh}</header>${content}</div></div>`;
 }
 // Ce qui identifie réellement un compte, le numéro ne le disant pas : e-mail côté OpenAI,
 // organisation côté Claude. Vide tant que le compte n'a pas répondu.
@@ -743,6 +833,7 @@ const accountIdentity=account=>account.provider==='openai'?(account.email&&accou
 // Panneau d'un compte OpenAI. Le bouton « Déconnecter » ne touche plus que la session que Status
 // détient pour ce compte : chaque compte a son propre CODEX_HOME.
 function connectionAction(action,account,label,primary=false){return `<button class="account-action ${primary?'primary':''}" onclick="send('${action}',{accountId:'${account.accountId}'})">${label}</button>`;}
+const quotaRefreshLabel=seconds=>({30:'toutes les 30 secondes',60:'chaque minute',120:'toutes les 2 minutes',300:'toutes les 5 minutes'})[seconds]||'chaque minute';
 function openAIPanel(account){
   const plan=account.plan&&account.plan!=='unknown'?`Offre ${account.plan}`:'Session propre à Status';
   const primary=account.connected?'':account.connecting?'<button class="account-action" disabled>Connexion…</button>':connectionAction('loginOpenAI',account,'Se connecter',true);
@@ -751,7 +842,7 @@ function openAIPanel(account){
 }
 function claudePanel(account){
   if(account.claudeSource==='web'){
-    const note=account.capturedAt?`${account.stale?'Mesure ancienne':'Dernière mesure'} : ${ageLabel(account.capturedAt)}. Relevé automatique toutes les 5 minutes.`:'En attente du premier relevé web.';
+    const note=account.capturedAt?`${account.stale?'Mesure ancienne':'Dernière mesure'} : ${ageLabel(account.capturedAt)}. Relevé automatique ${quotaRefreshLabel(appData?.prefs?.quotaRefreshIntervalSeconds)}.`:'En attente du premier relevé web.';
     return accountPanel(account,esc(account.label),account.connected?'Session web connectée · suivi automatique':'Connexion web requise',connectionAction('connectClaudeWeb',account,account.error?'Reconnecter le suivi':'Ouvrir la connexion web',true),connectionAction('connectClaudeCode',account,'Utiliser Claude Code'),note);
   }
   const bridge=account.claudeSource==='code'||!account.cookieConfigured;
@@ -797,13 +888,12 @@ function connectionsView(data){
     // fond sombre — présent, mais invisible.
     return `<article class="connection-panel" style="--provider:${providerColor(provider.id)}"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
   };
-  return `<div class="toolbar"><h1>Connexions</h1><span class="toolbar-meta">Un compte, une session isolée</span><button class="button" ${data.refreshing?'disabled':''} onclick="send('refresh')">Actualiser</button></div><div class="section-head"><div><h2>Comptes</h2><p>Chaque compte a sa propre session : les déconnecter ou les retirer n'affecte ni les autres comptes, ni les outils installés sur ce Mac.</p></div></div><div class="connections">${section(PROVIDERS[0],'Connexion ChatGPT · une session par compte.',openAIPanel)}${section(PROVIDERS[1],'Suivi automatique via une session web isolée par compte. Claude Code reste disponible en option.',claudePanel)}</div>`;
+  return `<div class="connections">${section(PROVIDERS[0],'Connexion ChatGPT · une session par compte.',openAIPanel)}${section(PROVIDERS[1],'Suivi automatique via une session web isolée par compte. Claude Code reste disponible en option.',claudePanel)}</div>`;
 }
 function render(){
   if(!appData)return;
   document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';
   document.querySelector('#overview').innerHTML=overview(appData);
-  document.querySelector('#connections').innerHTML=connectionsView(appData);
   document.querySelector('#displays').innerHTML=displaysView(appData);
   document.querySelector('#settings').innerHTML=settingsView(appData);
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));
@@ -835,7 +925,7 @@ function metricChart(familyId,specs,{percent=false}={}){
     const line=s.values.map((v,i)=>`${i?'L':'M'}${((offset+i)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
     return `<path class="area" fill="${s.color}" d="${line} L${w},${h} L${(offset/(len-1)*w).toFixed(1)},${h} Z"/><path class="line" stroke="${s.color}" d="${line}"/>`;
   }).join('');
-  return `<div class="metric-chart"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" data-family="${familyId}" data-keys="${drawn.map(s=>s.key).join(',')}" data-labels="${drawn.map(s=>s.label||s.key).join(',')}" data-percent="${percent?1:0}"><line class="baseline" x1="0" y1="${h}" x2="${w}" y2="${h}"/>${paths}</svg></div>`;
+  return `<div class="metric-chart"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" data-family="${familyId}" data-keys="${drawn.map(s=>s.key).join(',')}" data-labels="${drawn.map(s=>s.label||s.key).join(',')}" data-percent="${percent?1:0}">${percent?`<line class="gridline" x1="0" y1="${h/2}" x2="${w}" y2="${h/2}"/>`:''}<line class="baseline" x1="0" y1="${h}" x2="${w}" y2="${h}"/>${paths}</svg></div>`;
 }
 const readout=familyId=>{
   if(hoverState?.family!==familyId)return '';
@@ -950,10 +1040,10 @@ function sensorsCard(){
   const rows=[];
   if(n.dieMaxC!=null)rows.push([`SoC · ${n.dieCount} capteurs`,`${Math.round(n.dieMaxC)} °C max · ${Math.round(n.dieAvgC)} °C moy.`]);
   if(n.deviceMaxC!=null)rows.push([`périphériques · ${n.deviceCount}`,`${Math.round(n.deviceMaxC)} °C max · ${Math.round(n.deviceAvgC)} °C moy.`]);
-  if(fans.length)rows.push(['ventilateurs',fans.map(k=>Math.round(n[k]).toLocaleString('fr-FR')+' tr/min').join(' · ')]);
+
   const detailLines=rows.length?`<div class="detail-rows" style="margin-top:8px">${rows.map(([l,v])=>`<div class="detail-row"><span class="detail-label">${l}</span><span>${v}</span></div>`).join('')}</div>`:'';
   const chart=n.tempC!=null?metricChart('sensors',[{key:'tempC',color:'var(--chart-a)',label:'temp.'}],{percent:true}):'';
-  return metricCard('sensors','Capteurs',`<span>${badge}${temp}</span>`,chart+detailLines);
+  return metricCard('sensors','Capteurs',`<span>${badge}${temp}</span>`,chart+detailLines+fanPanel(fans.map(k=>n[k])));
 }
 function systemCard(){
   const system=famGet('system');if(!system)return '';
@@ -988,7 +1078,7 @@ function monitorView(){
     metricChart('disk',[{key:'readBytesPerSec',color:'var(--chart-a)',label:'lecture'},{key:'writeBytesPerSec',color:'var(--chart-b)',label:'écriture'}])
     +legend([['var(--chart-a)','lecture'],['var(--chart-b)','écriture']])+storageSummary(disk.now)));
   // La batterie a sa propre carte : Capteurs porte la température, l'état thermique et les ventilateurs.
-  const sensorsHTML=sensorsCard();if(sensorsHTML)cards.push(sensorsHTML);
+  const sensorsHTML=sensorsCard();
   const interval=metricsData.intervalSeconds||1,windowMin=Math.round(300*interval/60);
   const modes=[['charts','graphiques'],['table','tableau'],['day','24 h']];
   const toggle=`<div class="view-toggle">${modes.map(([m,l])=>`<button class="${monitorMode===m?'on':''}" onclick="setMonitorMode('${m}')">${l}</button>`).join('')}</div>`;
@@ -996,7 +1086,52 @@ function monitorView(){
   const head=`<div class="toolbar"><h1>Moniteur</h1><span class="toolbar-meta">${meta}</span>${toggle}</div>`;
   if(monitorMode==='table')return head+monitorTable();
   if(monitorMode==='day')return head+monitorDay();
-  return head+`<div class="metric-grid">${cards.join('')}${systemCard()}${processesCard()}</div>`;
+  // Regroupement par thème : on cherche « pourquoi ça chauffe / rame », pas une famille au hasard.
+  const byId=Object.fromEntries(cards.map(html=>[html.match(/data-family="([^"]+)"/)?.[1],html]));
+  const group=(title,html)=>html.filter(Boolean).length?`<section class="monitor-section"><h2>${title}</h2><div class="metric-grid">${html.filter(Boolean).join('')}</div></section>`:'';
+  return head+vitalsStrip()
+    +group('Calcul',[byId.cpu&&byId.cpu.replace('class="metric-card ','class="metric-card metric-card-wide '),byId.gpu,byId.ram])
+    +group('Thermique et énergie',[sensorsHTML,byId.battery])
+    +group('Entrées / sorties',[byId.network,byId.disk])
+    +group('Système',[processesCard(),systemCard()]);
+}
+// Bandeau de tête : l'état de la machine d'un coup d'œil, chaque tuile menant à sa carte.
+function sparkline(values,{min=0,max=null}={}){
+  if(!values||values.length<2)return '';
+  const w=100,h=22,hi=max??Math.max(min+1,...values),lo=max==null&&min==null?Math.min(...values):min;
+  const d=values.map((v,i)=>`${i?'L':'M'}${(i/(values.length-1)*w).toFixed(1)},${(h-(Math.min(v,hi)-lo)/Math.max(1e-9,hi-lo)*h).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${d}"/></svg>`;
+}
+function vitalsStrip(){
+  const tiles=[];
+  const tile=(family,label,value,spark,level='')=>tiles.push(`<button class="vital ${level}" onclick="document.querySelector('.metric-card[data-family=${family}]')?.scrollIntoView({behavior:'smooth',block:'center'})"><span class="vital-label">${label}</span><span class="vital-value">${value}</span>${spark}</button>`);
+  const pct=v=>v==null?'—':`${Math.round(v)}<small>%</small>`;
+  const level=(v,warn,crit)=>v==null?'':v>=crit?'crit':v>=warn?'warn':'';
+  const cpu=famGet('cpu'),gpu=famGet('gpu'),ram=famGet('ram'),sensors=famGet('sensors'),net=famGet('network'),disk=famGet('disk'),battery=famGet('battery');
+  if(cpu)tile('cpu','CPU',pct(cpu.now.total),sparkline(cpu.series?.total,{max:100}),level(cpu.now.total,85,95));
+  if(gpu)tile('gpu','GPU',pct(gpu.now.usage),sparkline(gpu.series?.usage,{max:100}),level(gpu.now.usage,85,95));
+  if(ram)tile('ram','Mémoire',pct(ram.now.usedPercent),sparkline(ram.series?.usedPercent,{max:100}),ram.now.pressureLevel>=4?'crit':ram.now.pressureLevel>=2?'warn':'');
+  if(sensors?.now.tempC!=null)tile('sensors','Temp.',`${Math.round(sensors.now.tempC)}<small>°C</small>`,sparkline(sensors.series?.tempC,{min:null}),level(sensors.now.tempC,85,95));
+  const fanKeys=sensors?Object.keys(sensors.now).filter(k=>k.startsWith('fan')).sort():[];
+  if(fanKeys.length){const avg=fanKeys.reduce((a,k)=>a+sensors.now[k],0)/fanKeys.length;
+    tile('sensors','Ventil. · tr/min',`${Math.round(avg).toLocaleString('fr-FR')}`,sparkline(sensors.series?.[fanKeys[0]],{min:0}),appData?.tools?.lidMode?.fanBoost?.active?'boost':'');}
+  if(net)tile('network','Réseau ↓',fmtBytes(net.now.rxBytesPerSec),sparkline(net.series?.rxBytesPerSec));
+  if(disk)tile('disk','Disque libre',fmtSize(disk.now.freeBytes),sparkline(disk.series?.readBytesPerSec),level(disk.now.usedPercent,90,97));
+  if(battery)tile('battery','Batterie',pct(battery.now.percent),sparkline(battery.series?.percent,{max:100}),battery.now.percent!=null&&battery.now.percent<=10&&!battery.now.externalConnected?'crit':'');
+  return tiles.length?`<div class="vitals">${tiles.join('')}</div>`:'';
+}
+// Ventilateurs dans la carte Capteurs : vitesse relative au maximum du Mac, et boost à portée.
+function fanPanel(rpms){
+  const lid=appData?.tools?.lidMode||{},f=lid.fanBoost||{},fans=f.fans?.length?f.fans:rpms.map(rpm=>({rpm}));
+  if(!fans.length)return '';
+  const rows=fans.map((fan,i)=>{const max=fan.maxRPM||0,share=max?Math.min(100,fan.rpm/max*100):0;
+    return `<div class="fan-meter"><span>ventilateur ${i+1}${fan.mode===1?' · manuel':''}</span><b>${Math.round(fan.rpm).toLocaleString('fr-FR')} tr/min</b>${max?`<div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${share}%"></i></div>`:''}</div>`;}).join('');
+  const service=lid.authorized&&f.version===2&&!lid.unconfirmed,stop=f.active||f.restorationPending||f.manualOutsideBoost;
+  const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="event.stopPropagation();setFanChoice('${kind}',${value});renderMonitor()">${label}</button>`;
+  const controls=!service?'':stop
+    ?`<div class="fan-actions"><strong>${f.active?`${f.verified?'Boost':'Montée'} ${(f.percent||100)>=100?'max':f.percent+' %'} · ${Math.ceil((f.remainingSeconds||0)/60)} min`:'Ventilateur en manuel'}</strong><button class="button" ${lid.busy?'disabled':''} onclick="send('stopFanBoost')">Auto Apple</button></div>`
+    :`<div class="fan-actions"><div class="segmented">${FAN_LEVELS.map(([p,l])=>seg('percent',p,l==='Maximum'?'Max':l,fanPercent===p)).join('')}</div><div class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' min',fanMinutes===m)).join('')}</div><button class="button" ${lid.busy?'disabled':''} onclick="startFanBoost()">Boost</button></div>`;
+  return `<div class="fan-panel">${rows}${controls}</div>`;
 }
 // Les courbes sont muettes au clavier et au lecteur d'écran. Ce tableau dit la même chose en
 // texte : valeur courante, min, max, moyenne sur la fenêtre glissante.
@@ -1116,7 +1251,10 @@ window.StatusApp={update(data){appData=data;render()},updateMetrics(data){const 
 // Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
 // encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.
 function goToView(view){
+  // Les comptes vivent désormais dans Réglages : les anciens liens « Connexions » y mènent.
+  if(view==='connections'){view='settings';settingsTab='accounts';}
   currentView=view;
+  send('setMonitorVisible',{visible:view==='monitor'});
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===currentView));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));
   render();renderMonitor();

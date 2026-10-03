@@ -1,6 +1,7 @@
 #import "StatusLidClient.h"
 #import "StatusLidProtocol.h"
 #import <ServiceManagement/ServiceManagement.h>
+#import <AppKit/AppKit.h>
 
 @implementation TMLidClient {
     NSXPCConnection *_connection;
@@ -11,14 +12,34 @@
     id _activity;
 }
 - (SMAppService *)service { return [SMAppService daemonServiceWithPlistName:TMLidServicePlist]; }
+- (instancetype)init {
+    if ((self=[super init])) [self retireUnsignedRegistration];
+    return self;
+}
+// Sans signature Apple, un daemon SMAppService ne peut jamais démarrer (contrainte de lancement
+// vide) : launchd le relance en boucle et smd le recrée après tout bootout. On le désenregistre.
+- (void)retireUnsignedRegistration {
+    SMAppService *previous=self.service;
+    if (!TMLidSigningReady() && previous.status!=SMAppServiceStatusNotRegistered) [previous unregisterAndReturnError:nil];
+}
+- (BOOL)authorized { return TMLidInstalledServiceReady() || (TMLidSigningReady() && self.service.status==SMAppServiceStatusEnabled); }
 - (NSDictionary *)snapshot {
     SMAppServiceStatus status=self.service.status;
     NSMutableDictionary *result=[(_remote ?: @{@"active":@NO}) mutableCopy];
-    result[@"authorized"]=@(status==SMAppServiceStatusEnabled);
+    if (_remote && ![_remote[@"controlVersion"] isEqual:@4]) {
+        result[@"unconfirmed"]=@YES;
+        result[@"message"]=@"Ancien service chargé. Arrêtez le mode puis mettez le service à jour.";
+    }
+    result[@"authorized"]=@(self.authorized);
     result[@"approvalRequired"]=@(status==SMAppServiceStatusRequiresApproval);
     result[@"busy"]=@(_refreshing);
-    result[@"available"]=@(TMLidPeerRequirement(TMLidServiceName)!=nil);
-    if (_error.length) { result[@"message"]=_error; result[@"unconfirmed"]=@(status==SMAppServiceStatusEnabled); }
+    result[@"installerAvailable"]=@(TMLidInstallerReady());
+    result[@"available"]=@(TMLidSigningReady() || TMLidInstallerReady());
+    if (!self.authorized && TMLidInstallerReady() && !TMLidSigningReady())
+        result[@"message"]=@"Installez le service macOS une fois avec votre autorisation administrateur, puis choisissez la durée.";
+    else if (!TMLidSigningReady() && !TMLidInstallerReady())
+        result[@"message"]=@"Installateur du service absent ou signature invalide. Réinstallez Status.";
+    if (_error.length) { result[@"message"]=_error; result[@"unconfirmed"]=@(self.authorized); }
     return result;
 }
 - (void)changed { if (self.onChange) self.onChange(); }
@@ -29,7 +50,17 @@
     if (!active && _activity) { [NSProcessInfo.processInfo endActivity:_activity]; _activity=nil; }
 }
 - (void)requestAuthorization {
-    if (!TMLidPeerRequirement(TMLidServiceName)) { _error=@"Une signature stable est nécessaire pour ce mode."; [self changed]; return; }
+    if (!TMLidSigningReady()) {
+        if (!TMLidInstallerReady()) { _error=@"Installateur du service absent ou signature invalide."; [self changed]; return; }
+        if ([_remote[@"active"] boolValue] || [_remote[@"restorationPending"] boolValue] || [_remote[@"fanBoost"][@"active"] boolValue] || [_remote[@"fanBoost"][@"restorationPending"] boolValue]) {
+            _error=@"Arrêtez et restaurez la session avant de réinstaller le service."; [self changed]; return;
+        }
+        [self retireUnsignedRegistration];  // Ne bloque plus le paquet (label distinct) : best effort.
+        NSURL *package=[NSBundle.mainBundle URLForResource:@"StatusLidService" withExtension:@"pkg"];
+        BOOL opened=package && [NSWorkspace.sharedWorkspace openURL:package];
+        _error=opened ? @"Terminez l’installation dans la fenêtre macOS. La session reste désactivée." : @"Impossible d’ouvrir l’installateur macOS.";
+        [self changed]; return;
+    }
     SMAppService *service=self.service;
     NSError *error=nil;
     if (service.status!=SMAppServiceStatusEnabled && service.status!=SMAppServiceStatusRequiresApproval)
@@ -42,11 +73,11 @@
     [self changed]; [self refresh];  // Jamais de démarrage automatique après l'autorisation.
 }
 - (BOOL)connect {
-    if (self.service.status!=SMAppServiceStatusEnabled) return NO;
+    if (!self.authorized) return NO;
     if (_connection) return YES;
-    NSString *requirement=TMLidPeerRequirement(TMLidServiceName);
+    NSString *requirement=TMLidPeerRequirement(TMLidHelperIdentifier);
     if (!requirement) return NO;
-    NSXPCConnection *connection=[[NSXPCConnection alloc] initWithMachServiceName:TMLidServiceName options:NSXPCConnectionPrivileged];
+    NSXPCConnection *connection=[[NSXPCConnection alloc] initWithMachServiceName:(TMLidInstalledServiceReady() ? TMLidInstalledServiceName : TMLidServiceName) options:NSXPCConnectionPrivileged];
     [connection setCodeSigningRequirement:requirement];
     connection.remoteObjectInterface=[NSXPCInterface interfaceWithProtocol:@protocol(TMLidService)];
     __weak typeof(self) weakSelf=self;
@@ -63,8 +94,15 @@
     connection.interruptionHandler=^{ [weakConnection invalidate]; };
     _connection=connection; [connection resume]; return YES;
 }
-- (void)request:(NSInteger)kind minutes:(NSInteger)minutes {
+- (void)request:(NSInteger)kind minutes:(NSInteger)minutes { [self request:kind minutes:minutes percent:100]; }
+- (void)request:(NSInteger)kind minutes:(NSInteger)minutes percent:(NSInteger)percent {
     if (_refreshing) return;
+    if (kind==1 && ![_remote[@"controlVersion"] isEqual:@4]) {
+        _error=@"Connexion au service à vérifier avant le démarrage."; [self changed]; [self refresh]; return;
+    }
+    if ((kind==3 || kind==4) && ![_remote[@"fanBoost"][@"version"] isEqual:@2]) {
+        _error=@"Mettez le service macOS à jour pour contrôler les ventilateurs."; [self changed]; return;
+    }
     if (![self connect]) return;
     _refreshing=YES;
     NSUInteger request=++_request;
@@ -75,7 +113,7 @@
             BOOL changed = kind!=0 || ![self->_remote isEqual:data] || ![(self->_error ?: @"") isEqual:(error ?: @"")];
             self->_refreshing=NO; self->_error=error;
             if (data) self->_remote=data;
-            [self keepHeartbeatAwake:!error && [data[@"active"] boolValue]];
+            [self keepHeartbeatAwake:!error && ([data[@"active"] boolValue] || [data[@"fanBoost"][@"active"] boolValue])];
             if (changed) [self changed];
         });
     };
@@ -85,8 +123,11 @@
     void (^reply)(NSDictionary *)=^(NSDictionary *data) { complete(data,nil); };
     if (kind==1) [remote startMinutes:minutes reply:reply];
     else if (kind==2) [remote stopWithReply:reply];
+    else if (kind==3) [remote startFanBoostMinutes:minutes percent:percent reply:reply];
+    else if (kind==4) [remote stopFanBoostWithReply:reply];
     else [remote statusWithReply:reply];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
+    // Prise de main des ventilateurs : thermalmonitord met 3 à 6 s à céder, puis chaque écriture est relue.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(kind==3||kind==4?35:12)*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         typeof(self) self=weakSelf;
         if (self && self->_refreshing && request==self->_request) {
             self->_refreshing=NO; self->_request++;
@@ -98,6 +139,8 @@
 - (void)refresh { [self request:0 minutes:0]; }
 - (void)startMinutes:(NSInteger)minutes { [self request:1 minutes:minutes]; }
 - (void)stop { [self request:2 minutes:0]; }
+- (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent { [self request:3 minutes:minutes percent:percent]; }
+- (void)stopFanBoost { [self request:4 minutes:0]; }
 - (void)invalidate { self.onChange=nil; _request++; [self keepHeartbeatAwake:NO]; [_connection invalidate]; _connection=nil; }
 - (void)dealloc { if (_activity) [NSProcessInfo.processInfo endActivity:_activity]; [_connection invalidate]; }
 @end

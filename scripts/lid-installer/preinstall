@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+# Installer exécute ce script avec l'autorisation administrateur de l'utilisateur.
+# Ne jamais remplacer un service pendant qu'il possède les réglages d'énergie.
+power=$(/usr/bin/pmset -g)
+printf '%s\n' "$power" | /usr/bin/grep -q 'System-wide power settings:' || exit 1
+if printf '%s\n' "$power" | /usr/bin/grep -Eq 'SleepDisabled[[:space:]]+1'; then
+  echo 'Arrêtez le mode capot fermé avant de mettre son service à jour.' >&2
+  exit 1
+fi
+if [ -e /var/db/com.raphael.status.lid/restore.plist ] || [ -L /var/db/com.raphael.status.lid/restore.plist ]; then
+  echo 'Une restauration est en attente. Arrêtez et restaurez le mode dans Status.' >&2
+  exit 1
+fi
+for directory in /Library /Library/LaunchDaemons /Library/PrivilegedHelperTools; do
+  if [ -L "$directory" ]; then exit 1; fi
+  if [ -e "$directory" ]; then
+    [ -d "$directory" ] && [ "$(/usr/bin/stat -f %u "$directory")" = 0 ] || exit 1
+    permissions=$(/usr/bin/stat -f %Lp "$directory")
+    [ "$((0$permissions & 0022))" = 0 ] || exit 1
+  fi
+done
+legacy=/Library/LaunchDaemons/com.raphael.status.lid-helper.plist
+for file in "$legacy" /Library/LaunchDaemons/com.raphael.status.lid-service.plist /Library/PrivilegedHelperTools/com.raphael.status.lid-helper; do
+  [ ! -L "$file" ] || exit 1
+done
+if /bin/launchctl print system/com.raphael.status.lid-service >/dev/null 2>&1; then
+  /bin/launchctl bootout system/com.raphael.status.lid-service
+fi
+# Ancien paquet (label partagé avec SMAppService) : retiré pour qu'aucun second
+# helper ne pilote les mêmes réglages au prochain démarrage.
+if [ -f "$legacy" ]; then
+  /bin/launchctl bootout system "$legacy" 2>/dev/null || true
+  /bin/rm -f "$legacy"
+fi

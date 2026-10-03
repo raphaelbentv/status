@@ -1,4 +1,5 @@
 #import "StatusLidClient.h"
+#import "StatusLidProtocol.h"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
@@ -19,6 +20,7 @@
 #import "StatusFx.h"
 #import "StatusDisplays.h"
 #import "StatusMenuBarWidgets.h"
+#import "StatusIconDesigns.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 #import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
 #import <IOKit/hidsystem/IOLLEvent.h>  // NX_SYSDEFINED
@@ -284,6 +286,8 @@ static const CGFloat TMTitleBarHeight = 28;
 // Une session claude.ai par compte : accountId → TMClaudeSession.
 @property NSMutableDictionary<NSString *, TMClaudeSession *> *claudeSessions;
 @property NSStatusItem *statusItem;
+@property NSMutableArray<NSStatusItem *> *iconPreviewItems;
+@property NSString *iconPreviewProvider;
 @property NSPopover *statusPopover;
 @property BOOL webReady;
 @property BOOL menuWebReady;
@@ -308,6 +312,7 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSMutableDictionary<NSString *, NSString *> *cookieCache;
 @property NSDictionary *costScan;    // dernier balayage des coûts terminal (feature 16)
 @property BOOL costScanning;
+@property NSTimeInterval costScanCompletedAt;
 @property id globalShortcutMonitor, localShortcutMonitor;
 @property TMWindowManager *windowManager;
 @property TMDisplayManager *displayManager;
@@ -347,12 +352,15 @@ static const CGFloat TMTitleBarHeight = 28;
 @property NSTimer *hoverOpenTimer;          // délai avant ouverture : évite le surgissement en traversant la barre
 @property NSTimer *hoverCloseTimer;         // grâce à la sortie : laisse le temps d'entrer dans le popover
 @property BOOL popoverOpenedByHover;        // un popover ouvert au clic ne doit pas se fermer tout seul
-@property NSInteger consecutiveErrors;      // backoff: grows on failed polls, resets on success
-@property NSDate *nextAllowedRefresh;       // backoff: automatic polls are skipped until this time
+@property NSMutableDictionary<NSString *, NSNumber *> *accountErrorCounts;
+@property NSMutableDictionary<NSString *, NSDate *> *accountBackoffUntil;
+@property NSTimeInterval lastQuotaRefreshAt;
 // Une surface « amorcée » a déjà reçu un payload métriques complet (séries incluses) ; les ticks
 // suivants n'envoient qu'un delta (TMMetricsDeltaPayload) et la série glisse côté web. L'amorçage
 // retombe quand la surface se ferme ou que sa webview se recharge.
 @property BOOL dashboardMetricsPrimed, popoverMetricsPrimed, widgetMetricsPrimed;
+@property BOOL monitorViewActive;
+@property BOOL macToolsVisible;
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
 @property TMLidClient *lidMode;
@@ -380,11 +388,12 @@ static const CGFloat TMTitleBarHeight = 28;
     }];
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     [defaults registerDefaults:@{
-        @"refreshIntervalMinutes": @5,
+        @"refreshIntervalSeconds": @60,
         // lowest | claude:session | claude:weekly | openai:weekly — quel % accompagne l'icône.
         // Claude semaine par défaut : c'est la limite qui contraint réellement le travail.
         @"menuBarMetric": @"claude:weekly",
         @"hoverPopover": @YES,
+        @"monitorInBackground": @NO,
         // « auto » : la jauge prend la couleur du fournisseur affiché. Voir updateStatusMenu.
         @"menuBarIconColor": @"auto",
         // blueprint reste l'apparence historique : les utilisateurs existants ne voient aucun
@@ -400,6 +409,8 @@ static const CGFloat TMTitleBarHeight = 28;
     self.codexServers = [NSMutableDictionary dictionary];
     self.claudeSessions = [NSMutableDictionary dictionary];
     self.openAILoginIDs = [NSMutableDictionary dictionary];
+    self.accountErrorCounts = [NSMutableDictionary dictionary];
+    self.accountBackoffUntil = [NSMutableDictionary dictionary];
     self.cookieCache = [NSMutableDictionary dictionary];
     [self loadAccountRegistry];
     // Réafficher les derniers volumes connus immédiatement, sans attendre le premier sondage : ils
@@ -420,7 +431,13 @@ static const CGFloat TMTitleBarHeight = 28;
     self.displayManager = [TMDisplayManager new];
     [self.displayManager rescan];
     [self buildWindow];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(dashboardWillClose:)
+                                             name:NSWindowWillCloseNotification object:self.window];
     [self buildStatusItem];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(statusPopoverDidClose:)
+                                             name:NSPopoverDidCloseNotification object:self.statusPopover];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--preview-menu-icons"])
+        [self showIconPreviews];
     [self scheduleRefresh];
     [self startSystemMonitor];
     [self rebuildMenuBarWidgets];  // icônes système activées par l'utilisateur, à côté de la jauge quota
@@ -464,6 +481,7 @@ static const CGFloat TMTitleBarHeight = 28;
     if (self.metricsLog.count) TMSaveMetricsHistory(self.metricsLog);
     for (TMCodexAppServer *server in self.codexServers.allValues) [server stop];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)requestNotificationAuthorization {
@@ -561,8 +579,7 @@ static const CGFloat TMTitleBarHeight = 28;
 }
 
 - (void)buildStatusItem {
-    // Variable, not square: the item carries a percentage next to the icon, so it must be free to
-    // grow and shrink with the text.
+    // Two provider icons, kept adjacent without text.
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     // L'icône n'est pas posée ici : updateStatusMenu la redessine à chaque cycle, puisqu'elle
     // représente la valeur courante. Un tiret le temps de la première lecture.
@@ -591,6 +608,40 @@ static const CGFloat TMTitleBarHeight = 28;
     self.statusPopover.contentSize = frame.size;
     self.statusPopover.contentViewController = controller;
     [self updateStatusMenu];
+}
+
+- (void)closeIconPreviews {
+    for (NSStatusItem *item in self.iconPreviewItems) [NSStatusBar.systemStatusBar removeStatusItem:item];
+    self.iconPreviewItems = nil;
+}
+
+- (void)showIconPreviews {
+    [self closeIconPreviews];
+    if (!self.iconPreviewProvider) self.iconPreviewProvider=@"openai";
+    [self.statusPopover close];
+    self.iconPreviewItems = [NSMutableArray array];
+    NSArray *ids = TMIconDesignIDs(), *names = TMIconDesignNames();
+    // Reverse insertion keeps designs 01–06 in reading order in the menu bar.
+    for (NSInteger i = ids.count - 1; i >= 0; i--) {
+        NSStatusItem *item = [NSStatusBar.systemStatusBar statusItemWithLength:30];
+        item.button.image = TMProviderGauge(ids[i], @0.72, [self.iconPreviewProvider isEqual:@"openai"]);
+        item.button.image.template = NO;
+        item.button.identifier = ids[i];
+        item.button.toolTip = [NSString stringWithFormat:@"%02ld · %@ — %@. Cliquer pour choisir. Aperçu fictif.", (long)i + 1, names[i], self.iconPreviewProvider];
+        item.button.accessibilityLabel = item.button.toolTip;
+        item.button.target = self;
+        item.button.action = @selector(selectIconPreview:);
+        [self.iconPreviewItems addObject:item];
+    }
+}
+
+- (void)selectIconPreview:(NSButton *)sender {
+    NSString *style = sender.identifier;
+    if (![TMIconDesignIDs() containsObject:style]) return;
+    [NSUserDefaults.standardUserDefaults setObject:style forKey:[@"menuBarIconStyle." stringByAppendingString:self.iconPreviewProvider ?: @"openai"]];
+    [self closeIconPreviews];
+    [self updateStatusMenu];
+    [self pushData];
 }
 
 #pragma mark - Widgets de la barre des menus (icônes système multiples)
@@ -872,129 +923,52 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     return series;
 }
 
+- (NSString *)metricForProvider:(NSString *)provider {
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+    return TMProviderMenuMetric(provider,[defaults dictionaryForKey:@"providerMenuMetrics"] ?: @{},
+        [defaults stringForKey:@"menuBarMetric"]);
+}
+
 - (void)updateStatusMenu {
     NSArray *accounts = [self accountPayloadList];
 
-    // Infobulle : le détail complet, compte par compte et fenêtre par fenêtre, quel que soit le
-    // chiffre épinglé. Avec plusieurs comptes, « Claude · semaine : 72 % » ne suffit plus à dire
-    // DE QUI on parle.
-    NSMutableArray<NSString *> *lines = [NSMutableArray array];
-    for (NSDictionary *account in accounts) {
-        NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
-        for (NSDictionary *window in windows) {
-            if (!TMWindowIsSession(window) && !TMWindowIsWeekly(window)) continue;
-            [lines addObject:[NSString stringWithFormat:@"%@ · %@ : %ld %% restant",
-                              account[@"label"], window[@"label"],
-                              (long)(100 - MIN(100, MAX(0, TMNumber(window[@"usedPercent"]))) + 0.5)]];
-        }
+    NSString *openAIStyle=[self iconStyleForProvider:@"openai"], *claudeStyle=[self iconStyleForProvider:@"claude"];
+    NSDictionary *openAI=TMResolveMenuBarMetric([self metricForProvider:@"openai"],accounts);
+    NSDictionary *claude=TMResolveMenuBarMetric([self metricForProvider:@"claude"],accounts);
+    NSMutableArray *selected=[NSMutableArray array];
+    for (NSString *provider in @[@"openai",@"claude"]) {
+        NSDictionary *quota=[provider isEqual:@"openai"] ? openAI : claude;
+        [selected addObject:quota ? [NSString stringWithFormat:@"%@ · %@ · %@ : %.0f %% restant",
+            [provider isEqual:@"openai"] ? @"OpenAI" : @"Claude",quota[@"label"],quota[@"shortLabel"],
+            100-MIN(100,MAX(0,TMNumber(quota[@"usedPercent"])))] :
+            [NSString stringWithFormat:@"%@ · quota indisponible",provider]];
     }
-    self.statusItem.button.toolTip = lines.count
-        ? [lines componentsJoinedByString:@"\n"]
-        : @"Status · Connectez un compte pour voir vos quotas";
+    self.statusItem.button.toolTip=[selected componentsJoinedByString:@"\n"];
+    NSNumber *a=openAI ? @(1-TMNumber(openAI[@"usedPercent"])/100) : nil;
+    NSNumber *c=claude ? @(1-TMNumber(claude[@"usedPercent"])/100) : nil;
+    NSDictionary *signature=@{@"openai":openAIStyle,@"claude":claudeStyle,@"a":a ?: NSNull.null,@"c":c ?: NSNull.null,@"openAIAccount":openAI[@"accountId"] ?: @"",@"claudeAccount":claude[@"accountId"] ?: @""};
+    if ([self.statusMenuSignature isEqual:signature]) return;
+    self.statusMenuSignature=signature;
+    // One native item keeps the two independently configured icons adjacent, even near a notch.
+    NSImage *left=TMProviderGauge(openAIStyle,a,YES), *right=TMProviderGauge(claudeStyle,c,NO);
+    NSImage *pair=[NSImage imageWithSize:NSMakeSize(44,18) flipped:NO drawingHandler:^BOOL(NSRect rect){
+        [left drawInRect:NSMakeRect(0,0,18,18)];
+        [right drawInRect:NSMakeRect(26,0,18,18)];
+        return YES;
+    }];
+    pair.template=NO;
+    self.statusItem.button.image=pair;
+    self.statusItem.button.imagePosition=NSImageOnly;
+    self.statusItem.button.attributedTitle=[[NSAttributedString alloc] initWithString:@""];
+    self.statusItem.button.title=@"";
+    self.statusItem.length=56;
+    self.statusItem.button.accessibilityLabel=[self.statusItem.button.toolTip stringByAppendingString:@". OpenAI en bleu à gauche, Claude en orange à droite. Ouvrir les quotas."];
+}
 
-    // Une seule fenêtre pilote l'élément : celle que l'utilisateur a épinglée, ou la plus contrainte
-    // par défaut. Le libellé n'apparaît que lorsque la fenêtre montrée peut changer toute seule —
-    // « lowest » et les agrégats multi-comptes — et doit donc se nommer ; épinglée sur un compte
-    // précis, elle est déjà connue, autant rendre l'espace à la barre des menus.
-    NSString *metric = [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly";
-    double shown = 0;
-    BOOL hasValue = NO;
-    NSString *label = nil;
-    NSColor *providerInk = nil;  // nil ⇒ template : rien à identifier
-
-    if ([metric hasPrefix:@"system:"]) {
-        // Métriques système : mêmes valeurs que l'onglet Moniteur, rafraîchies par metricsTick.
-        NSMutableDictionary *nowById = [NSMutableDictionary dictionary];
-        for (NSDictionary *family in [self.systemMonitor snapshot][@"families"]) nowById[family[@"id"]] = family[@"now"];
-        NSNumber *value = nowById[@"cpu"][@"total"]; label = @"cpu";
-        if ([metric isEqualToString:@"system:temp"]) { value = nowById[@"sensors"][@"tempC"]; label = @"temp"; }
-        else if ([metric isEqualToString:@"system:battery"]) { value = nowById[@"battery"][@"percent"]; label = @"batt"; }
-        hasValue = value != nil; shown = value.doubleValue;
-    } else {
-        NSDictionary *resolved = TMResolveMenuBarMetric(metric, accounts);
-        if (resolved) {
-            hasValue = YES;
-            shown = TMNumber(resolved[@"usedPercent"]);
-            providerInk = [resolved[@"provider"] isEqualToString:TMProviderOpenAI] ? TM_INK_OPENAI : TM_INK_CLAUDE;
-            // Épinglé sur un compte : rien à nommer. Agrégat ou « lowest » : la fenêtre montrée
-            // change avec la charge, elle doit dire laquelle elle est.
-            if (![metric hasPrefix:@"acct:"]) label = resolved[@"shortLabel"];
-            // Un agrégat qui ne recouvre qu'un seul compte n'a rien à départager : le libellé
-            // n'apprendrait rien de plus que l'icône.
-            if ([metric hasPrefix:@"claude:"] || [metric hasPrefix:@"openai:"]) {
-                NSString *provider = [metric hasPrefix:@"openai:"] ? TMProviderOpenAI : TMProviderClaude;
-                if ([self accountsForProvider:provider].count <= 1) label = nil;
-            }
-        }
-    }
-
-    // Les seuils d'alerte sont ceux d'un quota, pas d'une machine : un CPU à 85 % est un CPU qui
-    // travaille, pas une urgence. Les vraies alertes système passent par les notifications, avec
-    // leurs propres seuils. Colorer l'icône en ambre ici crierait au loup en permanence.
-    BOOL isQuotaMetric = ![metric hasPrefix:@"system:"];
-    TMSeverity severity = (hasValue && isQuotaMetric) ? TMSeverityForPercent(shown) : TMSeverityNormal;
-    if (!hasValue) providerInk = nil;  // le tiret « pas de donnée » n'identifie personne
-    double textValue = isQuotaMetric ? 100 - MIN(100, MAX(0, shown)) : shown;
-    NSString *suffix = [metric isEqualToString:@"system:temp"] ? @"°" : @"%";
-    NSString *prefix = label ? [label stringByAppendingString:@" "] : @"";
-    NSString *title = hasValue
-        ? [NSString stringWithFormat:@" %@%ld%@", prefix, (long)(textValue + 0.5), suffix]
-        : @" --";
-    // Le libellé ne bouge pas d'un tick à l'autre (c'est un choix de réglage) ; seul le nombre
-    // varie, de un à trois chiffres. Le gabarit réserve donc la place de « 100 ».
-    NSString *titleTemplate = [NSString stringWithFormat:@" %@100%@", prefix, suffix];
-
-    // Forme et couleur de la jauge, au choix (Réglages › Barre des menus). « auto » garde la
-    // couleur d'identité du fournisseur affiché : c'est elle qui dit si le chiffre parle d'OpenAI
-    // ou de Claude. Une couleur choisie la remplace ; la sévérité prime toujours sur les deux,
-    // parce qu'à ce moment-là savoir *que* compte plus que savoir *qui*.
-    NSString *shape = [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring";
-    NSColor *chosenInk = TMWidgetNamedColor([NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"]);
-    NSColor *ink = (severity != TMSeverityNormal) ? TMSeverityColor(severity) : (chosenInk ?: providerInk);
-
-    // Même garde-fou que updateMenuBarWidgets : réassigner l'image redéclenche un dessin
-    // WindowServer, et metricsTick passe ici chaque seconde dès qu'une métrique système est
-    // épinglée. La série n'est lue que pour les formes qui la dessinent — pour les quotas, elle
-    // vient de l'historique sur disque, autant ne pas le relire pour rien.
-    NSArray *series = [@[@"spark", @"bars"] containsObject:shape]
-        ? ([self menuBarSeriesForMetric:metric] ?: @[]) : @[];
-    NSDictionary *signature = TMWidgetRenderSignature(@{
-        @"metric": metric, @"title": title, @"titleTemplate": titleTemplate,
-        @"hasValue": @(hasValue), @"fraction": @(shown / 100.0), @"severity": @(severity),
-        @"ink": ink.description ?: @"", @"series": series,
-    }, shape, nil);
-    if ([self.statusMenuSignature isEqual:signature]) return;  // mêmes pixels : rien à redessiner
-    self.statusMenuSignature = signature;
-
-    if ([shape isEqualToString:@"none"]) {
-        // Le titre porte déjà la valeur en toutes lettres : une icône de plus n'ajoute rien, et
-        // c'est la seule façon de rendre la rangée aussi étroite que possible.
-        self.statusItem.button.image = nil;
-    } else if ([shape isEqualToString:@"spark"]) {
-        self.statusItem.button.image = TMSparklineIcon(series, hasValue, severity, ink);
-    } else if ([shape isEqualToString:@"ring"]) {
-        self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, ink);
-    } else if ([@[@"bars", @"pie", @"bar"] containsObject:shape]) {
-        // Les autres formes viennent du moteur des widgets système : un seul jeu de dessins pour
-        // toute la barre, et la jauge quota hérite de chaque forme qu'on y ajoute.
-        NSDictionary *readout = @{
-            @"style": @"ring", @"hasValue": @(hasValue), @"fraction": @(shown / 100.0),
-            @"series": series,
-            @"value": hasValue ? [NSString stringWithFormat:@"%ld%@", (long)(textValue + 0.5), suffix] : @"—",
-            @"valueTemplate": [NSString stringWithFormat:@"100%@", suffix], @"template": @"",
-            @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @(severity),
-        };
-        self.statusItem.button.image = TMWidgetImageWithInk(readout, shape, ink);
-    } else {
-        // Forme inconnue (réglage d'une version ultérieure, fichier bricolé) : l'anneau plutôt
-        // qu'une icône vide ou le repli « deux lignes » du moteur widgets, qui n'a pas de sens ici.
-        self.statusItem.button.image = TMGaugeIcon(shown / 100.0, hasValue, severity, ink);
-    }
-    self.statusItem.button.imagePosition = self.statusItem.button.image ? NSImageLeading : NSNoImage;
-    self.statusItem.button.image.accessibilityDescription = hasValue
-        ? [NSString stringWithFormat:@"Quota %ld %% consommé", (long)(shown + 0.5)]
-        : @"Quota indisponible";
-    self.statusItem.button.attributedTitle = TMMenuBarTitle(title, titleTemplate, severity);
+- (NSString *)iconStyleForProvider:(NSString *)provider {
+    NSString *key=[@"menuBarIconStyle." stringByAppendingString:provider];
+    NSString *style=[NSUserDefaults.standardUserDefaults stringForKey:key];
+    return [TMIconDesignIDs() containsObject:style] ? style : @"boldRing";
 }
 
 #pragma mark - Aperçu au survol
@@ -1070,7 +1044,13 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 - (void)showPopoverFromButton:(NSButton *)button {
     if (!button) button = self.statusItem.button;
     [self.statusPopover showRelativeToRect:button.bounds ofView:button preferredEdge:NSRectEdgeMinY];
+    [self startSystemMonitor];
     [self refresh:nil];
+}
+
+- (void)statusPopoverDidClose:(NSNotification *)notification {
+    (void)notification;
+    [self startSystemMonitor];
 }
 
 // Raccourci global ⌘⇧S — atteindre les quotas sans viser l'icône à la souris.
@@ -1466,6 +1446,12 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     [self.statusPopover close];
     [self.window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
+    [self startSystemMonitor];
+}
+
+- (void)dashboardWillClose:(NSNotification *)notification {
+    (void)notification;
+    [self startSystemMonitor];
 }
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
@@ -1480,6 +1466,11 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     NSDictionary *body = [message.body isKindOfClass:NSDictionary.class] ? message.body : nil;
     NSString *action = body ? body[@"action"] : message.body;
     if ([action isEqualToString:@"refresh"]) [self refresh:self];  // explicit click: bypass backoff
+    // Un clic dans le popover vaut épinglage, comme un clic sur l'icône (voir toggleStatusPopover).
+    if ([action isEqualToString:@"pinPopover"]) {
+        [self.hoverCloseTimer invalidate]; self.hoverCloseTimer = nil;
+        self.popoverOpenedByHover = NO;
+    }
     if ([action isEqualToString:@"toggleLaunchAtLogin"]) [self toggleLaunchAtLogin];
     if ([action isEqualToString:@"toggleHoverPopover"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -1488,7 +1479,17 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
     if ([action isEqualToString:@"setMenuBarMetric"]) {
         NSString *value = [body[@"value"] isKindOfClass:NSString.class] ? body[@"value"] : @"lowest";
-        [NSUserDefaults.standardUserDefaults setObject:value forKey:@"menuBarMetric"];
+        NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+        NSMutableDictionary *selections=[NSMutableDictionary dictionary];
+        for (NSString *provider in @[@"openai",@"claude"])
+            selections[provider]=[self metricForProvider:provider];
+        NSArray *parts=[value componentsSeparatedByString:@":"];
+        NSString *provider=[value hasPrefix:@"acct:"] && parts.count==4 ? parts[1] : parts.firstObject;
+        if ([@[@"openai",@"claude"] containsObject:provider])
+            selections[provider]=TMProviderMenuMetric(provider,@{provider:value},nil);
+        [defaults setObject:selections forKey:@"providerMenuMetrics"];
+        [defaults setObject:value forKey:@"menuBarMetric"];
+        [self startSystemMonitor];
         [self pushData];
     }
     if ([action isEqualToString:@"setTheme"]) {
@@ -1520,6 +1521,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"duoCancel"]) [self closePicker];
     if ([action isEqualToString:@"exportHistoryCSV"]) [self exportHistoryCSV];
     if ([action isEqualToString:@"setMenuBarIconStyle"]) {
+        [self closeIconPreviews];
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconStyle"];
         [self updateStatusMenu];
         [self pushData];
@@ -1529,6 +1531,18 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [self updateStatusMenu];
         [self pushData];
     }
+    if ([action isEqualToString:@"setProviderMenuIconStyle"]) {
+        NSString *provider=body[@"provider"], *style=body[@"value"];
+        if ([@[@"openai",@"claude"] containsObject:provider] && [TMIconDesignIDs() containsObject:style]) {
+            [NSUserDefaults.standardUserDefaults setObject:style forKey:[@"menuBarIconStyle." stringByAppendingString:provider]];
+            [self closeIconPreviews]; [self updateStatusMenu]; [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"previewMenuIcons"]) {
+        self.iconPreviewProvider=[body[@"provider"] isEqual:@"claude"] ? @"claude" : @"openai";
+        [self showIconPreviews];
+    }
+    if ([action isEqualToString:@"closeMenuIconPreviews"]) [self closeIconPreviews];
     if ([action isEqualToString:@"setBrightness"]) {
         NSString *displayId = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
         TMDisplay *display = displayId ? [self.displayManager displayWithIdentifier:displayId] : nil;
@@ -1551,6 +1565,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             // de liste, donc à droite — or macOS place tout nouvel item à gauche. Sans cela,
             // l'ordre affiché divergerait de celui des Réglages.
             [self reorderMenuBarWidgets];
+            [self startSystemMonitor];
             [self pushData];
         }
     }
@@ -1654,6 +1669,28 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [self startSystemMonitor];  // recrée le timer à la nouvelle cadence
         [self pushData];
     }
+    if ([action isEqualToString:@"setQuotaRefreshInterval"]) {
+        NSInteger seconds = [body[@"value"] integerValue];
+        if ([@[@30, @60, @120, @300] containsObject:@(seconds)]) {
+            [NSUserDefaults.standardUserDefaults setInteger:seconds forKey:@"refreshIntervalSeconds"];
+            [self scheduleRefresh];
+            [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"setMonitorVisible"]) {
+        self.monitorViewActive = [body[@"visible"] boolValue];
+        [self startSystemMonitor];
+    }
+    if ([action isEqualToString:@"setMacToolsVisible"]) {
+        self.macToolsVisible = [body[@"visible"] boolValue];
+        [self startSystemMonitor];
+    }
+    if ([action isEqualToString:@"toggleMonitorInBackground"]) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:![defaults boolForKey:@"monitorInBackground"] forKey:@"monitorInBackground"];
+        [self startSystemMonitor];
+        [self pushData];
+    }
     if ([action isEqualToString:@"openNotificationSettings"]) {
         [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.Notifications-Settings.extension"]];
     }
@@ -1664,11 +1701,21 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"quit"]) [NSApp terminate:nil];
     if ([action isEqualToString:@"authorizeLidMode"]) [self.lidMode requestAuthorization];
     if ([action isEqualToString:@"startLidMode"]) {
-        NSNumber *minutes = [body[@"minutes"] isKindOfClass:NSNumber.class] ? body[@"minutes"] : nil;
-        if (minutes && minutes.doubleValue == minutes.integerValue && minutes.integerValue >= 1 && minutes.integerValue <= 240)
+        NSNumber *minutes=[body[@"minutes"] isKindOfClass:NSNumber.class] ? body[@"minutes"] : nil;
+        if (minutes && minutes.doubleValue==minutes.integerValue && minutes.integerValue>=1 && minutes.integerValue<=240)
             [self.lidMode startMinutes:minutes.integerValue];
     }
     if ([action isEqualToString:@"stopLidMode"]) [self.lidMode stop];
+    if ([action isEqualToString:@"startFanBoost"]) {
+        NSNumber *minutes=[body[@"minutes"] isKindOfClass:NSNumber.class] ? body[@"minutes"] : nil;
+        if (minutes && minutes.doubleValue==minutes.integerValue && minutes.integerValue>=1 && minutes.integerValue<=60)
+        {
+            NSNumber *percent=[body[@"percent"] isKindOfClass:NSNumber.class] ? body[@"percent"] : @100;
+            if (percent.integerValue>=50 && percent.integerValue<=100)
+                [self.lidMode startFanBoostMinutes:minutes.integerValue percent:percent.integerValue];
+        }
+    }
+    if ([action isEqualToString:@"stopFanBoost"]) [self.lidMode stopFanBoost];
     if ([action isEqualToString:@"showLidMode"]) {
         [self openDashboard:nil];
         [self.webView evaluateJavaScript:@"settingsTab='system'; goToView('settings');" completionHandler:nil];
@@ -1736,7 +1783,11 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"menuBarMetric": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] ?: @"claude:weekly",
             @"hoverPopover": @([self hoverPopoverEnabled]),
             @"metricsInterval": @([self metricsInterval]),
+            @"monitorInBackground": @([NSUserDefaults.standardUserDefaults boolForKey:@"monitorInBackground"]),
+            @"quotaRefreshIntervalSeconds": @([self quotaRefreshIntervalSeconds]),
             @"menuBarIconStyle": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring",
+            @"providerMenuMetrics":@{@"openai":[self metricForProvider:@"openai"],@"claude":[self metricForProvider:@"claude"]},
+            @"providerIconStyles":@{@"openai":[self iconStyleForProvider:@"openai"],@"claude":[self iconStyleForProvider:@"claude"]},
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
@@ -1758,8 +1809,8 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
                                     : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
     },
-        @"backoffUntil": self.nextAllowedRefresh ? @(self.nextAllowedRefresh.timeIntervalSince1970 * 1000) : [NSNull null],
-        @"refreshing": @(self.refreshing), @"updatedAt": @([[NSDate date] timeIntervalSince1970] * 1000)
+        @"backoffCount": @([self pausedAccountCount]),
+        @"refreshing": @(self.refreshing), @"updatedAt": @(self.lastQuotaRefreshAt * 1000)
     };
 }
 
@@ -1797,13 +1848,15 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
 // Coût équivalent API (feature 16). Le premier balayage lit ~700 Mo de logs (~20 s) : en fond,
 // avec « calcul en cours ». Les suivants sont incrémentaux (~0,2 s) grâce au cache token-usage.json.
 - (void)refreshCostsInBackground {
-    if (self.costScanning) return;
+    if (self.costScanning || (self.costScanCompletedAt > 0 &&
+        NSDate.date.timeIntervalSince1970 - self.costScanCompletedAt < 300)) return;
     self.costScanning = YES;
     [self pushData];  // affiche « calcul en cours » au premier passage
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSDictionary *scan = TMScanTerminalCosts();
         dispatch_async(dispatch_get_main_queue(), ^{
             self.costScan = scan;
+            self.costScanCompletedAt = NSDate.date.timeIntervalSince1970;
             self.costScanning = NO;
             [self pushData];
         });
@@ -1937,22 +1990,39 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
 
 #pragma mark - Moniteur système
 
-// Échantillonnage permanent à 1 Hz (choix de la spec : anneaux pleins dès qu'on ouvre l'onglet).
-// La poussée vers les webviews, elle, est conditionnelle — sérialiser 6 × 300 points chaque
-// seconde pour des surfaces invisibles serait du gaspillage pur.
+// Le moniteur matériel reste dormant hors de sa vue, sauf demande explicite (widgets,
+// métrique système épinglée ou suivi en arrière-plan). Les quotas ont leur propre cadence.
 - (NSTimeInterval)metricsInterval {
     NSInteger seconds = [NSUserDefaults.standardUserDefaults integerForKey:@"metricsIntervalSeconds"];
     return (seconds == 2 || seconds == 5) ? seconds : 1;
 }
 
 - (void)startSystemMonitor {
+    BOOL systemWidgetEnabled = NO;
+    for (NSString *widgetId in [self enabledWidgets])
+        if (!TMWidgetIsQuota(widgetId)) { systemWidgetEnabled = YES; break; }
+    BOOL needed = [NSUserDefaults.standardUserDefaults boolForKey:@"monitorInBackground"]
+        || (self.monitorViewActive && self.window.isVisible)
+        || (self.macToolsVisible && self.statusPopover.isShown)
+        || systemWidgetEnabled
+        || [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] hasPrefix:@"system:"];
+    [self.metricsTimer invalidate];
+    self.metricsTimer = nil;
+    if (!needed) {
+        self.systemMonitor = nil;
+        self.previousProcessSample = nil;
+        self.topProcesses = nil;
+        self.dashboardMetricsPrimed = NO;
+        self.popoverMetricsPrimed = NO;
+        return;
+    }
     if (!self.systemMonitor) self.systemMonitor = TMSystemMonitorCreate();
-    [self.metricsTimer invalidate];  // recréé au changement d'intervalle ; les anneaux survivent
     __weak typeof(self) weakSelf = self;
     self.metricsTimer = [NSTimer scheduledTimerWithTimeInterval:[self metricsInterval] repeats:YES block:^(NSTimer *timer) {
         [weakSelf metricsTick];
     }];
     self.metricsTimer.tolerance = [self metricsInterval] * 0.2;  // macOS groupe les réveils, l'œil ne verra rien
+    [self metricsTick];
 }
 
 // Valeurs par défaut des alertes. Les alertes système sont volontairement hautes : elles signalent
@@ -2052,8 +2122,8 @@ static NSDictionary *TMAlertDefaults(void) {
         [self.widgetWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.updateMetrics(%@);", json] completionHandler:nil];
     } else self.widgetMetricsPrimed = NO;
 
-    BOOL dashboardVisible = self.webReady && self.window.isVisible;
-    BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown;
+    BOOL dashboardVisible = self.webReady && self.window.isVisible && self.monitorViewActive;
+    BOOL popoverVisible = self.menuWebReady && self.statusPopover.isShown && self.macToolsVisible;
     BOOL widgetVisible = self.widgetPopover.isShown && self.widgetWebReady;  // panneau d'info d'un widget
     if (!dashboardVisible) self.dashboardMetricsPrimed = NO;  // fermée : le prochain envoi réamorce
     if (!popoverVisible) self.popoverMetricsPrimed = NO;
@@ -2061,7 +2131,11 @@ static NSDictionary *TMAlertDefaults(void) {
     if (menuBarWantsSystem) [self updateStatusMenu];
     // Le relevé des processus alimente aussi les panneaux CPU/Mémoire des widgets : on l'active dès
     // qu'une surface qui en a besoin est visible.
-    if (!dashboardVisible && !popoverVisible && !widgetVisible) { self.previousProcessSample = nil; return; }
+    if (!dashboardVisible && !widgetVisible) {
+        self.previousProcessSample = nil;
+        if (popoverVisible) [self pushMetrics:snapshot dashboard:NO popover:YES];
+        return;
+    }
 
     // Le relevé des processus (~500 appels noyau) n'a lieu que surface visible ; le premier tick
     // après ouverture n'a donc pas de delta, comme le réseau au lancement.
@@ -2119,14 +2193,20 @@ static NSDictionary *TMAlertDefaults(void) {
 
 - (void)scheduleRefresh {
     [self.refreshTimer invalidate];
-    NSInteger minutes = MAX(5, [NSUserDefaults.standardUserDefaults integerForKey:@"refreshIntervalMinutes"]);
+    NSInteger seconds = [self quotaRefreshIntervalSeconds];
     // Via a block, not @selector(refresh:): NSTimer passes *itself* as the argument, which refresh:
     // would read as a non-nil sender — i.e. a manual click — and every automatic tick would clear
     // the backoff it is supposed to obey.
     __weak typeof(self) weakSelf = self;
-    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:minutes * 60 repeats:YES block:^(NSTimer *timer) {
+    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:seconds repeats:YES block:^(NSTimer *timer) {
         [weakSelf refresh:nil];
     }];
+    self.refreshTimer.tolerance = MIN(5, seconds * 0.1);
+}
+
+- (NSInteger)quotaRefreshIntervalSeconds {
+    NSInteger seconds = [NSUserDefaults.standardUserDefaults integerForKey:@"refreshIntervalSeconds"];
+    return [@[@30, @60, @120, @300] containsObject:@(seconds)] ? seconds : 60;
 }
 
 #pragma mark - Registre de comptes
@@ -2324,6 +2404,8 @@ static NSDictionary *TMAlertDefaults(void) {
             [quotaState removeObjectForKey:key];
     [NSUserDefaults.standardUserDefaults setObject:quotaState ?: @{} forKey:@"quotaNotificationState"];
     [self.accountPayloads removeObjectForKey:accountId];
+    [self.accountErrorCounts removeObjectForKey:accountId];
+    [self.accountBackoffUntil removeObjectForKey:accountId];
     self.accountRegistry = TMRegistryRemoving(self.accountRegistry, accountId);
     [self saveAccountRegistry];
     [self pushData];
@@ -2373,6 +2455,22 @@ static NSDictionary *TMAlertDefaults(void) {
     return server;
 }
 
+// Un processus Codex consomme environ 100 à 150 Mo. Les authentifications restent sur disque
+// dans le CODEX_HOME de chaque compte ; seul le processus de lecture est éphémère.
+- (void)releaseCodexServer:(TMCodexAppServer *)server forAccount:(NSString *)accountId {
+    if (self.codexServers[accountId] != server || self.openAILoginIDs[accountId]
+        || [[self knownPayload:accountId][@"connecting"] boolValue]) return;
+    if (!server.isIdle) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ [weakSelf releaseCodexServer:server forAccount:accountId]; });
+        return;
+    }
+    server.notificationHandler = nil;
+    [self.codexServers removeObjectForKey:accountId];
+    [server stop];
+}
+
 - (void)refreshOpenAIAccount:(NSString *)accountId completion:(void (^)(void))completion {
     TMCodexAppServer *server = [self codexServerForAccount:accountId];
     [server request:@"account/read" params:@{ @"refreshToken": @NO } completion:^(id result, NSError *error) {
@@ -2381,6 +2479,7 @@ static NSDictionary *TMAlertDefaults(void) {
                                   @"error": error.localizedDescription ?: @"Connexion à Codex impossible." }
                     forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:server forAccount:accountId];
             if (completion) completion();
             return;
         }
@@ -2392,15 +2491,23 @@ static NSDictionary *TMAlertDefaults(void) {
                 : @"";
             [self setPayload:TMOpenAIAccountPayload(account, nil, NO, notice) forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:server forAccount:accountId];
             if (completion) completion();
             return;
         }
         [server request:@"account/rateLimits/read" params:nil completion:^(id rateResult, NSError *rateError) {
             NSDictionary *rateResponse = [rateResult isKindOfClass:NSDictionary.class] ? rateResult : @{};
-            NSDictionary *payload = TMOpenAIAccountPayload(account, rateResponse, NO,
-                                                          rateError.localizedDescription);
+            NSMutableDictionary *payload = [TMOpenAIAccountPayload(account, rateResponse, NO,
+                                            rateError.localizedDescription) mutableCopy];
+            if (!rateError && [payload[@"windows"] count] > 0) {
+                long long now = (long long)NSDate.date.timeIntervalSince1970;
+                payload[@"capturedAt"] = @(now);
+                payload[@"liveSource"] = @YES;
+                self.lastQuotaRefreshAt = now;
+            }
             [self setPayload:payload forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:server forAccount:accountId];
             if (completion) completion();
         }];
     }];
@@ -2411,7 +2518,8 @@ static NSDictionary *TMAlertDefaults(void) {
     [self mergePayload:@{ @"connecting": @YES, @"error": @"" } forAccount:accountId];
     [self pushData];
     NSDictionary *params = @{ @"type": @"chatgpt", @"appBrand": @"codex", @"useHostedLoginSuccessPage": @YES };
-    [[self codexServerForAccount:accountId] request:@"account/login/start" params:params
+    TMCodexAppServer *server = [self codexServerForAccount:accountId];
+    [server request:@"account/login/start" params:params
                                          completion:^(id result, NSError *error) {
         NSDictionary *response = [result isKindOfClass:NSDictionary.class] ? result : @{};
         NSString *loginID = [response[@"loginId"] isKindOfClass:NSString.class] ? response[@"loginId"] : @"";
@@ -2421,6 +2529,7 @@ static NSDictionary *TMAlertDefaults(void) {
                                   @"error": error.localizedDescription ?: @"Le serveur Codex n’a pas fourni de lien de connexion." }
                     forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:server forAccount:accountId];
             return;
         }
         NSURL *url = [NSURL URLWithString:authURL];
@@ -2428,6 +2537,7 @@ static NSDictionary *TMAlertDefaults(void) {
             [self mergePayload:@{ @"connecting": @NO, @"error": @"Le lien de connexion reçu n’est pas sécurisé." }
                     forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:server forAccount:accountId];
             return;
         }
         self.openAILoginIDs[accountId] = loginID;
@@ -2446,12 +2556,14 @@ static NSDictionary *TMAlertDefaults(void) {
     [alert addButtonWithTitle:@"Annuler"];
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
         if (response != NSAlertFirstButtonReturn) return;
-        [[self codexServerForAccount:accountId] request:@"account/logout" params:nil
+        TMCodexAppServer *server = [self codexServerForAccount:accountId];
+        [server request:@"account/logout" params:nil
                                              completion:^(id result, NSError *error) {
             (void)result;
             [self.openAILoginIDs removeObjectForKey:accountId];
             [self setPayload:TMDisconnectedOpenAIAccount(error.localizedDescription) forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:server forAccount:accountId];
         }];
     }];
 }
@@ -2468,6 +2580,7 @@ static NSDictionary *TMAlertDefaults(void) {
                                   @"error": [params[@"error"] isKindOfClass:NSString.class] ? params[@"error"] : @"Connexion OpenAI annulée." }
                     forAccount:accountId];
             [self pushData];
+            [self releaseCodexServer:self.codexServers[accountId] forAccount:accountId];
             return;
         }
         [self refreshOpenAIAccount:accountId completion:nil];
@@ -2577,16 +2690,25 @@ static NSDictionary *TMAlertDefaults(void) {
         NSDictionary *current = TMAccountWithID(self.accountRegistry, accountId);
         if (!session.loginVisible || !current || ![(current[@"claudeSource"] ?: @"") isEqual:source]) return;
         NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
-        BOOL hasWeekly = NO;
-        for (NSDictionary *window in windows) if (TMWindowIsPrimaryWeekly(window)) hasWeekly = YES;
-        if (error || !hasWeekly) { [session showLoginMessage:error.localizedDescription ?: @"Quota hebdomadaire indisponible. Le suivi précédent est conservé."]; return; }
+        double weeklyUsed = -1;
+        for (NSDictionary *window in windows) if (TMWindowIsPrimaryWeekly(window)) weeklyUsed = TMNumber(window[@"usedPercent"]);
+        if (error || weeklyUsed < 0) { [session showLoginMessage:error.localizedDescription ?: @"Quota hebdomadaire indisponible. Le suivi précédent est conservé."]; return; }
         self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"orgId", orgId);
         self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"web");
         [self saveAccountRegistry];
-        [self setPayload:@{@"windows":windows, @"capturedAt":@((long long)NSDate.date.timeIntervalSince1970),
-            @"connected":@YES, @"liveSource":@YES, @"stale":@NO, @"error":@""} forAccount:accountId];
+        [self setPayload:@{@"windows":windows,
+            @"extraCredits":TMClaudeExtraCredits(json, json[@"overage_spend_limit"], json[@"prepaid/credits"]),
+            @"capturedAt":@((long long)NSDate.date.timeIntervalSince1970),
+            @"connected":@YES, @"liveSource":@YES, @"stale":@NO,
+            @"manualReset":@{@"status":@"unknown"}, @"error":@""} forAccount:accountId];
         [session finishLogin];
         [self recordHistoryAndNotify]; [self pushData];
+        [session checkManualResetAvailabilityForWeeklyUsedPercent:weeklyUsed completion:^(NSDictionary *availability) {
+            NSDictionary *latest = TMAccountWithID(self.accountRegistry, accountId);
+            if (![latest[@"claudeSource"] isEqual:@"web"] || ![latest[@"orgId"] isEqual:orgId]) return;
+            [self mergePayload:@{@"manualReset": availability} forAccount:accountId];
+            [self pushData];
+        }];
     }];
 }
 
@@ -2691,15 +2813,28 @@ static NSDictionary *TMAlertDefaults(void) {
             windows = TMDropExpiredWindows(previous);
         }
         NSTimeInterval age = capturedAt > 0 ? NSDate.date.timeIntervalSince1970 - capturedAt : 0;
+        if (live) self.lastQuotaRefreshAt = capturedAt;
         [self setPayload:@{
             @"windows": windows, @"capturedAt": @(capturedAt),
+            @"extraCredits": live ? TMClaudeExtraCredits(json, json[@"overage_spend_limit"], json[@"prepaid/credits"]) : @{@"status":@"unknown"},
             @"stale": @(!live && capturedAt > 0 && age > 1800), @"liveSource": @(live),
             @"cookieConfigured": @(!web), @"connected": @(live || [[self knownPayload:accountId][@"connected"] boolValue]), @"orgId": orgId,
+            @"manualReset": @{@"status": @"unknown"},
             @"error": error.localizedDescription ?: @""
         } forAccount:accountId];
         [self pushData];
         [self monitorClaudeSourceHealth:accountId live:live];
         if (completion) completion();
+        double weeklyUsed = -1;
+        if (live) for (NSDictionary *window in windows)
+            if (TMWindowIsPrimaryWeekly(window)) weeklyUsed = TMNumber(window[@"usedPercent"]);
+        if (weeklyUsed >= 0) [session checkManualResetAvailabilityForWeeklyUsedPercent:weeklyUsed completion:^(NSDictionary *availability) {
+            NSDictionary *latest = TMAccountWithID(self.accountRegistry, accountId);
+            if (!latest || ![(latest[@"claudeSource"] ?: @"") isEqual:(entry[@"claudeSource"] ?: @"")] ||
+                ![latest[@"orgId"] isEqual:orgId]) return;
+            [self mergePayload:@{@"manualReset": availability} forAccount:accountId];
+            [self pushData];
+        }];
     }];
 }
 
@@ -2829,57 +2964,78 @@ static NSDictionary *TMAlertDefaults(void) {
     }];
 }
 
+- (void)refreshOpenAIAccounts:(NSArray<NSDictionary *> *)accounts
+                    atIndex:(NSUInteger)index force:(BOOL)force completion:(void (^)(void))completion {
+    if (index >= accounts.count) { if (completion) completion(); return; }
+    NSString *accountId = accounts[index][@"accountId"];
+    if (!force && [self.accountBackoffUntil[accountId] timeIntervalSinceNow] > 0) {
+        [self refreshOpenAIAccounts:accounts atIndex:index + 1 force:force completion:completion];
+        return;
+    }
+    [self refreshOpenAIAccount:accountId completion:^{
+        [self updateBackoffForAccount:accountId];
+        [self refreshOpenAIAccounts:accounts atIndex:index + 1 force:force completion:completion];
+    }];
+}
+
 - (void)refresh:(id)sender {
     if (self.refreshing) return;
 
-    // Backoff: a manual click (sender != nil) always goes through and clears the penalty box; an
-    // automatic tick is skipped while claude.ai/Codex keep erroring, so we don't hammer a failing
-    // endpoint every 5 minutes.
+    // Un clic manuel retente tous les comptes. Le backoff automatique est isolé par compte :
+    // une session Claude défaillante ne doit jamais figer les cinq compteurs OpenAI.
     BOOL manual = sender != nil;
     if (manual) {
-        self.consecutiveErrors = 0;
-        self.nextAllowedRefresh = nil;
-    } else if (self.nextAllowedRefresh && [self.nextAllowedRefresh timeIntervalSinceNow] > 0) {
-        return;
+        [self.accountErrorCounts removeAllObjects];
+        [self.accountBackoffUntil removeAllObjects];
     }
 
     self.refreshing = YES;
     [self pushData];
 
     dispatch_group_t group = dispatch_group_create();
-    for (NSDictionary *account in [self accountsForProvider:TMProviderOpenAI]) {
+    NSArray<NSDictionary *> *openAIAccounts = [self accountsForProvider:TMProviderOpenAI];
+    if (openAIAccounts.count) {
         dispatch_group_enter(group);
-        [self refreshOpenAIAccount:account[@"accountId"] completion:^{ dispatch_group_leave(group); }];
+        [self refreshOpenAIAccounts:openAIAccounts atIndex:0 force:manual
+                       completion:^{ dispatch_group_leave(group); }];
     }
     for (NSDictionary *account in [self accountsForProvider:TMProviderClaude]) {
+        NSString *accountId = account[@"accountId"];
+        if (!manual && [self.accountBackoffUntil[accountId] timeIntervalSinceNow] > 0) continue;
         dispatch_group_enter(group);
-        [self refreshClaudeAccount:account[@"accountId"] completion:^{ dispatch_group_leave(group); }];
+        [self refreshClaudeAccount:accountId completion:^{
+            [self updateBackoffForAccount:accountId];
+            dispatch_group_leave(group);
+        }];
     }
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
         self.refreshing = NO;
-        [self applyBackoffFromCurrentState];
         [self recordHistoryAndNotify];
-        [self refreshCostsInBackground];  // incrémental, ~0,2 s à chaud
+        [self refreshCostsInBackground];  // limité à 5 min, indépendamment des quotas
         [self pushData];
     });
 }
 
-// Grows the backoff delay (5→10→20→40 min, capped) while either provider reports an error, clears
-// it once both are clean.
-- (void)applyBackoffFromCurrentState {
-    BOOL hasError = NO;
-    for (NSDictionary *payload in [self accountPayloadList]) {
-        if ([payload[@"error"] length] > 0) { hasError = YES; break; }
-    }
-    if (!hasError) {
-        self.consecutiveErrors = 0;
-        self.nextAllowedRefresh = nil;
+// Une erreur ne ralentit que son compte. Une réponse valide le ramène immédiatement à la cadence
+// normale ; les comptes des deux fournisseurs continuent indépendamment.
+- (void)updateBackoffForAccount:(NSString *)accountId {
+    NSString *error = [self knownPayload:accountId][@"error"];
+    if (![error isKindOfClass:NSString.class] || !error.length) {
+        [self.accountErrorCounts removeObjectForKey:accountId];
+        [self.accountBackoffUntil removeObjectForKey:accountId];
         return;
     }
-    self.consecutiveErrors = MIN(self.consecutiveErrors + 1, 4);
-    NSInteger base = MAX(1, [NSUserDefaults.standardUserDefaults integerForKey:@"refreshIntervalMinutes"]);
-    NSTimeInterval delay = base * 60 * pow(2, self.consecutiveErrors);  // exponential
-    self.nextAllowedRefresh = [NSDate dateWithTimeIntervalSinceNow:MIN(delay, 40 * 60)];
+    NSInteger failures = MIN([self.accountErrorCounts[accountId] integerValue] + 1, 6);
+    self.accountErrorCounts[accountId] = @(failures);
+    NSTimeInterval delay = MIN([self quotaRefreshIntervalSeconds] * pow(2, failures), 40 * 60);
+    self.accountBackoffUntil[accountId] = [NSDate dateWithTimeIntervalSinceNow:delay];
+}
+
+- (NSUInteger)pausedAccountCount {
+    NSUInteger count = 0;
+    for (NSDate *date in self.accountBackoffUntil.allValues)
+        if (date.timeIntervalSinceNow > 0) count++;
+    return count;
 }
 
 // [provider, accountId, fenêtres] par compte : la forme attendue par TMAppendHistory et, avec un
@@ -2979,9 +3135,26 @@ static int TMRunLoginItemCommand(BOOL enable) {
     return 1;
 }
 
+// Repair service registration after a signed helper was replaced. Does not start a lid session.
+// Only use after confirming the mode is stopped and the system sleep setting is restored.
+static int TMRepairLidRegistration(void) {
+    if (!TMLidSigningReady()) { fprintf(stderr,"Signature Apple app/service requise avant réenregistrement.\n"); return 1; }
+    SMAppService *service=[SMAppService daemonServiceWithPlistName:TMLidServicePlist];
+    NSError *error=nil;
+    if (service.status!=SMAppServiceStatusNotRegistered && ![service unregisterAndReturnError:&error]) {
+        fprintf(stderr,"Désenregistrement impossible : %s\n",error.localizedDescription.UTF8String); return 1;
+    }
+    if (![service registerAndReturnError:&error]) {
+        fprintf(stderr,"Enregistrement impossible : %s\n",error.localizedDescription.UTF8String); return 1;
+    }
+    printf("Service réenregistré ; statut=%ld. Aucune session capot fermé démarrée.\n",(long)service.status);
+    return 0;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--repair-lid-registration") == 0) return TMRepairLidRegistration();
             if (strcmp(argv[i], "--register-login-item") == 0) return TMRunLoginItemCommand(YES);
             if (strcmp(argv[i], "--unregister-login-item") == 0) return TMRunLoginItemCommand(NO);
         }

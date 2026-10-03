@@ -50,6 +50,11 @@ NS_ASSUME_NONNULL_BEGIN
 // GET /api/organizations/{orgId}/usage — les fenêtres de quota du compte.
 - (void)fetchUsage:(NSString *)orgId completion:(void (^)(NSDictionary * _Nullable json, NSError * _Nullable error))completion;
 
+// Observe seulement le bouton « Reset for free » de la page Usage de CE compte. Ne déclenche
+// jamais la réinitialisation. Une page illisible ou un bouton absent reste « unknown ».
+- (void)checkManualResetAvailabilityForWeeklyUsedPercent:(double)expectedUsed
+                                              completion:(void (^)(NSDictionary *availability))completion;
+
 // GET /api/organizations — sert à résoudre l'org id d'un compte à partir de son seul cookie, la
 // CLI locale n'étant plus consultée. Renvoie [{ uuid, name }].
 - (void)fetchOrganizations:(void (^)(NSArray * _Nullable organizations, NSError * _Nullable error))completion;

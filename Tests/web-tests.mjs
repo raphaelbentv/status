@@ -344,6 +344,28 @@ const openAIAccount = (n, label, windows) => ({
   accountId: uuid(n), provider: 'openai', label, windows, connected: true, error: '',
 });
 
+section('reset manuel — chaque jauge principale et état vérifié');
+{
+  const now=Math.floor(Date.now()/1000);
+  const weekly={windowId:'seven_day',label:'7 jours',usedPercent:30,resetsAt:now+90000};
+  const session={windowId:'five_hour',label:'5 h',usedPercent:40,resetsAt:now+9000};
+  const scoped={windowId:'seven_day_scoped_fable',label:'Fable',usedPercent:60,resetsAt:now+90000};
+  const claude={...claudeAccount('a','Perso',[]),manualReset:{status:'available',scope:'weekly',observedAt:now}};
+  check(dashboard('manualResetLine')(weekly,claude).includes('disponible'),'offre Claude hebdo sous la semaine');
+  checkEqual(dashboard('manualResetLine')(session,claude),'','offre Claude hebdo absente de la session');
+  checkEqual(dashboard('manualResetLine')(scoped,claude),'','offre absente du quota de modèle');
+  check(dashboard('manualResetLine')(session,{...claude,manualReset:{status:'available',scope:'session',observedAt:now}}).includes('disponible'),
+    'offre Claude session sous le compteur 5 h');
+  const openai={...openAIAccount(2,'Pro',[]),manualReset:{status:'available',count:2,observedAt:now}};
+  const primary={...weekly,primaryLimit:true};
+  check(dashboard('manualResetLine')(primary,openai).includes('2 disponibles'),'nombre OpenAI confirmé');
+  checkEqual(dashboard('manualResetLine')({...primary,primaryLimit:false},openai),'','limite OpenAI secondaire exclue');
+  check(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'none',observedAt:now}}).includes('aucun disponible'),
+    'zéro confirmé explicite');
+  check(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now-700}}).includes('non vérifié'),
+    'ancien relevé positif jamais présenté comme actuel');
+}
+
 // Les sous-quotas « scoped » (7 j · Fable) ne pilotent aucun chiffre agrégé : ni le héros du
 // tableau de bord, ni la jauge hebdo du popover. Ils gardent leur carte et leur épinglage dédié.
 section('sous-quotas scoped — exclus des chiffres agrégés');
@@ -354,11 +376,6 @@ section('sous-quotas scoped — exclus des chiffres agrégés');
   ];
   check(dashboard(`isScopedWeekly({windowId:'seven_day_scoped_fable'})`) === true, 'dashboard : scoped reconnu');
   check(dashboard(`isScopedWeekly({windowId:'seven_day'})`) === false, 'dashboard : la semaine générale ne l’est pas');
-  const data = JSON.stringify({ accounts: [claudeAccount('a', 'Perso', claudeWindows)],
-                                history: [], updatedAt: 0 });
-  const hero = dashboard(`overview(${data})`).split('hero-detail')[0];
-  check(hero.includes('hero-value">63<span'), 'héros : la semaine générale affiche 63 % restant');
-  check(!hero.includes('54'), 'héros : le sous-quota Fable (54) ne le pilote pas');
   const mw = menubar(`mainWeekly(${JSON.stringify(claudeWindows)})`);
   checkEqual(mw?.windowId, 'seven_day', 'popover : la jauge hebdo suit la semaine générale');
   checkEqual(menubar(`mainWeekly([{windowId:'codex-10080',durationMinutes:10080,usedPercent:1},{windowId:'codex_b-10080',durationMinutes:10080,usedPercent:84}])`)?.usedPercent,
@@ -383,10 +400,9 @@ section('accountsOf / historyKey — la liste de comptes');
   check(k1 !== k2, 'deux comptes ne partagent pas une clé d’historique');
   check(k1.includes(perso.accountId), 'la clé porte l’identifiant, pas le nom');
 
-  section('overview — le héros nomme le compte, pas seulement le fournisseur');
+  section('overview — un bloc par compte, sans synthèse');
   const view = dashboard(`overview(${json})`);
-  check(view.includes('hero-value">28<span'), 'le compte le plus contraint donne le chiffre');
-  check(view.split('hero-detail')[1].includes('Pro'), 'et le héros le nomme');
+  check(!view.includes('hero') && !view.includes('provider-summary'), 'ni héros ni synthèses en tête');
   check(view.includes('Perso') && view.includes('Boulot'), 'tous les comptes sont rendus');
 
   section('weeklySeriesFor — une série par compte');
@@ -454,7 +470,7 @@ section('accountsOf / historyKey — la liste de comptes');
         'settingsView rend du HTML complet');
 
   section('settingsView — épinglage par compte');
-  const settings2 = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })},'quotas')`);
+  const settings2 = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: {} })},'appearance')`);
   check(settings2.includes(`acct:claude:${pro.accountId}:weekly`), 'chaque compte Claude est épinglable');
   check(!settings2.includes(`acct:openai:${boulot.accountId}`), 'un fournisseur à compte unique n’encombre pas la liste');
 
@@ -467,14 +483,8 @@ section('accountsOf / historyKey — la liste de comptes');
     checkEqual(menubar(`parseMetric('system:cpu')`).system, true, 'les métriques système aussi');
 
     // Le piège : changer de fenêtre ne doit pas rendre l'icône à un autre compte en silence.
-    checkEqual(menubar(`metricForWindow('${pinPro}','claude','session')`),
-               `acct:claude:${pro.accountId}:session`, 'changer de fenêtre garde le compte épinglé');
-    checkEqual(menubar(`metricForWindow('${pinPro}','openai','weekly')`), 'openai:weekly',
-               'chez un autre fournisseur, on repart de l’agrégat');
-    checkEqual(menubar(`metricForWindow('claude:weekly','claude','session')`), 'claude:session',
-               'sans épinglage, l’agrégat reste l’agrégat');
     checkEqual(dashboard(`metricForWindow('${pinPro}','claude','session')`),
-               `acct:claude:${pro.accountId}:session`, 'même grammaire côté dashboard');
+               `acct:claude:${pro.accountId}:session`, 'changer de fenêtre garde le compte épinglé');
 
     // Le popover doit montrer le compte épinglé, sinon le geste n'a aucun retour à l'écran.
     checkEqual(menubar(`pickAccount(${JSON.stringify([perso, pro])},'${pinPro}')`).label, 'Pro',
@@ -507,7 +517,7 @@ section('accountsOf / historyKey — la liste de comptes');
           'la bascule conserve la fenêtre en cours');
 
     // Réglages : la rangée ne doit pas paraître vide dès qu'un compte est épinglé.
-    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })},'quotas')`);
+    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })},'appearance')`);
     // La liste d'épinglage plus bas allume elle aussi un segment : on ne compte que la rangée
     // des fenêtres, qui précède « pin-list ».
     const windowRow = pinned.split('pin-list')[0];
@@ -529,7 +539,7 @@ section('accountsOf / historyKey — la liste de comptes');
 
   section('aucun compte — l’app le dit au lieu de rester muette');
   const empty = JSON.stringify({ accounts: [], history: [], updatedAt: 0, accountLimit: 5 });
-  check(dashboard(`overview(${empty})`).includes('Ajoutez un compte'), 'la vue Volumes invite à en ajouter un');
+  check(dashboard(`overview(${empty})`).includes('Ajouter un compte'), 'la vue Volumes invite à en ajouter un');
   check(dashboard(`connectionsView(${empty})`).includes('Aucun compte'), 'la vue Connexions le dit aussi');
   check(menubar(`provider('openai','OpenAI',[],'openai:weekly')`).includes("send('addAccount',{provider:'openai'})"), 'le popover propose l’ajout');
 
@@ -576,9 +586,6 @@ section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumul�
   check(!dashboard('availability')({...account,windows:account.windows.map(w=>({...w,usedPercent:w.windowId==='five_hour'?100:25}))}).available,'quota 5 h épuisé empêche la recommandation');
   const spark={...account,provider:'openai',windows:[{windowId:'base',durationMinutes:10080,label:'Semaine',usedPercent:2,resetsAt:future},{windowId:'spark',durationMinutes:10080,label:'Spark',usedPercent:99,resetsAt:future}]};
   checkEqual(dashboard('availability')(spark).remaining,98,'la synthèse standard ne mélange pas Spark avec le quota général');
-  const html=dashboard('providerSummary')({id:'claude',name:'Claude'},[account,{...account,stale:true,label:'Ancien'}]);
-  check(html.includes('1 compte disponible sur 2')&&html.includes('75 % restant'),'compte disponible et restant lisibles');
-  check(!html.includes('175 %'),'aucune addition de pourcentages de comptes');
   checkEqual(dashboard('sortedAccounts')([{...account,label:'Ancien',stale:true},account])[0].label,'Disponible','tri place les données exploitables en premier');
 }
 section('Réglages regroupés, connexions compactes et données conditionnelles');
@@ -586,7 +593,10 @@ section('Réglages regroupés, connexions compactes et données conditionnelles'
   const fable={...claudeAccount('a','Perso',[]),windows:[{windowId:'seven_day_scoped_fable',label:'Fable',usedPercent:10,resetsAt:9999999999}]};
   const data={prefs:{notificationsAuthorized:false},accounts:[fable,claudeAccount('b','Pro',[])]};
   const quotas=dashboard('settingsView')(data,'quotas');
-  check(quotas.includes('Claude Fable'),'Fable conservé quand une vraie fenêtre existe');
+  check(dashboard('settingsView')(data,'appearance').includes('Claude Fable'),'Fable conservé quand une vraie fenêtre existe');
+  const accountsTab=dashboard('settingsView')(data,'accounts');
+  check(accountsTab.includes("send('addAccount',{provider:'claude'})")&&accountsTab.includes("send('refresh')"),'les comptes (ex-Connexions) sont dans Réglages');
+  check(!dashboard('settingsView')(data,'system').includes("send('addAccount'"),'et seulement dans leur catégorie');
   check(!quotas.includes('Piloter la luminosité au clavier'),'raccourcis séparés des quotas');
   check(dashboard('settingsView')(data,'shortcuts').includes('Piloter la luminosité au clavier'),'raccourcis restent accessibles');
   check(dashboard('settingsView')(data,'alerts').includes('Quota entamé'),'alertes conservées');
@@ -625,10 +635,14 @@ section('Popup : jauges, sous-quotas, sélecteurs et état inconnu');
   check(menubar('quotaRail')({usedPercent:95,label:'Semaine'}).includes('var(--danger)'),'quota critique en couleur d’alerte');
   check(!menubar('provider')('openai','OpenAI',[{...one,windows:windows.map(w=>({...w,resetsAt:1}))}],'openai:weekly').includes('role="meter"'),'fenêtres expirées masquées dans le popup');
   menubar(`lastData=${JSON.stringify({accounts:[one,two],updatedAt:0})}`);
+  menubar('window.sent=[]; window.webkit={messageHandlers:{native:{postMessage:m=>window.sent.push(m)}}}');
   menubar(`selectPopupAccount('openai','${two.accountId}')`);
-  checkEqual(menubar('popupSelection.openai'),two.accountId,'sélection indépendante dans le popup');
+  checkEqual(menubar('window.sent[0]'),{action:'setMenuBarMetric',value:`acct:openai:${two.accountId}:weekly`},'sélecteur popup transmet le compte à la jauge native');
   menubar(`selectPopupAccount('openai','unknown')`);
-  checkEqual(menubar('popupSelection.openai'),two.accountId,'sélection inconnue ignorée');
+  checkEqual(menubar('window.sent.length'),1,'sélection inconnue ignorée');
+  menubar(`selectPopupAccount('claude','${two.accountId}')`);
+  checkEqual(menubar('window.sent.length'),1,'sélection appartenant à un autre fournisseur ignorée');
+  check(menubar('provider')('openai','OpenAI',[one,two],`acct:openai:${two.accountId}:weekly`).includes(`value="${two.accountId}" selected`),'choix persisté reflété dans le sélecteur au prochain rendu');
 }
 
 const webClaude = {provider:'claude',accountId:'web-test',label:'Web',claudeSource:'web',connected:true,cookieConfigured:false,orgId:'org',capturedAt:Math.floor(Date.now()/1000),windows:[]};
@@ -662,13 +676,14 @@ check(dashboard('publicResetContext')('claude').includes('ne sont pas ajoutées'
 const lidSettings=dashboard('lidModeSettings');
 check(lidSettings({tools:{lidMode:{authorized:false,available:true}}}).includes('Autoriser le service macOS'),'autorisation distincte du démarrage');
 check(!lidSettings({tools:{lidMode:{authorized:false}}}).includes('onclick="startLidMode()"'),'aucun démarrage sans service autorisé');
-check(lidSettings({tools:{lidMode:{authorized:true}}}).includes('type="number"'),'durée personnalisée dans un champ');
-check(lidSettings({tools:{lidMode:{authorized:false}}}).includes('type="number"'),'durée saisissable avant autorisation');
+check(lidSettings({tools:{lidMode:{authorized:true}}}).includes('Durée en minutes'),'durée personnalisée visible');
+check(!lidSettings({tools:{lidMode:{authorized:true}}}).includes('40 °C'),'seuil numérique supprimé');
 check(lidSettings({tools:{lidMode:{active:true,remainingSeconds:600}}}).includes('Arrêter maintenant'),'session active stoppable');
 check(lidSettings({tools:{lidMode:{unconfirmed:true,active:true}}}).includes('État à vérifier'),'perte de connexion ne prétend pas active');
 check(lidSettings({tools:{lidMode:{restorationPending:true}}}).includes('Arrêter et restaurer'),'restauration en attente visible');
 check(dashboard('settingsView')({prefs:{},accounts:[],tools:{lidMode:{}}},'system').includes('Continuer capot fermé'),'réglage disponible dans Système');
-check(menubar('tools')({lidMode:{active:true,remainingSeconds:120}}).includes('capot · 2 min'),'popup affiche durée restante');
+check(menubar('tools')({lidMode:{active:true,remainingSeconds:61}}).includes('capot · 2 min'),'popup affiche durée restante');
+check(!lidSettings({tools:{lidMode:{authorized:true}}}).includes('disabled'),'pas de dépendance à une sonde pour démarrer');
 
 
 {
@@ -678,5 +693,52 @@ check(menubar('tools')({lidMode:{active:true,remainingSeconds:120}}).includes('c
   check(render({weeklyResetStats:{basis:'public',status:'publicStale'}}).includes('actualiser'),'référence périmée signalée');
 }
 
+section('Crédits supplémentaires par compte');
+{
+  const render=dashboard('extraCreditsCard');
+  check(render({}).includes('Solde indisponible'),'absence jamais présentée comme zéro');
+  check(render({extraCredits:{status:'known',unit:'credits',balance:125.5}}).includes('125,5 crédits restants'),'solde OpenAI dans son unité');
+  check(render({extraCredits:{status:'known',unit:'credits',unlimited:true}}).includes('illimités'),'crédits illimités explicites');
+  const claude=render({extraCredits:{status:'known',unit:'money',currency:'USD',balance:12.5,used:3.68,monthlyLimit:50}});
+  check(claude.includes('12,50')&&claude.includes('3,68')&&claude.includes('50,00'),'solde dépense et plafond Claude distincts');
+  check(render({extraCredits:{status:'known',unit:'money',used:3.68}}).includes('Solde prépayé indisponible'),'dépense seule ne devient pas un solde');
+}
+section('Ventilateurs : autorisation, vérification et retour automatique');
+{
+  const settings=dashboard('fanBoostSettings'),popup=menubar('fanControls');
+  check(settings({tools:{lidMode:{authorized:true}}}).includes('Mettre le service à jour'),'ancien service ne propose pas un boost inutilisable');
+  check(!popup({lidMode:{authorized:true,fanBoost:{version:1}}}).includes('startFanBoost()'),'protocole v1 (sans Ftst) refusé');
+  const lid={authorized:true,fanBoost:{version:2,active:false,fans:[{rpm:2345,mode:0}]}};
+  check(settings({tools:{lidMode:lid}}).includes('Boost temporaire'),'boost disponible avec service compatible');
+  check(popup({lidMode:lid}).replace(/[\u202f\u00a0]/g,' ').includes('2 345 tr/min'),'vitesse réelle dans le popup');
+  check(popup({lidMode:lid}).includes("setFanChoice('percent',60)")&&popup({lidMode:lid}).includes("setFanChoice('minutes',30)"),'paliers et durées en un geste');
+  lid.fanBoost={...lid.fanBoost,active:true,verified:false,percent:80,remainingSeconds:61};
+  check(popup({lidMode:lid}).includes('Montée 80 % · 2 min'),'montée en vitesse ne prétend pas boost confirmé');
+  lid.fanBoost.verified=true;
+  check(popup({lidMode:lid}).includes('Boost 80 % · 2 min')&&popup({lidMode:lid}).includes('Auto Apple'),'boost confirmé avec arrêt immédiat');
+  const stuck={authorized:true,fanBoost:{version:2,active:false,manualOutsideBoost:true,fans:[{rpm:4900,mode:1}]}};
+  check(popup({lidMode:stuck}).includes("send('stopFanBoost')")&&popup({lidMode:stuck}).includes('Ventilateur en manuel'),'ventilateur resté en manuel réparable depuis le popup');
+  check(settings({tools:{lidMode:stuck}}).includes('(manuel)'),'mode manuel signalé dans les réglages');
+  lid.unconfirmed=true;
+  check(popup({lidMode:lid}).includes('État à vérifier')&&!popup({lidMode:lid}).includes('Boost 80 %'),'rupture du service visible');
+}
+section('Popup : crédits du compte sélectionné');
+{
+  const render=menubar('provider'),credits=menubar('extraCredits');
+  const one={...openAIAccount(1,'Boulot',[]),extraCredits:{status:'known',unit:'credits',balance:125.5}};
+  const two={...openAIAccount(2,'Personnel',[]),extraCredits:{status:'known',unit:'credits',balance:42}};
+  const first=render('openai','OpenAI',[one,two],`acct:openai:${one.accountId}:weekly`);
+  const second=render('openai','OpenAI',[one,two],`acct:openai:${two.accountId}:weekly`);
+  check(first.includes('125,5 crédits restants')&&!first.includes('42 crédits restants'),'solde du premier compte uniquement');
+  check(second.includes('42 crédits restants')&&!second.includes('125,5 crédits restants'),'changement de compte change aussi le solde');
+  check(credits({}).includes('Solde indisponible'),'solde absent jamais présenté comme zéro');
+  check(credits({extraCredits:{status:'known',unit:'credits',balance:0}}).includes('0 crédits restants'),'solde nul explicite');
+  check(credits({extraCredits:{status:'known',unit:'credits',unlimited:true}}).includes('Crédits illimités'),'solde illimité explicite');
+  const claude=credits({extraCredits:{status:'known',unit:'money',balance:97,balanceCurrency:'EUR',currency:'USD',used:3,enabled:false}});
+  check(claude.includes('97,00')&&claude.includes('€')&&!claude.includes('$'),'devise du solde Claude conservée');
+  check(claude.includes('Usage supplémentaire désactivé'),'solde prépayé distinct de son activation');
+  check(credits({extraCredits:{status:'known',unit:'money',used:3}}).includes('Solde indisponible'),'dépense ne remplace pas le solde');
+  check(credits({extraCredits:{status:'known',unit:'credits',balance:42,observedAt:1}}).includes('Relevé il y a'),'ancienneté du relevé affichée');
+}
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

@@ -184,6 +184,10 @@ static NSError *TMSessionError(NSString *message) {
 // Exécute un GET JSON dans le contexte de la page, seul endroit d'où les cookies de session sont
 // envoyés et où le défi Cloudflare a déjà été franchi.
 - (void)fetchJSON:(NSString *)path completion:(void (^)(id json, NSError *error))completion {
+    [self fetchJSON:path optional:NO completion:completion];
+}
+
+- (void)fetchJSON:(NSString *)path optional:(BOOL)optional completion:(void (^)(id json, NSError *error))completion {
     [self ensureLoaded:^(BOOL ok) {
         if (!ok) {
             completion(nil, TMSessionError(@"Impossible de charger Claude. Ouvrez la connexion web du compte."));
@@ -203,14 +207,14 @@ static NSError *TMSessionError(NSString *message) {
                         completionHandler:^(id result, NSError *error) {
             if (error || ![result isKindOfClass:NSString.class]) {
                 // Une session périmée nous renvoie à la page de connexion, où le fetch part en 401.
-                self.loaded = NO;
+                if (!optional) self.loaded = NO;
                 completion(nil, TMSessionError(@"Session Claude indisponible. Vérifiez votre connexion web et réessayez."));
                 return;
             }
             NSData *data = [(NSString *)result dataUsingEncoding:NSUTF8StringEncoding];
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
             if (!json) {
-                self.loaded = NO;
+                if (!optional) self.loaded = NO;
                 completion(nil, TMSessionError(@"Réponse claude.ai illisible (challenge Cloudflare ?)."));
                 return;
             }
@@ -222,7 +226,72 @@ static NSError *TMSessionError(NSString *message) {
 - (void)fetchUsage:(NSString *)orgId completion:(void (^)(NSDictionary *json, NSError *error))completion {
     NSString *path = [NSString stringWithFormat:@"/api/organizations/%@/usage", orgId];
     [self fetchJSON:path completion:^(id json, NSError *error) {
-        completion([json isKindOfClass:NSDictionary.class] ? json : nil, error);
+        if (error || ![json isKindOfClass:NSDictionary.class]) { completion(nil, error); return; }
+        NSMutableDictionary *usage = [json mutableCopy];
+        dispatch_group_t group = dispatch_group_create();
+        for (NSString *endpoint in @[@"overage_spend_limit", @"prepaid/credits"]) {
+            dispatch_group_enter(group);
+            NSString *creditPath = [NSString stringWithFormat:@"/api/organizations/%@/%@", orgId, endpoint];
+            [self fetchJSON:creditPath optional:YES completion:^(id creditJSON, NSError *creditError) {
+                if (!creditError && [creditJSON isKindOfClass:NSDictionary.class]) usage[endpoint] = creditJSON;
+                dispatch_group_leave(group);
+            }];
+        }
+        dispatch_group_notify(group, dispatch_get_main_queue(), ^{ completion(usage, nil); });
+    }];
+}
+
+- (void)checkManualResetAvailabilityForWeeklyUsedPercent:(double)expectedUsed
+                                              completion:(void (^)(NSDictionary *availability))completion {
+    NSDictionary *unknown = @{@"status": @"unknown"};
+    if (!isfinite(expectedUsed) || expectedUsed < 0 || expectedUsed > 100) { completion(unknown); return; }
+    // La page est une SPA. Un sondage JSON des quotas ne met pas forcément son DOM à jour ; on
+    // recharge la page Usage avant de lire l'offre, sauf si l'utilisateur y navigue lui-même.
+    if (!self.loginVisible) self.loaded = NO;
+    [self ensureLoaded:^(BOOL ok) {
+        if (!ok) { completion(unknown); return; }
+        [self probeManualResetForExpectedUsed:expectedUsed attempts:12 completion:completion];
+    }];
+}
+
+- (void)probeManualResetForExpectedUsed:(double)expectedUsed attempts:(NSInteger)attempts
+                              completion:(void (^)(NSDictionary *availability))completion {
+    if (attempts <= 0) { completion(@{@"status": @"unknown"}); return; }
+    // La navigation initiale /settings/usage redirige vers /new#settings/usage. Une exécution JS
+    // asynchrone lancée pendant cette redirection est annulée : chaque sonde est donc courte et
+    // réessayée après navigation, sans jamais interpréter un échec comme « aucun reset ».
+    NSString *script = @"if(location.origin!=='https://claude.ai' || "
+        "!(location.pathname.startsWith('/settings/usage') || location.hash.startsWith('#settings/usage'))) "
+        "return {available:false}; "
+        "const meters=[...document.querySelectorAll('[role=progressbar],[role=meter],progress')]; "
+        "const name=e=>{ const id=e.getAttribute('aria-labelledby'); "
+        "return e.getAttribute('aria-label') || (id&&document.getElementById(id)?.textContent) || "
+        "e.parentElement?.textContent || ''; }; "
+        "const meter=meters.find(e=>/^(cette semaine|this week|weekly usage)\\b/i.test(name(e).trim())); "
+        "const raw=meter?.getAttribute('aria-valuenow') ?? meter?.value ?? meter?.getAttribute('aria-valuetext'); "
+        "const used=parseFloat(raw); "
+        "if(!meter || !Number.isFinite(used) || Math.abs(used-expectedUsed)>3) return {available:false}; "
+        "const match=/reset for free|réinitialiser gratuitement|reinitialiser gratuitement/i; "
+        "const scopeOf=b=>{ for(let p=b.parentElement,n=0;p&&n<4;p=p.parentElement,n++){ "
+        "const t=(p.textContent||'').slice(0,350).toLowerCase(); if(t.length>260) continue; "
+        "const weekly=/weekly|semaine|hebdomadaire|7.day/.test(t); "
+        "const session=/five.hour|5.hour|5 h|session/.test(t); "
+        "if(weekly!==session) return weekly?'weekly':'session'; } return 'unknown'; }; "
+        "for(const b of document.querySelectorAll('button,[role=button]')){ "
+        "if(b.disabled || b.closest('[aria-hidden=true]') || getComputedStyle(b).display==='none') continue; "
+        "if(match.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||''))) "
+        "return {available:true,scope:scopeOf(b)}; } return {available:false};";
+    [self.webView callAsyncJavaScript:script arguments:@{@"expectedUsed": @(expectedUsed)} inFrame:nil
+                       inContentWorld:WKContentWorld.pageWorld completionHandler:^(id result, NSError *error) {
+        if (!error && [result isKindOfClass:NSDictionary.class] && [result[@"available"] boolValue]) {
+            NSString *scope = [@[@"weekly", @"session"] containsObject:result[@"scope"]] ? result[@"scope"] : @"unknown";
+            completion(@{@"status": @"available", @"scope": scope,
+                         @"observedAt": @((long long)NSDate.date.timeIntervalSince1970)});
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self probeManualResetForExpectedUsed:expectedUsed attempts:attempts - 1 completion:completion];
+        });
     }];
 }
 

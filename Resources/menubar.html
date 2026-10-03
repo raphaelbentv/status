@@ -53,6 +53,9 @@
   .account-note.live{color:var(--green)}
   .mb-cost{margin-top:6px;font-size:12px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
   .mb-cost-lbl{color:var(--muted);font-weight:400;font-size:12px}
+  .extra-credits{margin-top:12px;padding-top:10px;border-top:1px solid var(--hair);font-size:12px}
+  .extra-credits span,.extra-credits small{display:block;color:var(--muted)}
+  .extra-credits strong{display:block;margin-top:3px;font-variant-numeric:tabular-nums}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
   .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
@@ -116,12 +119,22 @@
   .mb-cost{white-space:normal;font-size:12px}.mb-cost-lbl{display:block}.segmented{flex-wrap:wrap}.footer .seg{flex:1 1 45px}.account-note{line-height:1.5}
   button:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .popover{--muted:color-mix(in srgb,var(--text) 75%,var(--bg))}.mac-tools{flex:none;background:var(--panel-bg-strong);border-top:1px solid var(--hair-strong)}.mac-tools>summary{padding:9px 14px;color:var(--text);cursor:pointer}.name-sub{display:none}.value.critical{color:var(--danger)}.value.warning{color:var(--amber)}
+  .fans{padding:10px 14px 11px;border-top:1px solid var(--hair-strong);background:var(--panel-bg-strong);flex:none}
+  .fan-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:7px}
+  .fan-head strong{font-size:12px;text-transform:lowercase;letter-spacing:.06em;color:var(--text)}
+  .fan-head span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .fan-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .fan-row .account-action{--provider:var(--blue);margin-top:0;flex:none;padding:7px 12px}
+  .fan-state{flex:1;font-size:12px;font-weight:700;color:var(--muted)}.fan-state.on{color:var(--blue)}
+  .fan-note{display:block;color:var(--muted);font-size:12px;margin-top:7px;line-height:1.4}
 </style>
 </head>
 <body>
-<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row" id="accountRow" hidden><span class="segmented" id="account"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><div id="fanControls"></div><footer class="footer"><div class="footer-row" id="accountRow" hidden><span class="segmented" id="account"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
+document.querySelector('.mac-tools').addEventListener('toggle',event=>
+  send('setMacToolsVisible',{visible:event.currentTarget.open}));
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
@@ -174,10 +187,9 @@ function pickAccount(accounts,metric){
   });
   return best||(accounts||[])[0]||null;
 }
-const popupSelection={};
 function selectPopupAccount(provider,accountId){
   if(!lastData?.accounts?.some(a=>a.provider===provider&&a.accountId===accountId))return;
-  popupSelection[provider]=accountId;renderMenu(lastData);
+  send('setMenuBarMetric',{value:pinnedMetric(provider,accountId,'weekly')});
 }
 function quotaRail(window,primary=false){
   const value=used(window);
@@ -191,8 +203,26 @@ function lastWeeklyReset(account){
   const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
   return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
 }
+function extraCredits(account){
+  if(!account)return '';
+  const c=account.extraCredits||{},finite=n=>typeof n==='number'&&Number.isFinite(n);
+  const fmt=n=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(n);
+  let value='Solde indisponible',detail='';
+  if(c.status==='known'&&c.unit==='credits'){
+    value=c.unlimited?'Crédits illimités':finite(c.balance)?`${fmt(c.balance)} crédits restants`:
+      c.hasCredits===false?'Aucun crédit supplémentaire':'Solde indisponible';
+  }else if(c.status==='known'&&c.unit==='money'){
+    const currency=c.balanceCurrency||c.currency;
+    if(finite(c.balance))value=c.balance===0?'Aucun crédit supplémentaire':
+      `${/^[A-Z]{3}$/.test(currency||'')?new Intl.NumberFormat('fr-FR',{style:'currency',currency}).format(c.balance):`${fmt(c.balance)} (devise non fournie)`} restants`;
+    if(c.enabled===false)detail='Usage supplémentaire désactivé';
+  }
+  if(c.observedAt&&Date.now()/1000-c.observedAt>120)
+    detail=[detail,`Relevé ${ageLabel(c.observedAt)}`].filter(Boolean).join(' · ');
+  return `<div class="extra-credits"><span>Crédits supplémentaires</span><strong>${esc(value)}</strong>${detail?`<small>${esc(detail)}</small>`:''}</div>`;
+}
 function provider(id,name,accounts,metric){
-  const account=(accounts||[]).find(a=>a.accountId===popupSelection[id])||pickAccount(accounts,metric);
+  const account=pickAccount(accounts,metric);
   const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
   // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
   const weekly=mainWeekly(windows);
@@ -218,7 +248,7 @@ function provider(id,name,accounts,metric){
   const cells=rows=>rows.map((html,i)=>`<div class="cell ${col} r${i+1}" style="--provider:${ink}">${html}</div>`).join('')
     +`<div class="cell ${col} r8" style="--provider:${ink}"></div>`;
   const several=(accounts||[]).length>1;
-  const nameHTML=`<div class="name">${name}${several&&account?`<span class="name-sub">${esc(account.label)}</span><select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value)">${accounts.map(a=>`<option value="${esc(a.accountId)}" ${a.accountId===account.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`:''}</div>`;
+  const nameHTML=`<div class="name">${name}${several&&account?`<span class="name-sub">${esc(account.label)}</span><select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value);this.blur()">${accounts.map(a=>`<option value="${esc(a.accountId)}" ${a.accountId===account.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`:''}</div>`;
   const weeklyValue=used(weekly);
   const valueHTML=`<div class="value ${weeklyValue===null?'empty-value':weeklyValue>=95?'critical':weeklyValue>=80?'warning':''}">${weeklyValue===null?'—':(100-weeklyValue)+'<span class="unit">%</span>'}</div>`;
   const subgauge=w=>`<div class="subgauge"><div class="subgauge-head"><span>${esc(w.label||(isSession(w)?'5 h':w.windowId))}</span></div>${quotaRail(w)}<div class="reset">Renouvellement ${reset(w)}</div></div>`;
@@ -226,7 +256,7 @@ function provider(id,name,accounts,metric){
   const weekLabel=weekly?.label||'Semaine';
   return cells([nameHTML,valueHTML,`<div class="window">${esc(weekLabel)} · restant</div>${quotaRail(weekly,true)}`,
     `<div class="reset">Renouvellement ${reset(weekly)}</div>${lastWeeklyReset(account)}`,additional.map(subgauge).join(''),
-    noteAndAction(weeklyValue),providerCost(id)]);
+    extraCredits(account)+noteAndAction(weeklyValue),providerCost(id)]);
 }
 // Le clavier est dessiné, pas écrit : U+2328 (⌨) n'a pas de glyphe dans la police système et
 // macOS le rendait en rectangle vide. La lune, elle, existe bel et bien.
@@ -240,6 +270,33 @@ function tools(t){
   return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?'capot · '+Math.ceil((lid.remainingSeconds||0)/60)+' min':'capot fermé',lid.active&&!lid.unconfirmed)
     +btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
     +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
+}
+// Ventilateurs : palier (60 %, 80 %, max) et durée choisis d'un geste, sans champ à saisir. Le
+// natif borne et revalide tout ; le service vérifie la vitesse réelle et rend la main à macOS.
+let fanPercent=100,fanMinutes=15;
+const FAN_LEVELS=[[60,'60 %'],[80,'80 %'],[100,'Max']],FAN_DURATIONS=[15,30,60];
+function setFanChoice(kind,value){if(kind==='percent')fanPercent=value;else fanMinutes=value;if(lastData)renderMenu(lastData);}
+function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.some(([p])=>p===fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
+const fanLevelLabel=p=>p>=100?'Max':p+' %';
+function fanControls(tools){
+  const lid=tools?.lidMode||{},f=lid.fanBoost||{},service=lid.authorized&&f.version===2&&!lid.unconfirmed;
+  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost;
+  const rpm=(f.fans||[]).map(v=>Math.round(v.rpm).toLocaleString('fr-FR')).join(' · ');
+  const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="setFanChoice('${kind}',${value})">${label}</button>`;
+  let body,note=f.message||'';
+  if(needsStop){
+    const state=lid.unconfirmed?'État à vérifier':active?`${f.verified?'Boost':'Montée'} ${fanLevelLabel(f.percent||100)} · ${Math.ceil((f.remainingSeconds||0)/60)} min`:f.manualOutsideBoost?'Ventilateur en manuel':'Retour à vérifier';
+    body=`<div class="fan-row"><span class="fan-state ${active&&f.verified?'on':''}">${state}</span><button class="account-action" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">Auto Apple</button></div>`;
+    if(lid.unconfirmed)note=lid.message||note;
+  }else if(service){
+    body=`<div class="fan-row"><span class="segmented">${FAN_LEVELS.map(([p,l])=>seg('percent',p,l,fanPercent===p)).join('')}</span></div>
+      <div class="fan-row"><span class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' min',fanMinutes===m)).join('')}</span><button class="account-action" ${lid.busy?'disabled':''} onclick="startFanBoost()">Boost</button></div>`;
+    note=note&&note!=='Auto Apple'?note:'Auto Apple · macOS pilote les ventilateurs.';
+  }else{
+    body=`<div class="fan-row"><button class="account-action" onclick="send('authorizeLidMode')">${lid.authorized?'Mettre le service à jour':'Autoriser le service macOS'}</button></div>`;
+    note=lid.authorized?'Service à mettre à jour pour piloter les ventilateurs.':'Le contrôle passe par le service Status, installé une fois.';
+  }
+  return `<div class="fans"><div class="fan-head"><strong>Ventilateurs</strong><span>${rpm?esc(rpm)+' tr/min':''}</span></div>${body}<small class="fan-note" role="status">${esc(note)}</small></div>`;
 }
 // Un curseur par écran pilotable, les non-pilotables omis (popover trop dense pour l'état « sans
 // réponse » détaillé — voir le tableau de bord). Nom tronqué par CSS, pas ici : le survol du
@@ -267,13 +324,6 @@ function parseMetric(metric){
 }
 const aggregateMetric=(provider,kind)=>`${provider}:${kind}`;
 const pinnedMetric=(provider,accountId,kind)=>`acct:${provider}:${accountId}:${kind}`;
-// Choisir une fenêtre garde le compte déjà épinglé chez ce fournisseur : changer de fenêtre ne
-// doit pas rendre l'icône à un autre compte sans le dire.
-function metricForWindow(current,provider,kind){
-  const m=parseMetric(current);
-  return m.accountId&&m.provider===provider?pinnedMetric(provider,m.accountId,kind)
-                                           :aggregateMetric(provider,kind);
-}
 // Rangée « compte » : elle n'existe que s'il y a quelque chose à basculer — un fournisseur pilote
 // l'icône, et il a plusieurs comptes. Sinon elle rend @"" et la rangée disparaît, plutôt que
 // d'occuper de la hauteur pour un choix unique.
@@ -299,30 +349,35 @@ function accountSwitcher(accounts,metric){
                           current.accountId===a.accountId,a.label)).join('');
 }
 let lastData=null;
+// Le service pousse un état toutes les 5 s (tours/minute des ventilateurs) : réécrire un bloc
+// à chaque fois détruisait le <select> de compte ouvert et effaçait une durée en cours de saisie.
+// On ne remplace donc que ce qui a changé, et jamais un bloc dont un champ a le focus — il sera
+// redessiné à sa sortie (blur).
+function setHTML(selector,html){
+  const el=document.querySelector(selector);
+  if(el.dataset.html===html)return;
+  const focused=document.activeElement;
+  if(focused&&el.contains(focused)&&/^(SELECT|INPUT)$/.test(focused.tagName))return;
+  el.innerHTML=html;el.dataset.html=html;
+}
+document.addEventListener('focusout',e=>{if(lastData&&/^(SELECT|INPUT)$/.test(e.target.tagName))setTimeout(()=>renderMenu(lastData),0);});
+// Un clic dans un popover ouvert au survol l'épingle : sans cela, le menu natif du sélecteur de
+// compte, qui déborde du popover, faisait croire à une sortie de la souris et tout se refermait.
+document.addEventListener('pointerdown',()=>send('pinPopover'),true);
 function renderMenu(data){
   document.documentElement.dataset.theme=data.prefs?.theme||'blueprint';
   const accounts=data.accounts||[];
   const of=providerId=>accounts.filter(a=>a.provider===providerId);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
-  document.querySelector('#notificationNotice').innerHTML=data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>Alertes désactivées sur ce Mac</span><button onclick="send('openNotificationSettings')">Réglages</button></div>`:'';
-  document.querySelector('#providers').innerHTML=provider('openai','OpenAI',of('openai'),metric)+provider('claude','Claude',of('claude'),metric);
-  document.querySelector('#brightness').innerHTML=brightnessRow(data.displays);
-  document.querySelector('#tools').innerHTML=tools(data.tools);
-  const current=parseMetric(metric);
-  // Un segment de fenêtre reste allumé quand un compte est épinglé sur cette même fenêtre : c'est
-  // toujours « Claude semaine » qui pilote l'icône, seul le compte a été restreint.
-  const win=(provider,kind,label)=>{
-    const on=current.provider===provider&&current.kind===kind;
-    return `<button class="seg ${on?'on':''}" title="Fenêtre affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${metricForWindow(metric,provider,kind)}'})">${label}</button>`;
-  };
-  const plain=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
-  document.querySelector('#metric').innerHTML=win('claude','weekly','C sem')+win('claude','session','C 5h')
-    +win('openai','weekly','AI sem')+plain('lowest','max')+plain('system:cpu','cpu')+plain('system:temp','°C')+plain('system:battery','bat');
-
+  setHTML('#notificationNotice',data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>Alertes désactivées sur ce Mac</span><button onclick="send('openNotificationSettings')">Réglages</button></div>`:'');
+  setHTML('#providers',provider('openai','OpenAI',of('openai'),data.prefs?.providerMenuMetrics?.openai||metric)+provider('claude','Claude',of('claude'),data.prefs?.providerMenuMetrics?.claude||metric));
+  setHTML('#brightness',brightnessRow(data.displays));
+  setHTML('#tools',tools(data.tools));
+  setHTML('#fanControls',fanControls(data.tools));
   const switcher=accountSwitcher(accounts,metric);
   const row=document.querySelector('#accountRow');
   row.hidden=!switcher;
-  if(switcher)document.querySelector('#account').innerHTML=switcher;
+  if(switcher)setHTML('#account',switcher);
   const sync=document.querySelector('#sync');
   sync.textContent=data.refreshing
     ? 'actualisation…'

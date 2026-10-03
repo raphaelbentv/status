@@ -133,15 +133,19 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
             r[@"series"] = TMFamilySeries(snapshot, fam, key);
         }
     } else if (TMWidgetIsQuota(widgetId)) {
-        // Volume hebdomadaire consommé chez un fournisseur. La famille porte le même id que le
+        // La source contient le consommé ; texte, remplissage et historique affichent le restant.
+        // La famille porte le même id que le
         // widget ; absente (aucun compte connecté), l'icône montre son tiret comme les autres.
         NSNumber *value = TMNum(TMFamilyNow(snapshot, widgetId)[@"percent"]);
         r[@"style"] = @"pie";
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(@(100 - MIN(100, MAX(0, value.doubleValue))));
-            r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
-            r[@"series"] = TMFamilySeries(snapshot, widgetId, @"percent");
+            r[@"fraction"] = @(1 - MIN(MAX(value.doubleValue / 100.0, 0), 1));
+            NSMutableArray *remainingSeries=[NSMutableArray array];
+            for (NSNumber *used in TMFamilySeries(snapshot, widgetId, @"percent"))
+                [remainingSeries addObject:@(100 - MIN(100, MAX(0, used.doubleValue)))];
+            r[@"series"] = remainingSeries;
         }
     } else if ([widgetId isEqual:@"memory"] || [widgetId isEqual:@"disk"]) {
         NSString *fam = [widgetId isEqual:@"memory"] ? @"ram" : @"disk";

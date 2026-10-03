@@ -15,8 +15,10 @@
 #import "StatusWindowManager.h"
 #import "StatusDisplays.h"
 #import "StatusMenuBarWidgets.h"
+#import "StatusIconDesigns.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
+#import "StatusCodexServer.h"
 #import <IOKit/pwr_mgt/IOPMLib.h>
 #import <sys/sysctl.h>
 
@@ -63,6 +65,18 @@ static void TestCoercion(void) {
     CheckEqual(@(TMInteger(@7)), @7, @"entier valide");
     CheckEqual(@(TMInteger([NSNull null])), @0, @"NSNull -> 0");
     CheckEqual(@(TMInteger(@{})), @0, @"dictionnaire -> 0");
+}
+
+static void TestCodexExecutableDiscovery(void) {
+    Section(@"Découverte du CLI Codex après mise à jour de ChatGPT");
+    NSString *app = @"/Applications/ChatGPT.app";
+    if (![NSFileManager.defaultManager fileExistsAtPath:app]) return;
+    NSString *path = TMCodexExecutablePath();
+    Check(path.length && [NSFileManager.defaultManager isExecutableFileAtPath:path],
+          @"un CLI exécutable est trouvé quand ChatGPT est installé");
+    NSString *currentCLI = [app stringByAppendingPathComponent:@"Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"];
+    if ([NSFileManager.defaultManager isExecutableFileAtPath:currentCLI])
+        CheckEqual(path, currentCLI, @"le CLI embarqué actuel est préféré aux autres versions");
 }
 
 static void TestISODate(void) {
@@ -246,6 +260,28 @@ static void TestOpenAIWindowIdentity(void) {
     }
 }
 
+static void TestManualResetsOpenAI(void) {
+    Section(@"Réinitialisations manuelles OpenAI");
+    NSDictionary *account = @{@"type": @"chatgpt"};
+    NSMutableDictionary *response = [TMFakeOpenAIResponse() mutableCopy];
+    CheckEqual(TMOpenAIAccountPayload(account, response, NO, nil)[@"manualReset"][ @"status"],
+               @"unknown", @"champ absent : disponibilité inconnue, pas zéro inventé");
+    response[@"rateLimitResetCredits"] = @{@"availableCount": @2};
+    NSDictionary *reset = TMOpenAIAccountPayload(account, response, NO, nil)[@"manualReset"];
+    CheckEqual(reset[@"status"], @"available", @"deux crédits confirmés disponibles");
+    CheckEqual(reset[@"count"], @2, @"nombre conservé");
+    Check([reset[@"observedAt"] longLongValue] > 0, @"relevé horodaté");
+    response[@"rateLimitResetCredits"] = @{@"availableCount": @0};
+    CheckEqual(TMOpenAIAccountPayload(account, response, NO, nil)[@"manualReset"][ @"status"],
+               @"none", @"zéro explicite : aucun crédit");
+    response[@"rateLimitResetCredits"] = @{@"availableCount": @YES};
+    CheckEqual(TMOpenAIAccountPayload(account, response, NO, nil)[@"manualReset"][ @"status"],
+               @"unknown", @"un booléen n'est pas un nombre de crédits");
+    response[@"rateLimitResetCredits"] = @{@"availableCount": @1};
+    CheckEqual(TMOpenAIAccountPayload(account, response, NO, @"Lecture impossible")[ @"manualReset"][ @"status"],
+               @"unknown", @"une réponse en erreur ne confirme pas la disponibilité");
+}
+
 static void TestOpenAIHistoryCollision(void) {
     printf("\n\033[1mHistorique OpenAI — collision de clés\033[0m\n");
     setenv("STATUS_SUPPORT_DIR", "/tmp/status-tests-openai", 1);
@@ -260,6 +296,24 @@ static void TestOpenAIHistoryCollision(void) {
     NSSet *values = [NSSet setWithArray:points.allValues];
     Check([values containsObject:@84] && [values containsObject:@1], @"84 % et 1 % survivent tous les deux");
     [NSFileManager.defaultManager removeItemAtPath:TMHistoryPath() error:nil];
+}
+
+static void TestExtraCredits(void) {
+    Section(@"Crédits supplémentaires — soldes distincts des resets et plafonds");
+    CheckEqual(TMOpenAIExtraCredits(@{})[@"status"], @"unknown", @"solde absent reste inconnu");
+    CheckEqual(TMOpenAIExtraCredits(@{@"credits":@{@"balance":@"766.76", @"hasCredits":@YES, @"unlimited":@NO}})[@"balance"], @766.76, @"solde OpenAI décimal");
+    CheckEqual(TMOpenAIExtraCredits(@{@"credits":@{@"balance":@"oops"}})[@"status"], @"unknown", @"texte invalide ne devient pas zéro");
+    CheckEqual(TMOpenAIExtraCredits(@{@"credits":@{@"balance":@"0", @"hasCredits":@NO}})[@"balance"], @0, @"zéro explicite conservé");
+    NSDictionary *c = TMClaudeExtraCredits(@{}, @{@"used_credits":@368, @"monthly_credit_limit":@5000, @"currency":@"usd", @"is_enabled":@YES}, @{@"remaining_balance":@1250, @"currency":@"usd"});
+    CheckEqual(c[@"balance"], @12.5, @"solde Claude converti depuis centimes");
+    CheckEqual(c[@"used"], @3.68, @"dépense Claude convertie depuis centimes");
+    CheckEqual(c[@"monthlyLimit"], @50, @"plafond mensuel distinct du solde");
+    c = TMClaudeExtraCredits(@{@"extra_usage":@{@"used_credits":@368, @"monthly_limit":NSNull.null}}, nil, nil);
+    CheckEqual(c[@"used"], @3.68, @"dépense conservée sans plafond");
+    Check(c[@"balance"] == nil, @"marge mensuelle jamais inventée comme solde prépayé");
+    c = TMClaudeExtraCredits(@{}, nil, @{@"amount":@9700, @"balance":@{@"money":@{@"amount_minor":@9700, @"currency":@"EUR", @"exponent":@2}}});
+    CheckEqual(c[@"balance"], @97, @"portefeuille Claude réel converti avec son exposant");
+    CheckEqual(c[@"balanceCurrency"], @"EUR", @"devise propre au solde conservée");
 }
 
 static void TestHistory(void) {
@@ -282,10 +336,10 @@ static void TestHistory(void) {
     CheckEqual(h1[0][@"p"][TMHistoryKey(TMProviderOpenAI, TM_ACC_B, @"seven_day")], @41, @"le point OpenAI est présent");
 
     NSArray *h2 = TMAppendHistory(pairs, t0 + 30);
-    CheckEqual(@(h2.count), @1, @"un point < 2 min après est fusionné (pas de doublon)");
+    CheckEqual(@(h2.count), @1, @"un point < 5 min après est fusionné (pas de doublon)");
 
-    NSArray *h3 = TMAppendHistory(pairs, t0 + 200);
-    CheckEqual(@(h3.count), @2, @"un point > 2 min après est ajouté");
+    NSArray *h3 = TMAppendHistory(pairs, t0 + 301);
+    CheckEqual(@(h3.count), @2, @"un point > 5 min après est ajouté");
 
     NSArray *h4 = TMAppendHistory(@[], t0 + 400);
     CheckEqual(@(h4.count), @2, @"sans fenêtre, rien n'est enregistré");
@@ -294,7 +348,7 @@ static void TestHistory(void) {
     // seule clé, la moitié de la donnée perdue en silence) se reproduirait ici à l'identique.
     NSArray *twoClaude = @[@[TMProviderClaude, TM_ACC_A, claude],
                            @[TMProviderClaude, TM_ACC_B, @[@{@"windowId": @"five_hour", @"usedPercent": @77.0}]]];
-    NSArray *h5 = TMAppendHistory(twoClaude, t0 + 600);
+    NSArray *h5 = TMAppendHistory(twoClaude, t0 + 650);
     NSDictionary *last = h5.lastObject[@"p"];
     CheckEqual(last[TMHistoryKey(TMProviderClaude, TM_ACC_A, @"five_hour")], @34, @"compte A gardé");
     CheckEqual(last[TMHistoryKey(TMProviderClaude, TM_ACC_B, @"five_hour")], @77, @"compte B gardé, pas écrasé");
@@ -453,6 +507,23 @@ static void TestMenuBarMetricResolution(void) {
     Check(TMResolveMenuBarMetric(@"claude:weekly", @[]) == nil, @"aucun compte -> nil");
     Check(TMResolveMenuBarMetric(@"openai:weekly", @[accounts[0]]) == nil,
           @"fournisseur sans compte -> nil");
+
+    Section(@"Jauges indépendantes — choix du compte transmis au rendu");
+    NSString *openID=@"33333333-3333-4333-8333-333333333333";
+    NSString *otherID=@"55555555-5555-4555-8555-555555555555";
+    NSMutableArray *twoOpen=[accounts mutableCopy];
+    [twoOpen addObject:@{@"accountId":otherID,@"provider":@"openai",@"label":@"Autre",
+        @"windows":@[@{@"windowId":@"codex-10080",@"durationMinutes":@10080,@"usedPercent":@5,@"resetsAt":@4102444800}]}];
+    NSString *openPin=TMPinnedMetricForAccount(@"openai",otherID,@"weekly");
+    NSDictionary *selection=@{@"openai":openPin,@"claude":pinned};
+    CheckEqual(TMResolveMenuBarMetric(TMProviderMenuMetric(@"openai",selection,@"claude:weekly"),twoOpen)[@"usedPercent"],@5,@"OpenAI sélectionné : 95 % restant, pas 45 % de l’agrégat");
+    CheckEqual(TMResolveMenuBarMetric(TMProviderMenuMetric(@"claude",selection,openPin),twoOpen)[@"accountId"],TM_ACC_A,@"changer OpenAI conserve le compte Claude");
+    CheckEqual(TMProviderMenuMetric(@"openai",@{},openPin),openPin,@"ancien compte épinglé repris au premier lancement");
+    CheckEqual(TMProviderMenuMetric(@"claude",@{},openPin),@"claude:weekly",@"un choix OpenAI ne devient jamais le choix Claude");
+    CheckEqual(TMProviderMenuMetric(@"openai",@{@"openai":@"openai:weekly"},openPin),@"openai:weekly",@"tous rétablit explicitement l’agrégat");
+    NSDictionary *unavailable=@{@"accountId":otherID,@"provider":@"openai",@"windows":@[]};
+    Check(TMResolveMenuBarMetric(openPin,@[accounts.lastObject,unavailable])==nil,@"compte choisi sans quota : inconnu, jamais le chiffre du voisin");
+    CheckEqual(TMResolveMenuBarMetric(TMPinnedMetricForAccount(@"openai",openID,@"weekly"),twoOpen)[@"usedPercent"],@55,@"revenir au premier compte redonne sa valeur");
 
     Section(@"TMHistoryKeyMatchesMetric — sparkline");
     NSString *claudeWeeklyA = TMHistoryKey(TMProviderClaude, TM_ACC_A, @"seven_day");
@@ -1399,6 +1470,35 @@ static void TestMenuBarWidgets(void) {
     CheckEqual(@([cpu[@"series"] count]), @3, @"CPU : série pour barres/courbe");
     Check([TMWidgetReadout(@"memory", snap)[@"series"] count] == 0 || YES, @"Mémoire : série usedPercent transmise si présente");
 
+    for (NSString *provider in @[@"claudeWeek",@"codexWeek"]) {
+        NSDictionary *quotaSnapshot=@{@"families":@[@{@"id":provider,@"now":@{@"percent":@80},
+            @"series":@{@"percent":@[@0,@20,@80,@100]}}]};
+        NSDictionary *q=TMWidgetReadout(provider,quotaSnapshot);
+        CheckEqual(q[@"value"],@"20 %",@"quota : texte restant");
+        Check(fabs([q[@"fraction"] doubleValue]-0.2)<1e-9,@"quota : remplissage restant comme le texte");
+        CheckEqual(q[@"series"],@[@100,@80,@20,@0],@"quota : historique du restant");
+        Check(![TMWidgetReadout(provider,@{})[@"hasValue"] boolValue],@"quota absent reste inconnu");
+    }
+    // Rasteriser chaque dessin détecte aussi les inversions visuelles / masques de composition.
+    for (NSString *design in TMIconDesignIDs()) {
+        for (NSNumber *provider in @[@YES,@NO]) {
+            double previous=-1;
+            for (NSNumber *remaining in @[@0,@0.25,@0.75,@1]) {
+                NSImage *image=TMProviderGauge(design,remaining,provider.boolValue);
+                Check(NSEqualSizes(image.size,NSMakeSize(18,18)),@"jauge seule sans pictogramme adjacent");
+                NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithData:image.TIFFRepresentation];
+                double coverage=0;
+                for (NSInteger y=0;y<bitmap.pixelsHigh;y++) for (NSInteger x=0;x<bitmap.pixelsWide;x++)
+                    coverage += [bitmap colorAtX:x y:y].alphaComponent;
+                Check(coverage>previous,@"plus de restant remplit davantage chaque jauge des deux fournisseurs");
+                previous=coverage;
+            }
+            NSBitmapImageRep *missing=[[NSBitmapImageRep alloc] initWithData:TMProviderGauge(design,nil,provider.boolValue).TIFFRepresentation];
+            NSBitmapImageRep *empty=[[NSBitmapImageRep alloc] initWithData:TMProviderGauge(design,@0,provider.boolValue).TIFFRepresentation];
+            Check(![missing.TIFFRepresentation isEqual:empty.TIFFRepresentation],@"donnée absente distincte d'un quota épuisé");
+        }
+    }
+
     // Le dessin ne doit pas planter, quelle que soit la forme, la couleur ou l'entrée (fumée).
     NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery", @""];
     NSArray *colors = @[@"auto", @"blue", @"red", @"purple", @"inconnu"];
@@ -1997,6 +2097,7 @@ int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
         TestCoercion();
+        TestCodexExecutableDiscovery();
         TestISODate();
         TestCookieExtraction();
         TestCookieConversion();
@@ -2010,6 +2111,7 @@ int main(void) {
         TestLegacyMigration();
         TestMenuBarMetricResolution();
         TestOpenAIWindowIdentity();
+        TestManualResetsOpenAI();
         TestOpenAIHistoryCollision();
         TestAwake();
         TestHoldFraction();
@@ -2035,6 +2137,7 @@ int main(void) {
         TestClaudeWebIdentity();
         TestParseClaudeLine();
         TestParseCodex();
+        TestExtraCredits();
         TestHistoryCSV();
         TestStaleAlert();
         TestWatchdog();

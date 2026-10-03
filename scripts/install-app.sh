@@ -27,5 +27,9 @@ if [[ "${1:-}" == "--login" ]]; then
   "$DEST/Contents/MacOS/Status" --register-login-item
 fi
 
-open "$DEST"
+if [[ "${1:-}" == "--preview-menu-icons" ]]; then
+  open "$DEST" --args --preview-menu-icons
+else
+  open "$DEST"
+fi
 echo "lancé depuis /Applications"

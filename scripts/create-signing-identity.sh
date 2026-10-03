@@ -69,6 +69,7 @@ Une fois créé, vérifiez avec :
   security find-identity -p codesigning | grep "Status Local Signing"
   ./scripts/package-app.sh            # doit afficher « signé avec : Status Local Signing »
 
-Le statut CSSMERR_TP_NOT_TRUSTED est normal et sans effet : une racine auto-signée n'est pas
-approuvée par défaut, et codesign l'accepte quand même. Voir README § Signature stable.
+Le statut CSSMERR_TP_NOT_TRUSTED permet une signature locale, mais ne suffit pas pour
+le service privilégié capot fermé. Ce service exige une signature Apple reconnue.
+Voir README § Signature du service capot fermé.
 CHECK

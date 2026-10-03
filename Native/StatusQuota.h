@@ -27,6 +27,9 @@ NSString *TMQuotaWindowLabel(long long minutes);
 NSString *TMClaudeWindowLabel(NSString *name);
 // Unique source des quotas Claude : réponse de claude.ai /api/organizations/{org}/usage.
 NSArray *TMClaudeWindowsFromUsagePayload(NSDictionary *payload);
+// Crédits supplémentaires, distincts des crédits de reset et des quotas inclus.
+NSDictionary *TMOpenAIExtraCredits(NSDictionary *snapshot);
+NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSDictionary *grant);
 // Écarte les fenêtres dont le reset est passé : leur pourcentage ne veut plus rien dire.
 NSArray *TMDropExpiredWindows(NSArray *windows);
 
@@ -176,3 +179,6 @@ NSArray *TMAppendHistory(NSArray *pairs, long long now);
 // Renouvellements globaux détectés, isolés par compte. Au plus 64 dates sur 180 jours.
 // Estimation descriptive (médiane/plage observée), jamais une date garantie du fournisseur.
 NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *accountKey, NSTimeInterval now);
+
+// Métrique persistée indépendamment pour chaque jauge, avec reprise de l’ancien choix.
+NSString *TMProviderMenuMetric(NSString *provider, NSDictionary *selections, NSString *legacyMetric);

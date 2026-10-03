@@ -65,8 +65,8 @@ change d'ad-hoc à stable, donc macOS la redemande — puis plus jamais.
 
 Le certificat apparaît comme non approuvé (`CSSMERR_TP_NOT_TRUSTED`) et **c'est normal** : une
 racine auto-signée n'est pas approuvée par défaut. `codesign` l'accepte quand même, et c'est tout
-ce qu'il faut — on ne cherche pas une chaîne vérifiable par des tiers (ce serait un Developer ID
-Apple), seulement une empreinte stable d'un build à l'autre. Pour le vérifier :
+ce qu’il faut pour stabiliser certains usages locaux. Cela ne suffit pas pour le service
+privilégié capot fermé, dont le lancement est refusé sur le Mac testé. Pour le vérifier :
 
 ```bash
 codesign -d -r- outputs/Status.app   # l'exigence désignée doit être identique entre deux builds
@@ -142,13 +142,18 @@ Depuis l'onglet **Connexions** :
 - **Renommer** / **Retirer** : sur chaque compte. Retirer efface le secret ou le dossier de session
   du compte, ainsi que son historique de quotas.
 
-Actualisation automatique toutes les **5 minutes**, plus au lancement.
+Actualisation automatique des quotas toutes les **minutes** par défaut (réglable de 30 secondes à 5 minutes), plus au lancement.
+
+Sous les jauges de chaque compte, **Crédits supplémentaires** affiche le solde OpenAI en crédits,
+ou le portefeuille Claude dans sa devise, avec la dépense et le plafond mensuels quand disponibles.
+Ces montants suivent les relevés de quotas. Une donnée absente reste indisponible ; les crédits de
+réinitialisation manuelle restent affichés séparément.
 
 ## Comportement
 
-- **Actualisation** : toutes les 5 min, au lancement, à l'ouverture du popover, et au réveil du Mac.
-  En cas d'erreur répétée l'intervalle double jusqu'à 40 min (backoff), et repart à zéro dès qu'un
-  clic manuel ou une réponse correcte survient.
+- **Actualisation** : toutes les minutes par défaut, au lancement, à l'ouverture du popover, et au réveil du Mac.
+  En cas d'erreur répétée, seul le compte concerné ralentit jusqu'à 40 min (backoff) ; les autres
+  continuent normalement. Un clic manuel ou une réponse correcte annule sa pause.
 - **Alertes** : une notification au seuil configuré (80 % par défaut), puis à 95 % du quota
   hebdomadaire global, une seule fois par niveau et par période. Les renouvellements suivent ce
   même périmètre : aucun seuil ni renouvellement des modèles spécifiques, fenêtres 5 h ou dépassements.
@@ -238,41 +243,34 @@ locales, dans le tableau de bord, les connexions et le popup. Cette date de dét
 indépendamment de l’activation des notifications. Sans observation antérieure, « Non observée »
 est affiché ; aucune date n’est extrapolée depuis la prochaine échéance.
 
-## Mode temporaire capot fermé
+## Mode capot fermé à durée définie (0.8.5)
 
-Dans **Réglages → Système → Continuer capot fermé**, autoriser d’abord le service macOS,
-puis saisir une durée entière entre **1 et 240 minutes** et cliquer sur **Démarrer**.
-Le popup donne accès au réglage et affiche les minutes restantes quand il est actif.
-La première autorisation ne démarre rien. La fermeture du capot doit être testée physiquement
-sur le Mac concerné ; ni un build ni une assertion de veille ne prouvent ce fonctionnement.
+Dans **Réglages → Système → Continuer capot fermé**, autoriser le service macOS,
+puis choisir une durée de **1 à 240 minutes** et cliquer sur **Démarrer**.
+Le tableau de bord et le popup affichent le temps restant. Le mode température et
+la dépendance aux sondes SMC ont été retirés. L’autorisation ne démarre aucune session.
 
-Le service impose la faible consommation sur batterie et secteur, et vérifie l’état effectif
-après chaque écriture. Il utilise le réglage global `pmset disablesleep` de macOS, qui affecte
-également la veille manuelle tant que le mode est actif. Ce réglage n’est pas une API publique
-garantie. Le service refuse d’intervenir s’il était déjà actif avant Status.
+Le service impose la faible consommation sur batterie et secteur, puis restaure les
+réglages d’origine à l’échéance ou avec **Arrêter maintenant**. Il vérifie les écritures
+`pmset` avant de confirmer l’activation. `disablesleep` affecte aussi la veille manuelle ;
+ce réglage n’est pas une API publique garantie et nécessite un test physique sur le Mac.
 
-Surveillance toutes les cinq secondes : arrêt à **30 % de batterie**, données batterie absentes,
-pression thermique macOS dès le niveau **fair**, échéance, réglages externes modifiés ou absence
-de contact de Status depuis plus de vingt secondes. Un signal thermique macOS n’est pas une
-mesure de température ambiante et ne rend pas sûr un fonctionnement dans un sac fermé :
-conserver une ventilation suffisante. Les tâches réseau exigent toujours une connexion.
+Toutes les cinq secondes, arrêt anticipé à 30 % de batterie, si la charge devient
+illisible, si macOS signale une pression thermique (dès « fair »), si les réglages
+d’énergie changent ou si Status ne répond plus depuis vingt secondes. Il n’y a plus
+aucun seuil en degrés. Conserver une ventilation suffisante : ces arrêts ne garantissent
+pas un fonctionnement sûr dans un sac fermé.
 
-Le service restaure les réglages qu’il a changés, sans écraser un changement externe identifiable.
-Un journal root privé dans `/var/db/com.raphael.status.lid/` précède les modifications ; après
-interruption/redémarrage du service, il est restauré sans reprendre la session. En cas d’échec,
-le journal est conservé et la restauration réessayée. Ne pas désactiver le service macOS
-pendant une session/restauration ; arrêter le mode d’abord. Une panne du système ou l’arrêt forcé
-du service par un administrateur peut retarder ces protections.
+Un journal root privé dans `/var/db/com.raphael.status.lid/` précède les modifications.
+Le service restaure ses changements après une interruption sans reprendre la session ;
+un échec de restauration conserve le journal et déclenche des réessais. Il préserve
+les changements externes identifiables. Arrêter et restaurer avant une mise à jour.
 
-Le LaunchDaemon est enregistré via `SMAppService` et n’accepte que le processus Status signé
-par le même certificat (exigence XPC vérifiée sur les messages). L’app vérifie symétriquement le
-service. Les binaires sont signés avec Hardened Runtime ; une signature ad hoc ne permet pas
-l’activation. Aucun mot de passe n’est lu par Status. Le service n’exécute aucun chemin ni aucune
-commande fournis par le client : seulement les options de gestion d’énergie fixes.
-
-`Tests/lid-mode-tests.m` simule activation, durée libre, batterie, pression thermique, expiration,
-perte de contact, échec d’écriture, récupération après crash et restauration. Ces tests ne
-modifient aucun réglage d’énergie réel. Le helper accepte `--diagnose` pour la lecture seule.
+Les échanges XPC vérifient le certificat et l’identifiant exact du pair dans les deux
+sens. Le helper n’accepte aucune commande ni aucun chemin fournis par le client.
+Les tests simulent l’échéance, la batterie, le signal thermique macOS, la perte de
+contact, les erreurs d’écriture et la récupération sans modifier les réglages réels.
+Le helper accepte `--diagnose` pour une lecture seule.
 
 ## Estimation des renouvellements (0.7.0)
 
@@ -316,3 +314,83 @@ L'historique personnel prend la priorité dès trois observations, y compris lor
 irrégulier ou sa prévision dépassée. Aucun événement public n'est inséré dans l'historique
 ou les notifications. Un repère dépassé n'est pas reporté ; l'instantané expire après
 30 jours et affiche « à actualiser ». Il est embarqué, sans synchronisation automatique.
+
+## Icônes par fournisseur (0.8.1)
+
+La barre affiche deux icônes côte à côte, sans texte : OpenAI à gauche, Claude à droite.
+Réglages → Apparence → Icônes des fournisseurs permet de choisir indépendamment parmi
+six dessins de jauge : Double anneau, Capsules, Double arc, Anneau épais,
+Réservoir et 5 segments. Le choix reste indépendant pour chaque fournisseur.
+
+Depuis 0.8.7, les deux jauges n’ont plus de pictogramme adjacent : OpenAI est bleu
+à gauche, Claude orange à droite. La partie pleine représente toujours le **quota
+restant** du compte choisi dans le popup. Le choix est mémorisé indépendamment
+pour OpenAI et Claude (0.8.8) et met à jour la jauge immédiatement. Le mode « tous »
+suit le compte le plus contraint du fournisseur. Les widgets de
+quota secondaires utilisent aussi le restant pour leur texte, leur remplissage et
+leur historique. Un tiret distingue une mesure absente d’un quota épuisé.
+Les dessins fixes (Orbite, Éventail, S) ont été retirés ; une ancienne sélection
+correspondante utilise désormais l’Anneau épais. L’aperçu montre un restant fictif de 72 %.
+
+## Installation du service capot fermé
+
+La signature locale de Status est utilisable pour l’application mais le service embarqué
+`SMAppService` a été refusé par macOS (-423 / EX_CONFIG) sur le Mac testé. Un redémarrage
+seul ne résout pas ce refus.
+
+Pour les builds locaux, **Autoriser le service macOS** ouvre désormais
+`StatusLidService.pkg` dans l’installateur système. L’utilisateur saisit son autorisation
+dans macOS ; Status ne lit aucun mot de passe. Le paquet installe uniquement :
+
+- `/Library/PrivilegedHelperTools/com.raphael.status.lid-helper`
+- `/Library/LaunchDaemons/com.raphael.status.lid-service.plist` (label et nom Mach
+  `com.raphael.status.lid-service`)
+
+Ces fichiers appartiennent à root et ne sont pas modifiables par les autres utilisateurs.
+Le label et le nom Mach diffèrent volontairement de l’enregistrement SMAppService
+(`com.raphael.status.lid-helper`) : smd recrée ce dernier après un `bootout`, et le
+partage du label faisait échouer le `bootstrap` du paquet (« Bootstrap failed: 5 »).
+Status désenregistre aussi au lancement tout SMAppService non signé par Apple, qui
+ne peut jamais démarrer et que launchd relancerait en boucle. Le paquet retire
+l’ancien `com.raphael.status.lid-helper.plist` d’une installation précédente.
+L’installation refuse une session active ou une restauration en attente, démarre le
+service avec `launchctl bootstrap system`, et vérifie la présence de son processus.
+Elle n’active jamais le maintien éveillé. L’application exige ensuite une réponse XPC
+avec la version du protocole attendue avant de permettre un démarrage.
+Une signature ad hoc reste refusée : app et helper doivent partager un certificat stable.
+Aucun réglage global de confiance, Gatekeeper ou SIP n’est modifié.
+
+Les builds signés par Apple conservent la voie `SMAppService`. Pour cette voie, utiliser
+la même identité Apple Development ou Developer ID Application pour les deux binaires :
+
+```sh
+STATUS_SIGN_IDENTITY='nom exact du certificat Apple' ./scripts/install-app.sh
+/Applications/Status.app/Contents/MacOS/Status --repair-lid-registration
+```
+
+Un build et l’installation ne prouvent pas le comportement capot fermé : vérifier la
+réponse XPC, un essai court avec restauration des profils, puis la fermeture physique.
+
+Références : [installation classique avec Program et launchctl](https://developer.apple.com/forums/thread/771162),
+[identité Apple pour SMAppService](https://developer.apple.com/forums/thread/799910).
+
+### Ventilateurs : Auto Apple et Boost temporaire
+
+Dans Réglages → Système et dans « Outils du Mac » du popup : boost de tous les
+ventilateurs à leur maximum SMC pendant 1 à 60 minutes, puis retour à Auto Apple.
+Le service macOS doit être mis à jour avec l’installateur fourni dans Status.
+Aucun démarrage n’a lieu pendant l’installation. Les vitesses réelles sont affichées ;
+le boost reste en vérification pendant la montée en vitesse et est annulé si la
+vitesse n’est pas confirmée sous 20 secondes.
+
+Le service indépendant restaure le mode automatique à l’expiration, à la rupture
+XPC, après 20 secondes sans heartbeat, à son arrêt et après son redémarrage grâce
+à un journal privé. Toute restauration non confirmée est signalée et réessayée.
+Un outil externe déjà en mode manuel bloque le démarrage. Aucune clé SMC arbitraire
+ni vitesse inférieure au maximum n’est exposée par le service. Le contrôle peut
+être refusé par macOS, notamment sur certains M3/M4 : Status n’utilise pas le
+contournement diagnostic `Ftst` et ne désactive pas `thermalmonitord`.
+
+Tests simulés : durée, montée en vitesse, vitesse réelle, expiration, perte de contact,
+écriture partielle, restauration en échec, récupération au redémarrage et reprise
+par macOS. Ces tests ne constituent pas une validation des écritures sur un Mac réel.
