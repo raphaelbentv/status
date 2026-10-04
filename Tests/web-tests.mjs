@@ -105,27 +105,20 @@ checkEqual(menubar('used')({ usedPercent: -5 }), 0, 'borné en bas : jamais de n
 checkEqual(menubar('used')({ usedPercent: 130 }), 100, 'borné en haut');
 checkEqual(menubar('used')(null), null, 'fenêtre absente : null, distinct de 0');
 
-// ── Alignement des deux colonnes du popover (menubar.html) ──────────────────
-// Claude porte des sous-jauges (5 h, Fable) qu'OpenAI n'a pas. En empilant librement, la note de
-// fraîcheur et le coût des deux fournisseurs se retrouvaient décalés de plus de cent pixels : on
-// ne pouvait plus comparer une ligne à celle d'en face. Chaque donnée occupe donc une rangée
-// nommée de la même grille, et une case sans donnée reste vide plutôt que d'absorber la suivante.
-section('provider — les deux colonnes partagent les mêmes rangées');
-const rowsOf = html => [...html.matchAll(/class="cell (c\d) (r\d)/g)].map(m => m[2]);
-const colsOf = html => [...new Set([...html.matchAll(/class="cell (c\d) /g)].map(m => m[1]))];
+// ── Cartes du popover (menubar.html) ───────────────────────────────────────
+section('provider — une carte par fournisseur, volume hebdo en tête');
 const openaiHTML = menubar('provider')('openai', 'OpenAI', [{ provider: 'openai', connected: true, label: 'Boulot', windows: [
   { windowId: 'seven_day', usedPercent: 42, resetsAt: Date.now() / 1000 + 90000 } ] }], 'openai:weekly');
 const claudeHTML = menubar('provider')('claude', 'Claude', [{ provider: 'claude', cookieConfigured: true, orgId: 'org', label: 'Perso', windows: [
   { windowId: 'seven_day', usedPercent: 81, resetsAt: Date.now() / 1000 + 90000 },
-  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 } ] }], 'claude:weekly');
-checkEqual(rowsOf(openaiHTML), rowsOf(claudeHTML),
-  'mêmes rangées des deux côtés, sous-jauges ou non');
-checkEqual(colsOf(openaiHTML), ['c1'], 'OpenAI occupe la première colonne');
-checkEqual(colsOf(claudeHTML), ['c2'], 'Claude occupe la seconde');
-check(/class="cell c2 r5[^"]*"[^>]*>\s*<div class="subgauge"/.test(claudeHTML),
-  'la sous-jauge 5 h vit dans la rangée qui lui est réservée');
-check(/class="cell c1 r5[^"]*"[^>]*>\s*<\/div>/.test(openaiHTML),
-  'côté OpenAI la même rangée existe, vide — elle ne remonte pas la suite');
+  { windowId: 'five_hour', usedPercent: 4, resetsAt: Date.now() / 1000 + 9000 },
+  { windowId: 'seven_day_scoped_fable', label: 'Fable', usedPercent: 54, resetsAt: Date.now() / 1000 + 90000 } ] }], 'claude:weekly');
+check(openaiHTML.includes('58<span class="unit">%</span>') && openaiHTML.includes('restant cette semaine'), 'restant hebdo en grand');
+check(claudeHTML.includes('19<span class="unit">%</span>') && claudeHTML.includes('class="value warning"'), 'Claude : semaine entamée signalée');
+check(claudeHTML.includes('session-row') && claudeHTML.includes('96 %'), 'la fenêtre 5 h reste en ligne compacte');
+check(!claudeHTML.includes('Fable') && !claudeHTML.includes('54'), 'aucune jauge Fable');
+check(!openaiHTML.includes('session-row'), 'pas de ligne 5 h côté OpenAI');
+check(!claudeHTML.match(/réinitialisation hebdo|Prévision|épuisé/), 'ni prévision ni historique de reset');
 
 // ── Coût par modèle (dashboard) ─────────────────────────────────────────────
 section('fmtTokens — volumes de tokens, toujours en millions');
@@ -360,9 +353,16 @@ section('reset manuel — chaque jauge principale et état vérifié');
   const primary={...weekly,primaryLimit:true};
   check(dashboard('manualResetLine')(primary,openai).includes('2 disponibles'),'nombre OpenAI confirmé');
   checkEqual(dashboard('manualResetLine')({...primary,primaryLimit:false},openai),'','limite OpenAI secondaire exclue');
-  check(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'none',observedAt:now}}).includes('aucun disponible'),
-    'zéro confirmé explicite');
-  check(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now-700}}).includes('non vérifié'),
+  const withExpiry=dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now,credits:[{expiresAt:now+86400*0.5},{title:'Offert',resetType:'codexRateLimits'}]}});
+  check(withExpiry.includes('expire le')&&withExpiry.includes('demain')&&withExpiry.includes('class="soon"'),'expiration proche datée et signalée');
+  check(withExpiry.includes('Offert · sans expiration'),'crédit sans expiration jamais daté');
+  const claudeReset=dashboard('manualResetLine')(weekly,{...claude,manualReset:{status:'available',scope:'weekly',count:1,observedAt:now,credits:[{title:'Réinitialisation complète',expiresAt:now+18*86400}]}});
+  check(claudeReset.includes('Réinitialisation complète · expire le')&&claudeReset.includes('dans 18 j'),'expiration Claude datée');
+  check(!dashboard('manualResetLine')(weekly,{...claude,manualReset:{status:'available',scope:'weekly',count:1,observedAt:now,credits:[{}]}}).includes('sans expiration'),'crédit Claude sans mention : jamais « sans expiration »');
+  check(dashboard('manualResetLine')(weekly,{...claude,manualReset:{status:'available',scope:'weekly',count:1,observedAt:now,credits:[{expiryText:'bientôt'}]}}).includes('expiration : bientôt'),'mention non datée reprise telle quelle');
+  checkEqual(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'none',observedAt:now}}),'',
+    'aucun reset : pas de ligne inutile');
+  checkEqual(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now-700}}),'',
     'ancien relevé positif jamais présenté comme actuel');
 }
 
@@ -494,27 +494,11 @@ section('accountsOf / historyKey — la liste de comptes');
     checkEqual(menubar(`pickAccount(${JSON.stringify([pro, perso])},'claude:weekly')`).label, 'Pro',
                'sans épinglage, le plus contraint');
 
-    // La rangée de bascule elle-même : présente quand il y a un choix, absente sinon.
-    const all = JSON.stringify([boulot, perso, pro]);
-    const switcher = menubar(`accountSwitcher(${all},'claude:weekly')`);
-    check(switcher.includes('>tous<'), 'un retour à l’agrégat est proposé');
-    check(switcher.includes('>Perso<') && switcher.includes('>Pro<'), 'les deux comptes Claude y sont');
-    checkEqual(menubar(`chipLabel("contact@venio.paris's Organization")`), 'contact',
-               'un libellé auto se réduit à ce qui identifie');
-    checkEqual(menubar(`chipLabel('Pro')`), 'Pro', 'un nom court est laissé tel quel');
-    checkEqual(menubar(`chipLabel('Organisation')`), 'Organisation', 'douze caractères passent entiers');
-    checkEqual(menubar(`chipLabel('Organisationnelle')`), 'Organisatio…', 'au-delà, on tronque');
-    check(menubar(`accountSwitcher(${all},'claude:weekly')`).includes('title="Perso"'),
-          'le nom complet reste dans l’infobulle');
-    check(!switcher.includes('Boulot'), 'et pas ceux d’un autre fournisseur');
-    check((switcher.match(/class="seg on"/g) || []).length === 1, 'un seul choix est marqué');
-    check(menubar(`accountSwitcher(${all},'openai:weekly')`) === '',
-          'un fournisseur à compte unique n’affiche aucune rangée');
-    check(menubar(`accountSwitcher(${all},'lowest')`) === '', '« lowest » non plus');
-    check(menubar(`accountSwitcher(${all},'system:cpu')`) === '', 'les métriques système non plus');
-    // Basculer garde la fenêtre choisie : on change de compte, pas de jauge.
-    check(menubar(`accountSwitcher(${all},'claude:session')`).includes(`acct:claude:${pro.accountId}:session`),
-          'la bascule conserve la fenêtre en cours');
+    // Le sélecteur intégré à la carte remplace la rangée de pastilles.
+    const pickerHTML = menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])},'${pinPro}')`);
+    check(pickerHTML.includes('Le plus entamé'), 'un retour à l’agrégat est proposé');
+    check(pickerHTML.includes(`value="${pro.accountId}" selected`), 'le compte épinglé est sélectionné');
+    check(!menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])},'claude:weekly')`).includes('" selected>Pro'), 'sans épinglage, l’agrégat est sélectionné');
 
     // Réglages : la rangée ne doit pas paraître vide dès qu'un compte est épinglé.
     const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })},'appearance')`);
@@ -533,9 +517,9 @@ section('accountsOf / historyKey — la liste de comptes');
   const picked = menubar(`pickAccount(${JSON.stringify([perso, pro])},'claude:weekly')`);
   checkEqual(picked?.label, 'Pro', 'le popover retient le compte le plus contraint');
   const block = menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])},'claude:weekly')`);
-  check(block.includes('name-sub">Pro'), 'et le nomme, puisqu’il y en a plusieurs');
-  check(!menubar(`provider('claude','Claude',${JSON.stringify([perso])},'claude:weekly')`).includes('name-sub'),
-        'compte unique : pas de nom redondant');
+  check(block.includes('>Pro<'), 'et le nomme, puisqu’il y en a plusieurs');
+  check(!menubar(`provider('claude','Claude',${JSON.stringify([perso])},'claude:weekly')`).includes('<select'),
+        'compte unique : pas de sélecteur');
 
   section('aucun compte — l’app le dit au lieu de rester muette');
   const empty = JSON.stringify({ accounts: [], history: [], updatedAt: 0, accountLimit: 5 });
@@ -593,7 +577,8 @@ section('Réglages regroupés, connexions compactes et données conditionnelles'
   const fable={...claudeAccount('a','Perso',[]),windows:[{windowId:'seven_day_scoped_fable',label:'Fable',usedPercent:10,resetsAt:9999999999}]};
   const data={prefs:{notificationsAuthorized:false},accounts:[fable,claudeAccount('b','Pro',[])]};
   const quotas=dashboard('settingsView')(data,'quotas');
-  check(dashboard('settingsView')(data,'appearance').includes('Claude Fable'),'Fable conservé quand une vraie fenêtre existe');
+  check(!dashboard('settingsView')(data,'appearance').includes('Claude Fable'),'jauge Fable retirée');
+  check(!dashboard('accountBlock')(fable,[]).includes('Fable'),'aucun compteur Fable');
   const accountsTab=dashboard('settingsView')(data,'accounts');
   check(accountsTab.includes("send('addAccount',{provider:'claude'})")&&accountsTab.includes("send('refresh')"),'les comptes (ex-Connexions) sont dans Réglages');
   check(!dashboard('settingsView')(data,'system').includes("send('addAccount'"),'et seulement dans leur catégorie');
@@ -652,27 +637,8 @@ const webPanel=dashboard('claudePanel')(webClaude);
 check(webPanel.includes('suivi automatique')&&webPanel.includes('connectClaudeWeb'),'action de connexion web et mode automatique');
 check(!webPanel.includes('Recoller le cookie'),'aucun collage de cookie pour une session web');
 
-for(const surface of [dashboard,menubar]){
-  const resetLabel=surface('lastWeeklyReset');
-  check(resetLabel({}).includes('Non observée'),'date inconnue explicitement signalée');
-  check(resetLabel({lastWeeklyResetObservedAt:1700000000}).includes('2023'),'date complète du renouvellement affichée');
-  check(resetLabel({lastWeeklyResetObservedAt:Date.now()/1000+3600}).includes('Non observée'),'date future refusée');
-}
-
-{
-  const render=dashboard('weeklyResetEstimate'),now=Date.now()/1000;
-  check(render({}).includes('en apprentissage (0/3)'),'prévision courte sans historique');
-  const regular={observationCount:3,status:'estimated',medianSeconds:604800,earliestAt:now+86400,latestAt:now+3*86400,confidence:'low'};
-  check(render({weeklyResetStats:regular}).includes('Reset estimé :')&&render({weeklyResetStats:regular}).includes('confiance faible'),'plage et confiance conservées');
-  check(render({weeklyResetStats:{...regular,status:'overdue'}}).includes('Prévision dépassée'),'prévision dépassée signalée');
-  check(render({weeklyResetStats:{...regular,status:'irregular'}}).includes('rythme irrégulier'),'irrégularité signalée');
-  check(!menubar('lastWeeklyReset')({weeklyResetStats:regular}).includes('weekly-reset-estimate'),'aucune prévision dans le popup');
-  check(!dashboard('lastWeeklyReset')({weeklyResetStats:regular}).includes('weekly-reset-estimate'),'historique séparé de la prévision');
-}
-
-check(dashboard('publicResetContext')('claude').includes('14,1 jours'),'relevé public Claude actualisé');
-check(dashboard('publicResetContext')('openai').includes('crédits de reset'),'repères Codex signalent le périmètre distinct');
-check(dashboard('publicResetContext')('claude').includes('ne sont pas ajoutées'),'sources externes séparées des détections personnelles');
+check(!dashboard('accountBlock')(claudeAccount('a','Perso',[{windowId:'seven_day',label:'7 jours',usedPercent:30,resetsAt:9999999999}]),[]).match(/Prévision|réinitialisation hebdo|épuisé/),
+  'ni prévision ni historique de reset dans les compteurs');
 const lidSettings=dashboard('lidModeSettings');
 check(lidSettings({tools:{lidMode:{authorized:false,available:true}}}).includes('Autoriser le service macOS'),'autorisation distincte du démarrage');
 check(!lidSettings({tools:{lidMode:{authorized:false}}}).includes('onclick="startLidMode()"'),'aucun démarrage sans service autorisé');
@@ -686,17 +652,22 @@ check(menubar('tools')({lidMode:{active:true,remainingSeconds:61}}).includes('ca
 check(!lidSettings({tools:{lidMode:{authorized:true}}}).includes('disabled'),'pas de dépendance à une sonde pour démarrer');
 
 
-{
-  const render=dashboard('weeklyResetEstimate');
-  check(render({weeklyResetStats:{basis:'public',status:'publicEstimated',estimatedAt:1789770765}}).includes('repère public'),'prévision publique visible sans observations');
-  check(render({weeklyResetStats:{basis:'public',status:'publicOverdue'}}).includes('dépassé'),'repère public dépassé jamais repoussé');
-  check(render({weeklyResetStats:{basis:'public',status:'publicStale'}}).includes('actualiser'),'référence périmée signalée');
-}
 
+section('Facturation par compte');
+{
+  const line=dashboard('billingLine'),now=Date.now()/1000;
+  checkEqual(line({}),'','inconnue : rien d’affiché');
+  checkEqual(line({billing:{status:'unknown'}}),'','statut inconnu : rien');
+  const exact=line({billing:{status:'known',nextAt:now+10*86400,estimated:false,plan:'pro'}});
+  check(exact.includes('Facturation le')&&exact.includes('dans 10 j')&&exact.includes('Pro'),'date exacte, délai et offre');
+  check(line({billing:{status:'known',nextAt:now+86400*2,estimated:true}}).includes('vers le'),'date reportée signalée');
+  check(line({billing:{status:'known',nextAt:now+86400*2,estimated:false}}).includes('soon'),'échéance proche mise en avant');
+  check(dashboard('accountBlock')({...claudeAccount('a','Perso',[]),billing:{status:'known',nextAt:now+5*86400}},[]).includes('Facturation le'),'visible dans le bloc du compte');
+}
 section('Crédits supplémentaires par compte');
 {
   const render=dashboard('extraCreditsCard');
-  check(render({}).includes('Solde indisponible'),'absence jamais présentée comme zéro');
+  checkEqual(render({}),'','solde inconnu : pas de carte, jamais un faux zéro');
   check(render({extraCredits:{status:'known',unit:'credits',balance:125.5}}).includes('125,5 crédits restants'),'solde OpenAI dans son unité');
   check(render({extraCredits:{status:'known',unit:'credits',unlimited:true}}).includes('illimités'),'crédits illimités explicites');
   const claude=render({extraCredits:{status:'known',unit:'money',currency:'USD',balance:12.5,used:3.68,monthlyLimit:50}});
@@ -731,13 +702,13 @@ section('Popup : crédits du compte sélectionné');
   const second=render('openai','OpenAI',[one,two],`acct:openai:${two.accountId}:weekly`);
   check(first.includes('125,5 crédits restants')&&!first.includes('42 crédits restants'),'solde du premier compte uniquement');
   check(second.includes('42 crédits restants')&&!second.includes('125,5 crédits restants'),'changement de compte change aussi le solde');
-  check(credits({}).includes('Solde indisponible'),'solde absent jamais présenté comme zéro');
+  checkEqual(credits({}),'','solde inconnu : rien plutôt qu’un faux zéro');
   check(credits({extraCredits:{status:'known',unit:'credits',balance:0}}).includes('0 crédits restants'),'solde nul explicite');
   check(credits({extraCredits:{status:'known',unit:'credits',unlimited:true}}).includes('Crédits illimités'),'solde illimité explicite');
   const claude=credits({extraCredits:{status:'known',unit:'money',balance:97,balanceCurrency:'EUR',currency:'USD',used:3,enabled:false}});
   check(claude.includes('97,00')&&claude.includes('€')&&!claude.includes('$'),'devise du solde Claude conservée');
   check(claude.includes('Usage supplémentaire désactivé'),'solde prépayé distinct de son activation');
-  check(credits({extraCredits:{status:'known',unit:'money',used:3}}).includes('Solde indisponible'),'dépense ne remplace pas le solde');
+  checkEqual(credits({extraCredits:{status:'known',unit:'money',used:3}}),'','dépense seule ne devient pas un solde');
   check(credits({extraCredits:{status:'known',unit:'credits',balance:42,observedAt:1}}).includes('Relevé il y a'),'ancienneté du relevé affichée');
 }
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);

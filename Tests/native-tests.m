@@ -316,6 +316,44 @@ static void TestExtraCredits(void) {
     CheckEqual(c[@"balanceCurrency"], @"EUR", @"devise propre au solde conservée");
 }
 
+static NSString *TMTestJWT(NSDictionary *claims) {
+    NSData *data=[NSJSONSerialization dataWithJSONObject:claims options:0 error:nil];
+    NSString *b64=[[[data base64EncodedStringWithOptions:0] stringByReplacingOccurrencesOfString:@"+" withString:@"-"]
+        stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+    return [NSString stringWithFormat:@"e30.%@.sig",[b64 stringByReplacingOccurrencesOfString:@"=" withString:@""]];
+}
+static void TestResetCredits(void) {
+    Section(@"Resets manuels — expiration de chaque crédit");
+    Check(TMResetCreditDetails(nil) == nil, @"détail absent : nil, pas « aucun »");
+    NSArray *c = TMResetCreditDetails(@[
+        @{@"id":@"b", @"grantedAt":@1, @"status":@"available", @"expiresAt":@1793000000, @"resetType":@"weekly"},
+        @{@"id":@"a", @"grantedAt":@1, @"status":@"available", @"expiresAt":@1792000000, @"title":@"Reset offert"},
+        @{@"id":@"c", @"grantedAt":@1, @"status":@"redeemed", @"expiresAt":@1791000000},
+        @{@"id":@"d", @"grantedAt":@1, @"status":@"available", @"expiresAt":NSNull.null}]);
+    CheckEqual(@(c.count), @3, @"crédits déjà utilisés écartés");
+    CheckEqual(c[0][@"expiresAt"], @1792000000, @"le premier à expirer en tête");
+    CheckEqual(c[0][@"title"], @"Reset offert", @"titre conservé");
+    Check(c[2][@"expiresAt"] == nil, @"sans expiration : en dernier, jamais une fausse date");
+}
+
+static void TestBilling(void) {
+    Section(@"Facturation — prochaine échéance par compte");
+    NSTimeInterval now=1791100000; // 2026-10-04
+    NSDictionary *b=TMOpenAIBillingFromIDToken(TMTestJWT(@{@"https://api.openai.com/auth":@{@"chatgpt_plan_type":@"pro",@"chatgpt_subscription_active_until":@"2026-10-06T18:07:24+00:00"}}), now);
+    CheckEqual(b[@"status"], @"known", @"échéance OpenAI lue dans l'id_token");
+    CheckEqual(b[@"estimated"], @NO, @"échéance future : date exacte");
+    CheckEqual(b[@"plan"], @"pro", @"offre conservée");
+    b=TMOpenAIBillingFromIDToken(TMTestJWT(@{@"https://api.openai.com/auth":@{@"chatgpt_subscription_active_until":@"2026-09-10T22:43:01+00:00"}}), now);
+    CheckEqual(b[@"estimated"], @YES, @"échéance passée : reportée et signalée estimée");
+    Check([b[@"nextAt"] doubleValue]>now && [b[@"nextAt"] doubleValue]<now+32*86400, @"report d'un mois au plus près");
+    CheckEqual(TMOpenAIBillingFromIDToken(@"pas-un-jeton", now)[@"status"], @"unknown", @"jeton illisible : inconnu");
+    CheckEqual(TMOpenAIBillingFromIDToken(TMTestJWT(@{}), now)[@"status"], @"unknown", @"sans claims : inconnu, jamais inventé");
+    CheckEqual(TMClaudeBillingFromSubscription(@{@"next_charge_date":@"2026-10-20"}, now)[@"status"], @"known", @"échéance Claude (date seule)");
+    CheckEqual(TMClaudeBillingFromSubscription(@{@"subscription":@{@"current_period_end":@1792500000}}, now)[@"status"], @"known", @"échéance Claude imbriquée en secondes");
+    CheckEqual(TMClaudeBillingFromSubscription(@{@"status":@"active"}, now)[@"status"], @"unknown", @"sans date : inconnu");
+    CheckEqual(TMClaudeBillingFromSubscription(@[], now)[@"status"], @"unknown", @"réponse inattendue : inconnu");
+}
+
 static void TestHistory(void) {
     Section(@"TMAppendHistory — série locale");
     // Isole le test des données réelles. Redéfinir HOME ne suffirait pas (Foundation met le chemin
@@ -2137,7 +2175,7 @@ int main(void) {
         TestClaudeWebIdentity();
         TestParseClaudeLine();
         TestParseCodex();
-        TestExtraCredits();
+        TestBilling(); TestResetCredits(); TestExtraCredits();
         TestHistoryCSV();
         TestStaleAlert();
         TestWatchdog();

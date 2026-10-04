@@ -229,7 +229,7 @@ static NSError *TMSessionError(NSString *message) {
         if (error || ![json isKindOfClass:NSDictionary.class]) { completion(nil, error); return; }
         NSMutableDictionary *usage = [json mutableCopy];
         dispatch_group_t group = dispatch_group_create();
-        for (NSString *endpoint in @[@"overage_spend_limit", @"prepaid/credits"]) {
+        for (NSString *endpoint in @[@"overage_spend_limit", @"prepaid/credits", @"subscription_details"]) {
             dispatch_group_enter(group);
             NSString *creditPath = [NSString stringWithFormat:@"/api/organizations/%@/%@", orgId, endpoint];
             [self fetchJSON:creditPath optional:YES completion:^(id creditJSON, NSError *creditError) {
@@ -260,34 +260,63 @@ static NSError *TMSessionError(NSString *message) {
     // La navigation initiale /settings/usage redirige vers /new#settings/usage. Une exécution JS
     // asynchrone lancée pendant cette redirection est annulée : chaque sonde est donc courte et
     // réessayée après navigation, sans jamais interpréter un échec comme « aucun reset ».
+    // Lecture de la section « Réinitialisation de la limite » : une ligne par crédit, avec son titre
+    // (« Réinitialisation complète ») et sa mention « Expiration : 22 oct. ». Rien n'est cliqué.
     NSString *script = @"if(location.origin!=='https://claude.ai' || "
         "!(location.pathname.startsWith('/settings/usage') || location.hash.startsWith('#settings/usage'))) "
-        "return {available:false}; "
+        "return {ready:false}; "
+        "const body=(document.body?.innerText||''); "
+        "if(!/cette semaine|this week/i.test(body)) return {ready:false}; "
+        // Garde de fraîcheur : si la jauge hebdo est lisible, elle doit refléter le relevé JSON.
         "const meters=[...document.querySelectorAll('[role=progressbar],[role=meter],progress')]; "
         "const name=e=>{ const id=e.getAttribute('aria-labelledby'); "
-        "return e.getAttribute('aria-label') || (id&&document.getElementById(id)?.textContent) || "
-        "e.parentElement?.textContent || ''; }; "
+        "return e.getAttribute('aria-label') || (id&&document.getElementById(id)?.textContent) || e.parentElement?.textContent || ''; }; "
         "const meter=meters.find(e=>/^(cette semaine|this week|weekly usage)\\b/i.test(name(e).trim())); "
-        "const raw=meter?.getAttribute('aria-valuenow') ?? meter?.value ?? meter?.getAttribute('aria-valuetext'); "
-        "const used=parseFloat(raw); "
-        "if(!meter || !Number.isFinite(used) || Math.abs(used-expectedUsed)>3) return {available:false}; "
-        "const match=/reset for free|réinitialiser gratuitement|reinitialiser gratuitement/i; "
-        "const scopeOf=b=>{ for(let p=b.parentElement,n=0;p&&n<4;p=p.parentElement,n++){ "
-        "const t=(p.textContent||'').slice(0,350).toLowerCase(); if(t.length>260) continue; "
-        "const weekly=/weekly|semaine|hebdomadaire|7.day/.test(t); "
-        "const session=/five.hour|5.hour|5 h|session/.test(t); "
-        "if(weekly!==session) return weekly?'weekly':'session'; } return 'unknown'; }; "
+        "const used=parseFloat(meter?.getAttribute('aria-valuenow') ?? meter?.value ?? meter?.getAttribute('aria-valuetext')); "
+        "if(meter && Number.isFinite(used) && Math.abs(used-expectedUsed)>3) return {ready:false}; "
+        "const match=/reset\\s+for\\s+free|r[ée]initialiser\\s+gratuitement/i; "
+        "const months={janv:0,jan:0,févr:1,fevr:1,feb:1,mars:2,mar:2,avr:3,apr:3,mai:4,may:4,juin:5,jun:5,juil:6,jul:6,août:7,aout:7,aug:7,sept:8,sep:8,oct:9,nov:10,déc:11,dec:11}; "
+        "const parseDay=t=>{ const m=t.match(/(\\d{1,2})\\s+([a-zéû]+)\\.?(?:\\s+(\\d{4}))?|([a-z]+)\\.?\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?/i); if(!m) return null; "
+        "const day=+(m[1]||m[5]), key=(m[2]||m[4]||'').toLowerCase(), month=months[key]??months[key.slice(0,4)]??months[key.slice(0,3)]; "
+        "if(month==null||!(day>=1&&day<=31)) return null; const now=new Date(); let year=+(m[3]||m[6])||now.getFullYear(); "
+        "let d=new Date(year,month,day,23,59,59); if(!(m[3]||m[6]) && d<now-86400000) d=new Date(year+1,month,day,23,59,59); return Math.floor(d/1000); }; "
+        "const credits=[]; "
         "for(const b of document.querySelectorAll('button,[role=button]')){ "
-        "if(b.disabled || b.closest('[aria-hidden=true]') || getComputedStyle(b).display==='none') continue; "
-        "if(match.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||''))) "
-        "return {available:true,scope:scopeOf(b)}; } return {available:false};";
+        // Un bouton désactivé reste un crédit détenu (claude.ai ne l'active qu'à certains moments) :
+        // il est compté, marqué non utilisable pour l'instant.
+        "if(b.closest('[aria-hidden=true]') || getComputedStyle(b).display==='none') continue; "
+        "if(!match.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||''))) continue; "
+        "let row=b.parentElement; for(let n=0;row&&n<4&&!/expir/i.test(row.innerText||'');n++) row=row.parentElement; "
+        "const text=((row||b.parentElement)?.innerText||'').replace(/\\s+/g,' ').trim(); "
+        "if(text.length>240) { credits.push({usable:!b.disabled}); continue; } "
+        "const exp=text.match(/(?:expiration|expire[sd]?|expires on|expire le)\\s*:?\\s*([^·|]{3,30}?)(?=\\s*(?:réinitialiser|reset for|$))/i); "
+        "const title=text.split(/expiration|expire/i)[0].replace(match,'').replace(/[\\uE000-\\uF8FF]/g,'').trim().slice(0,60); "
+        "const scope=/5\\s*h|five.hour|session/i.test(text)?'session':/complète|full|hebdo|week/i.test(text)?'weekly':'unknown'; "
+        "credits.push({title, expiryText:exp?exp[1].trim():'', expiresAt:exp?parseDay(exp[1]):null, scope, usable:!(b.disabled||b.getAttribute('aria-disabled')==='true')}); } "
+        "const section=/réinitialisation de la limite|limit reset/i.test(body); "
+        "return {ready:true, section, credits};";
     [self.webView callAsyncJavaScript:script arguments:@{@"expectedUsed": @(expectedUsed)} inFrame:nil
                        inContentWorld:WKContentWorld.pageWorld completionHandler:^(id result, NSError *error) {
-        if (!error && [result isKindOfClass:NSDictionary.class] && [result[@"available"] boolValue]) {
-            NSString *scope = [@[@"weekly", @"session"] containsObject:result[@"scope"]] ? result[@"scope"] : @"unknown";
-            completion(@{@"status": @"available", @"scope": scope,
-                         @"observedAt": @((long long)NSDate.date.timeIntervalSince1970)});
-            return;
+        if (!error && [result isKindOfClass:NSDictionary.class] && [result[@"ready"] boolValue]) {
+            NSArray *raw = [result[@"credits"] isKindOfClass:NSArray.class] ? result[@"credits"] : @[];
+            NSMutableArray *credits = [NSMutableArray array];
+            for (NSDictionary *credit in raw) {
+                if (![credit isKindOfClass:NSDictionary.class]) continue;
+                NSMutableDictionary *row = [NSMutableDictionary dictionary];
+                if ([credit[@"title"] isKindOfClass:NSString.class] && [credit[@"title"] length]) row[@"title"] = credit[@"title"];
+                if ([credit[@"expiresAt"] isKindOfClass:NSNumber.class] && [credit[@"expiresAt"] doubleValue] > 0) row[@"expiresAt"] = @([credit[@"expiresAt"] longLongValue]);
+                else if ([credit[@"expiryText"] isKindOfClass:NSString.class] && [credit[@"expiryText"] length]) row[@"expiryText"] = credit[@"expiryText"];
+                if ([credit[@"usable"] isKindOfClass:NSNumber.class] && ![credit[@"usable"] boolValue]) row[@"usable"] = @NO;
+                [credits addObject:row];
+            }
+            long long observed = (long long)NSDate.date.timeIntervalSince1970;
+            if (credits.count) {
+                NSString *scope = [raw.firstObject isKindOfClass:NSDictionary.class] && [@[@"weekly", @"session"] containsObject:raw.firstObject[@"scope"]] ? raw.firstObject[@"scope"] : @"unknown";
+                completion(@{@"status": @"available", @"scope": scope, @"count": @(credits.count), @"credits": credits, @"observedAt": @(observed)});
+                return;
+            }
+            // Section lue sans bouton actif : aucun reset, affirmé seulement quand la section existe.
+            if ([result[@"section"] boolValue]) { completion(@{@"status": @"none", @"observedAt": @(observed)}); return; }
         }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self probeManualResetForExpectedUsed:expectedUsed attempts:attempts - 1 completion:completion];

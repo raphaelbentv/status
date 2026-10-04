@@ -80,6 +80,84 @@ NSDictionary *TMOpenAIExtraCredits(NSDictionary *snapshot) {
     return out;
 }
 
+static NSTimeInterval TMParseBillingDate(id value) {
+    if ([value isKindOfClass:NSNumber.class]) { double t=[value doubleValue]; return t>1e11?t/1000:t; }
+    if (![value isKindOfClass:NSString.class] || ![value length]) return 0;
+    static NSISO8601DateFormatter *full, *plain, *day;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        full=[NSISO8601DateFormatter new]; full.formatOptions=NSISO8601DateFormatWithInternetDateTime|NSISO8601DateFormatWithFractionalSeconds;
+        plain=[NSISO8601DateFormatter new]; plain.formatOptions=NSISO8601DateFormatWithInternetDateTime;
+        day=[NSISO8601DateFormatter new]; day.formatOptions=NSISO8601DateFormatWithFullDate;
+    });
+    NSDate *date=[full dateFromString:value] ?: [plain dateFromString:value] ?: [day dateFromString:value];
+    return date ? date.timeIntervalSince1970 : 0;
+}
+
+NSDictionary *TMBillingFromPeriod(NSTimeInterval periodEnd, NSString *plan, NSTimeInterval now) {
+    if (!(periodEnd > 946684800)) return @{@"status":@"unknown"};
+    NSDate *next=[NSDate dateWithTimeIntervalSince1970:periodEnd];
+    BOOL estimated=NO;
+    NSCalendar *calendar=[NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+    calendar.timeZone=[NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+    for (NSInteger months=1; next.timeIntervalSince1970<=now && months<=24; months++) {
+        next=[calendar dateByAddingUnit:NSCalendarUnitMonth value:months toDate:[NSDate dateWithTimeIntervalSince1970:periodEnd] options:0];
+        estimated=YES;
+    }
+    if (next.timeIntervalSince1970<=now) return @{@"status":@"unknown"};
+    NSMutableDictionary *billing=[@{@"status":@"known", @"nextAt":@((long long)next.timeIntervalSince1970), @"estimated":@(estimated)} mutableCopy];
+    if ([plan isKindOfClass:NSString.class] && plan.length) billing[@"plan"]=plan;
+    return billing;
+}
+
+NSDictionary *TMOpenAIBillingFromIDToken(NSString *idToken, NSTimeInterval now) {
+    NSArray *parts=[idToken isKindOfClass:NSString.class] ? [idToken componentsSeparatedByString:@"."] : @[];
+    if (parts.count<2) return @{@"status":@"unknown"};
+    NSMutableString *payload=[[[parts[1] stringByReplacingOccurrencesOfString:@"-" withString:@"+"]
+        stringByReplacingOccurrencesOfString:@"_" withString:@"/"] mutableCopy];
+    while (payload.length%4) [payload appendString:@"="];
+    NSData *data=[[NSData alloc] initWithBase64EncodedString:payload options:0];
+    NSDictionary *claims=data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSDictionary *auth=[claims isKindOfClass:NSDictionary.class] ? claims[@"https://api.openai.com/auth"] : nil;
+    if (![auth isKindOfClass:NSDictionary.class]) return @{@"status":@"unknown"};
+    return TMBillingFromPeriod(TMParseBillingDate(auth[@"chatgpt_subscription_active_until"]), auth[@"chatgpt_plan_type"], now);
+}
+
+NSDictionary *TMClaudeBillingFromSubscription(id json, NSTimeInterval now) {
+    if (![json isKindOfClass:NSDictionary.class]) return @{@"status":@"unknown"};
+    // Forme non documentée : on accepte les noms usuels, à plat ou sous « subscription ».
+    NSArray *containers=@[json, [json[@"subscription"] isKindOfClass:NSDictionary.class] ? json[@"subscription"] : @{}];
+    for (NSDictionary *container in containers)
+        for (NSString *key in @[@"next_charge_date", @"next_billing_date", @"current_period_end", @"renewal_date", @"renews_at", @"period_end"]) {
+            NSTimeInterval t=TMParseBillingDate(container[key]);
+            if (t>0) {
+                return TMBillingFromPeriod(t, [container[@"plan"] isKindOfClass:NSString.class] ? container[@"plan"] : nil, now);
+            }
+        }
+    return @{@"status":@"unknown"};
+}
+
+NSArray *TMResetCreditDetails(id raw) {
+    if (![raw isKindOfClass:NSArray.class]) return nil;  // nil = détail non fourni, distinct de « aucun »
+    NSMutableArray *credits = [NSMutableArray array];
+    for (NSDictionary *credit in raw) {
+        if (![credit isKindOfClass:NSDictionary.class]) continue;
+        if ([credit[@"status"] isKindOfClass:NSString.class] && ![credit[@"status"] isEqual:@"available"]) continue;
+        NSMutableDictionary *row = [NSMutableDictionary dictionary];
+        id expires = credit[@"expiresAt"];
+        if ([expires isKindOfClass:NSNumber.class] && [expires doubleValue] > 0) row[@"expiresAt"] = @([expires longLongValue]);
+        for (NSString *key in @[@"title", @"resetType"])
+            if ([credit[key] isKindOfClass:NSString.class] && [credit[key] length]) row[key] = credit[key];
+        [credits addObject:row];
+    }
+    // Le premier à expirer d'abord ; un crédit sans expiration passe en dernier.
+    [credits sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        double x = a[@"expiresAt"] ? [a[@"expiresAt"] doubleValue] : INFINITY, y = b[@"expiresAt"] ? [b[@"expiresAt"] doubleValue] : INFINITY;
+        return x < y ? NSOrderedAscending : x > y ? NSOrderedDescending : NSOrderedSame;
+    }];
+    return credits;
+}
+
 NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSDictionary *grant) {
     NSDictionary *extra = [usage[@"extra_usage"] isKindOfClass:NSDictionary.class] ? usage[@"extra_usage"] : @{};
     NSDictionary *source = [spend isKindOfClass:NSDictionary.class] && spend.count ? spend : extra;
@@ -166,10 +244,12 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
         CFGetTypeID((__bridge CFTypeRef)rawCredits) != CFBooleanGetTypeID() &&
         [rawCredits doubleValue] >= 0 && isfinite([rawCredits doubleValue]);
     NSInteger credits = creditsKnown ? [rawCredits integerValue] : 0;
-    NSDictionary *manualReset = creditsKnown && !error.length
-        ? @{@"status": credits > 0 ? @"available" : @"none", @"count": @(credits),
-            @"observedAt": @((long long)NSDate.date.timeIntervalSince1970)}
-        : @{@"status": @"unknown"};
+    NSMutableDictionary *manualReset = creditsKnown && !error.length
+        ? [@{@"status": credits > 0 ? @"available" : @"none", @"count": @(credits),
+            @"observedAt": @((long long)NSDate.date.timeIntervalSince1970)} mutableCopy]
+        : [@{@"status": @"unknown"} mutableCopy];
+    NSArray *details = TMResetCreditDetails(creditSummary[@"credits"]);
+    if (creditsKnown && details) manualReset[@"credits"] = details;
     return @{
         @"connected": @(connected), @"connecting": @(connecting),
         @"email": connected && [account[@"email"] isKindOfClass:NSString.class] ? account[@"email"] : @"",

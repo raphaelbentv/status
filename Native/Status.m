@@ -2284,6 +2284,7 @@ static NSDictionary *TMAlertDefaults(void) {
         [NSString stringWithFormat:@"%@#%@", provider, accountId], NSDate.date.timeIntervalSince1970);
     payload[@"orgId"] = account[@"orgId"] ?: @"";
     payload[@"orgName"] = account[@"orgName"] ?: @"";
+    if ([provider isEqualToString:TMProviderOpenAI]) payload[@"billing"] = [self openAIBillingForAccount:accountId];
     if ([provider isEqualToString:TMProviderClaude]) {
         payload[@"claudeSource"] = account[@"claudeSource"] ?: @"";
         payload[@"cookieConfigured"] = ([account[@"claudeSource"] isEqual:@"code"] || [account[@"claudeSource"] isEqual:@"web"]) ? @NO : @([self cookieForAccount:accountId].length > 0);
@@ -2293,6 +2294,41 @@ static NSDictionary *TMAlertDefaults(void) {
         }
     }
     return payload;
+}
+
+// Prochaine facturation OpenAI : lue dans l'id_token ChatGPT du CODEX_HOME du compte, sans réseau.
+// Le fichier n'est relu que s'il a changé ; le report mensuel d'une échéance passée est recalculé.
+- (NSDictionary *)openAIBillingForAccount:(NSString *)accountId {
+    static NSMutableDictionary *cache;
+    if (!cache) cache = [NSMutableDictionary dictionary];
+    NSString *path = [[self codexHomeForAccount:accountId] stringByAppendingPathComponent:@"auth.json"];
+    NSDate *modified = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil].fileModificationDate;
+    if (!modified) return @{@"status":@"unknown"};
+    NSDictionary *entry = cache[accountId];
+    if (![entry[@"modified"] isEqual:modified]) {
+        NSData *data = [NSData dataWithContentsOfFile:path];
+        NSDictionary *auth = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        NSDictionary *tokens = [auth isKindOfClass:NSDictionary.class] ? auth[@"tokens"] : nil;
+        NSString *token = [tokens isKindOfClass:NSDictionary.class] && [tokens[@"id_token"] isKindOfClass:NSString.class] ? tokens[@"id_token"] : @"";
+        entry = @{@"modified": modified, @"token": token};
+        cache[accountId] = entry;
+    }
+    return TMOpenAIBillingFromIDToken(entry[@"token"], NSDate.date.timeIntervalSince1970);
+}
+
+// Claude : échéance de subscription_details quand le relevé est en direct ; sinon la dernière connue.
+// Les noms de champs (jamais leurs valeurs) sont journalisés une fois : la forme n'est pas documentée.
+- (NSDictionary *)claudeBillingFrom:(NSDictionary *)json live:(BOOL)live account:(NSString *)accountId {
+    id details = json[@"subscription_details"];
+    static BOOL logged = NO;
+    if (!logged && [details isKindOfClass:NSDictionary.class]) {
+        logged = YES;
+        NSLog(@"Status billing: subscription_details keys=%@", [[details allKeys] componentsJoinedByString:@","]);
+    }
+    NSDictionary *billing = live ? TMClaudeBillingFromSubscription(details, NSDate.date.timeIntervalSince1970) : nil;
+    if ([billing[@"status"] isEqual:@"known"]) return billing;
+    NSDictionary *previous = [self knownPayload:accountId][@"billing"];
+    return [previous isKindOfClass:NSDictionary.class] ? previous : @{@"status":@"unknown"};
 }
 
 // Tous les comptes, dans l'ordre d'affichage, chacun avec son payload courant.
@@ -2698,6 +2734,7 @@ static NSDictionary *TMAlertDefaults(void) {
         [self saveAccountRegistry];
         [self setPayload:@{@"windows":windows,
             @"extraCredits":TMClaudeExtraCredits(json, json[@"overage_spend_limit"], json[@"prepaid/credits"]),
+            @"billing":TMClaudeBillingFromSubscription(json[@"subscription_details"], NSDate.date.timeIntervalSince1970),
             @"capturedAt":@((long long)NSDate.date.timeIntervalSince1970),
             @"connected":@YES, @"liveSource":@YES, @"stale":@NO,
             @"manualReset":@{@"status":@"unknown"}, @"error":@""} forAccount:accountId];
@@ -2817,6 +2854,7 @@ static NSDictionary *TMAlertDefaults(void) {
         [self setPayload:@{
             @"windows": windows, @"capturedAt": @(capturedAt),
             @"extraCredits": live ? TMClaudeExtraCredits(json, json[@"overage_spend_limit"], json[@"prepaid/credits"]) : @{@"status":@"unknown"},
+            @"billing": [self claudeBillingFrom:json live:live account:accountId],
             @"stale": @(!live && capturedAt > 0 && age > 1800), @"liveSource": @(live),
             @"cookieConfigured": @(!web), @"connected": @(live || [[self knownPayload:accountId][@"connected"] boolValue]), @"orgId": orgId,
             @"manualReset": @{@"status": @"unknown"},

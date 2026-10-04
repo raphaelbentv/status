@@ -30,6 +30,17 @@ NSArray *TMClaudeWindowsFromUsagePayload(NSDictionary *payload);
 // Crédits supplémentaires, distincts des crédits de reset et des quotas inclus.
 NSDictionary *TMOpenAIExtraCredits(NSDictionary *snapshot);
 NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSDictionary *grant);
+// Crédits de reset manuel disponibles (Codex rateLimitResetCredits.credits) : expiresAt, title,
+// resetType, triés par expiration. nil quand le détail n'est pas fourni.
+NSArray *TMResetCreditDetails(id raw);
+// Prochaine facturation de l'abonnement : { status:"known", nextAt, estimated, plan? } ou
+// { status:"unknown" }. Une échéance passée est reportée de mois en mois (estimated:YES) plutôt
+// que d'afficher une date révolue : le jeton local n'est rafraîchi qu'épisodiquement.
+NSDictionary *TMBillingFromPeriod(NSTimeInterval periodEnd, NSString *plan, NSTimeInterval now);
+// OpenAI : claims « https://api.openai.com/auth » de l'id_token ChatGPT (chatgpt_subscription_active_until).
+NSDictionary *TMOpenAIBillingFromIDToken(NSString *idToken, NSTimeInterval now);
+// Claude : réponse de /api/organizations/{org}/subscription_details (champs tolérés : voir .m).
+NSDictionary *TMClaudeBillingFromSubscription(id json, NSTimeInterval now);
 // Écarte les fenêtres dont le reset est passé : leur pourcentage ne veut plus rien dire.
 NSArray *TMDropExpiredWindows(NSArray *windows);
 

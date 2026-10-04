@@ -197,8 +197,6 @@
   .wk-legend{display:flex;gap:18px;margin-top:10px;font-size:12px;color:var(--muted)}
   .wk-leg i{display:inline-block;width:11px;height:2px;vertical-align:middle;margin-right:6px}
   .metric-empty{color:var(--muted);padding:26px 0;text-align:center;font-size:12px}
-  .forecast{margin-top:7px;font-size:12px;color:var(--muted);border-top:1px dashed var(--hair);padding-top:6px}
-  .forecast.soon{color:var(--amber)}
   .metric-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:16px}
   .metric-table th,.metric-table td{text-align:right;padding:6px 10px;border-bottom:1px solid var(--hair)}
   .metric-table th{color:var(--muted);font-weight:400;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
@@ -313,6 +311,9 @@
   .fan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
   .fan-actions strong{flex:1;font-size:12px;color:var(--blue)}
   .fan-actions .seg{padding:5px 8px;font-size:12px}
+  .billing-line{font-size:12px;color:var(--muted);margin:4px 0 10px}.billing-line.soon{color:var(--amber)}
+  .reset-expiries{margin:4px 0 0;padding-left:16px;font-weight:400}.reset-expiries li{margin-top:2px}.reset-expiries li.soon{color:var(--amber)}
+  .reset-later{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -361,7 +362,8 @@ const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.duration
 const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
 const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
-const windowsFor=(providerId,account)=>{const windows=account?.windows||[];return providerId==='openai'?windows.filter(w=>isWeekly(w)&&!isCodexSpark(w)):windows};
+// Les sous-quotas par modèle (Fable) et Spark ne sont pas affichés : seul le volume général compte.
+const windowsFor=(providerId,account)=>{const windows=(account?.windows||[]).filter(w=>!isScopedWeekly(w)&&!/fable/i.test(`${w.windowId||''} ${w.label||''}`));return providerId==='openai'?windows.filter(w=>isWeekly(w)&&!isCodexSpark(w)):windows};
 const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
 // data.accounts est une liste de payloads, un par compte, déjà dans l'ordre d'affichage.
 const accountsOf=(data,providerId)=>(data?.accounts||[]).filter(a=>a.provider===providerId);
@@ -482,15 +484,6 @@ function sparkline(history,key,color){
     <circle class="tip" cx="${w}" cy="${y(last.v).toFixed(1)}" r="2"/></svg>`;
 }
 
-// « épuisé jeudi vers 16 h » fait décider ; « 78 % » ne fait que constater. Absent quand le
-// natif juge la prévision non fiable — jamais de chiffre inventé pour remplir la ligne.
-function forecastLine(key){
-  const at=appData?.forecasts?.[key];
-  if(!at)return '';
-  const hours=(at-Date.now())/3600000;
-  const when=new Intl.DateTimeFormat('fr-FR',hours<24?{hour:'2-digit',minute:'2-digit'}:{weekday:'long',hour:'2-digit'}).format(new Date(at));
-  return `<div class="forecast ${hours<12?'soon':''}">au rythme actuel, épuisé ${hours<24?'à ':''}${when}</div>`;
-}
 // Coût équivalent API (feature 16). « usage terminal » partout : le web n'est pas journalisé.
 // Deux devises côte à côte. L'euro vient d'un taux daté (costs.eurPerUsd), pas d'un appel réseau.
 // Montants en chiffres entiers avec séparateur de milliers (« 79 739 $ »), jamais abrégés en « k ».
@@ -511,12 +504,28 @@ function manualResetLine(w,account){
     if(account.provider==='claude'&&reset.scope==='session'&&isWeekly(w))return '';
     const count=Number.isInteger(reset.count)&&reset.count>0?`${reset.count} disponible${reset.count>1?'s':''}`:'disponible';
     const detail=account.provider==='claude'&&reset.scope==='unknown'?' · portée à voir dans Claude':'';
-    return `<div class="manual-reset available">Reset manuel : ${count}${detail}</div>`;
+    return `<div class="manual-reset available">Reset manuel : ${count}${detail}${resetExpiries(reset)}</div>`;
   }
-  if(status==='none')return '<div class="manual-reset">Reset manuel : aucun disponible</div>';
-  return `<div class="manual-reset">Reset manuel : ${account.provider==='claude'?'à vérifier dans Claude':'statut non vérifié'}</div>`;
+  return '';  // « aucun » ou « non vérifié » n'aide à rien décider
 }
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${forecastLine(key)}${manualResetLine(w,account)}</div>`}
+// Expiration des resets manuels : date et délai de chaque crédit (OpenAI), ou la mention lue sur
+// la page Usage de Claude. Rien quand la source ne la donne pas — jamais de date supposée.
+function resetExpiries(reset){
+  const credits=Array.isArray(reset.credits)?reset.credits:[];
+  if(credits.length){
+    const fmt=t=>{const days=Math.ceil((t-Date.now()/1000)/86400);
+      return `${new Intl.DateTimeFormat('fr-FR',{day:'numeric',month:'short'}).format(new Date(t*1000))} (${days<=0?'aujourd’hui':days===1?'demain':'dans '+days+' j'})`;};
+    // « sans expiration » n'a de sens que pour OpenAI (champ explicite) ; une mention Claude non
+    // convertie en date est reprise telle quelle, et une ligne sans information est omise.
+    const rows=credits.map(c=>{const title=(c.title?esc(c.title)+' · ':'')+(c.usable===false?'<span class="reset-later">pas utilisable pour l’instant</span> · ':'');
+      if(Number.isFinite(c.expiresAt))return `<li class="${c.expiresAt-Date.now()/1000<3*86400?'soon':''}">${title}expire le ${fmt(c.expiresAt)}</li>`;
+      if(c.expiryText)return `<li>${title}expiration : ${esc(c.expiryText)}</li>`;
+      return c.resetType?`<li>${title}sans expiration</li>`:'';}).filter(Boolean);
+    return rows.length?`<ul class="reset-expiries">${rows.join('')}</ul>`:'';
+  }
+  return reset.expiryText?`<span class="reset-expiry"> · ${esc(reset.expiryText)}</span>`:'';
+}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
@@ -560,33 +569,20 @@ function providerCostTotal(id){
   return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">Équivalent API sur ${label} · tous comptes${partial?' · estimation partielle':id==='openai'?' · approximatif':''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}<div class="summary-note">Estimation au tarif API, pas une facture. Usage terminal uniquement.${id==='openai'?' Tarif standard ; majorations Fast et contexte long non incluses.':''}</div>${modelBreakdown(p)}</div>`;
 }
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
-function weeklyResetEstimate(account){
-  const s=account?.weeklyResetStats||{},count=Number.isInteger(s.observationCount)?s.observationCount:0;
-  const date=t=>new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit'}).format(new Date(t*1000));
-  let line=`Prévision : en apprentissage (${count}/3)`;
-  if(count>=3){
-    if(s.status==='estimated'&&Number.isFinite(s.earliestAt)&&Number.isFinite(s.latestAt)&&s.latestAt>=s.earliestAt)
-      line=`Reset estimé : ${date(s.earliestAt)} – ${date(s.latestAt)} · confiance ${s.confidence==='moderate'?'modérée':'faible'}`;
-    else if(s.status==='overdue')line='Prévision dépassée · en attente du reset';
-    else if(s.status==='irregular')line='Prévision indisponible · rythme irrégulier';
-  }
-  if(s.basis==='public'){
-    if(s.status==='publicEstimated'&&Number.isFinite(s.estimatedAt))line=`Reset possible vers le ${date(s.estimatedAt)} · repère public · confiance faible`;
-    else if(s.status==='publicOverdue')line='Repère public dépassé · en attente';
-    else if(s.status==='publicStale')line='Repère public à actualiser';
-  }
-  const publicNote=s.publicReference?` Référence publique au 11/09/2026 : moyenne ${s.publicReference.meanGapDays} j, maximum ${s.publicReference.maximumGapDays} j. Resets exceptionnels${s.publicReference.scope==='Max'?' ; dernier annoncé pour Max uniquement':''}, sans garantie pour ce compte.`:'';
-  const cadence=Number.isFinite(s.medianSeconds)&&s.medianSeconds>0?` Intervalle médian : ${new Intl.NumberFormat('fr-FR',{maximumFractionDigits:1}).format(s.medianSeconds/86400)} j.`:'';
-  return `<div class="weekly-reset-estimate" style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px" title="${esc(`${count} renouvellements observés sur 180 jours.${cadence}${publicNote} Estimation indicative du quota hebdomadaire global, distincte de l’échéance annoncée.`)}">${esc(line)}</div>`;
-}
-function lastWeeklyReset(account){
-  const t=account?.lastWeeklyResetObservedAt;
-  const valid=typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000;
-  const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
-  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
+// Prochaine facturation de l'abonnement. « vers le » quand la date est reportée d'une échéance
+// passée (jeton OpenAI pas encore rafraîchi) : utile pour s'organiser, pas une date contractuelle.
+function billingLine(account){
+  const b=account?.billing;
+  if(b?.status!=='known'||!Number.isFinite(b.nextAt))return '';
+  const at=new Date(b.nextAt*1000),days=Math.ceil((b.nextAt-Date.now()/1000)/86400);
+  const date=new Intl.DateTimeFormat('fr-FR',{day:'numeric',month:'long'}).format(at);
+  const when=days<=0?'aujourd’hui':days===1?'demain':`dans ${days} j`;
+  const plan=b.plan?` · ${esc(String(b.plan).replace(/^\w/,c=>c.toUpperCase()))}`:'';
+  return `<div class="billing-line ${days<=3?'soon':''}" title="${b.estimated?'Date reportée depuis la dernière échéance connue ; à confirmer.':'Date de la prochaine facturation de l’abonnement.'}">Facturation ${b.estimated?'vers le':'le'} ${date} · ${when}${plan}</div>`;
 }
 function extraCreditsCard(account){
   const c=account.extraCredits||{},known=c.status==='known';
+  if(!known)return '';  // solde inconnu : rien plutôt qu'une carte vide
   const fmt=n=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(n);
   const money=(n,currency=c.currency)=>{if(typeof n!=='number'||!Number.isFinite(n))return 'indisponible';
     return /^[A-Z]{3}$/.test(currency||'')?new Intl.NumberFormat('fr-FR',{style:'currency',currency}).format(n):`${fmt(n)} (devise non fournie)`;};
@@ -609,21 +605,14 @@ function accountBlock(account,history){
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':`Non connecté.<br><button class="account-action" onclick="goToView('connections')">Ouvrir Connexions</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ mesure ancienne · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
-  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${lastWeeklyReset(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${weeklyResetEstimate(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
-}
-function publicResetContext(provider){
-  const claude=provider==='claude';
-  const text=claude
-    ? 'Claude Reset Tracker : 11 resets depuis avril, moyenne 14,1 jours, pause maximale 50,7 jours. Dernier reset : 04/09, Max uniquement.'
-    : 'Codex Reset : moyenne 4,8 jours sur les 8 derniers intervalles, maximum 11 jours ; médiane sur 30 jours : 5,5 jours. Dernier reset : 08/09. Les crédits de reset offerts sont exclus de cette référence.';
-  return `<details class="public-reset-context" style="padding:12px 16px;color:var(--muted);font-size:12px;line-height:1.6"><summary>Fréquences publiées en ligne · repères au 11/09/2026</summary><p>${text}</p><p>Ces repères alimentent la prévision avant 3 observations personnelles, puis votre historique prend le relais. Ils expirent après 30 jours. Les annonces ne sont pas ajoutées à votre historique personnel.</p><button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-study':'codex-monitor'}'})">${claude?'Voir le relevé et la discussion':'Voir la cartographie Codex'}</button> <button class="account-action" onclick="send('openResetSource',{source:'${claude?'claude-help':'codex-history'}'})">${claude?'Règles Claude':'Voir les fréquences publiées'}</button></details>`;
+  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${billingLine(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 function providerBlock(provider,accounts,history){
   const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name}.<br><button class="account-action" onclick="goToView('connections')">Ajouter un compte</button></div>`;
   // Le fournisseur annonce combien de comptes il porte et ouvre l'endroit où on en ajoute : sans
   // ce chemin, « voir Connexions » n'était qu'une phrase, et l'ajout restait à découvrir.
   const manage=`<button class="provider-manage" onclick="goToView('connections')" title="Gérer les comptes ${provider.name}">gérer</button>`;
-  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${publicResetContext(provider.id)}${blocks}${providerCostTotal(provider.id)}</section>`;
+  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
 }
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur
 // une semaine glissante, à partir de l'historique horodaté. OpenAI y figure au même titre que
@@ -676,7 +665,6 @@ function weeklyChart(data){
     <svg class="wk-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${paths}</svg>
     <div class="wk-legend">${legend}</div></div>`;
 }
-const hasFable=accounts=>(accounts||[]).some(a=>(a.windows||[]).some(w=>/fable/i.test(w.windowId||w.label||'')&&Number(w.resetsAt)>Date.now()/1000));
 function usableWindows(account){return (account.windows||[]).filter(w=>typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&w.usedPercent>=0&&w.usedPercent<=100&&Number(w.resetsAt)>Date.now()/1000);}
 function availability(account){
   if(!isConnected(account.provider,account)||account.error||account.stale||(account.capturedAt&&Date.now()/1000-account.capturedAt>1800))return null;
@@ -729,7 +717,7 @@ function pinnedOptions(data,metric){
     const accounts=accountsOf(data,p.id);
     if(accounts.length<2)return;  // un seul compte : l'agrégat dit déjà exactement la même chose
     accounts.forEach(account=>{
-      const kinds=p.id==='openai'?[['weekly','sem.']]:[['weekly','sem.'],['session','5 h'],...(hasFable([account])?[['weekly-fable','Fable']]:[])];
+      const kinds=p.id==='openai'?[['weekly','sem.']]:[['weekly','sem.'],['session','5 h']];
       const buttons=kinds.map(([kind,label])=>{
         const value=`acct:${account.provider}:${account.accountId}:${kind}`;
         return `<button class="seg ${(data.prefs?.providerMenuMetrics?.[account.provider]||metric)===value?'on':''}" onclick="send('setMenuBarMetric',{value:'${value}'})">${label}</button>`;
@@ -780,7 +768,7 @@ function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claud
     const target=m.system||m.lowest?v:metricForWindow(p.providerMenuMetrics?.[m.provider]||metric,m.provider,m.kind);
     return `<button class="seg ${on?'on':''}" onclick="send('setMenuBarMetric',{value:'${target}'})">${l}</button>`},theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Barre des menus</h2><p>Ce que Status affiche en haut de l’écran, en permanence.</p></div></div><div class="settings">
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Icônes système dans la barre des menus</strong><small><strong>Cliquez un nom pour afficher ou masquer son icône.</strong> Pastille pleine : elle est visible dans la barre. Chaque icône est indépendante ; forme, couleur et contenu de son panneau se règlent sur la même ligne (« Panneau »). Les flèches ← → donnent l’ordre d’affichage (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône dans la barre pour ouvrir son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${hasFable(accountsOf(data,'claude'))?opt('claude:weekly-fable','Claude Fable'):''}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</section>
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>Icônes des fournisseurs</strong><small>OpenAI en bleu à gauche, Claude en orange à droite. La partie pleine représente le quota restant du compte sélectionné dans le popup, ou du compte le plus contraint en mode « tous ». Aucun symbole à côté. Un tiret indique une donnée indisponible.</small></div>${['openai','claude'].map(provider=>`<div style="margin-top:16px"><strong>${provider==='openai'?'OpenAI':'Claude'}</strong><div class="segmented" style="margin:8px 0;flex-wrap:wrap">${ICON_DESIGNS.map(([v,l])=>`<button class="seg ${(p.providerIconStyles?.[provider]||'boldRing')===v?'on':''}" onclick="send('setProviderMenuIconStyle',{provider:'${provider}',value:'${v}'})">${l}</button>`).join('')}</div><button class="button" onclick="send('previewMenuIcons',{provider:'${provider}'})">Comparer pour ${provider==='openai'?'OpenAI':'Claude'}</button></div>`).join('')}<button class="button" style="margin-top:12px" onclick="send('closeMenuIconPreviews')">Fermer l’aperçu</button><div class="hint">Cliquer sur un aperçu choisit le dessin pour le fournisseur sélectionné. Niveaux fictifs dans l’aperçu.</div></section>
 </div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></section>
@@ -858,7 +846,7 @@ function claudePanel(account){
 }
 function accountPanel(account,name,subtitle,primary,secondary,note){
   const common=(account.provider==='openai'&&account.email?'':connectionAction('renameAccount',account,'Renommer'))+connectionAction('removeAccount',account,'Retirer');
-  return `<div class="quota-block" style="--provider:${providerColor(account.provider)}"><div class="account-row"><div class="account-copy"><strong>${name}</strong><small>${esc(subtitle)}</small></div><div class="account-actions">${primary}<details class="account-menu"><summary aria-label="Actions pour ${esc(account.label)}">⋯</summary><div class="account-menu-items">${secondary}${common}</div></details></div></div><p class="connection-note">${esc(note)}</p>${lastWeeklyReset(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
+  return `<div class="quota-block" style="--provider:${providerColor(account.provider)}"><div class="account-row"><div class="account-copy"><strong>${name}</strong><small>${esc(subtitle)}</small></div><div class="account-actions">${primary}<details class="account-menu"><summary aria-label="Actions pour ${esc(account.label)}">⋯</summary><div class="account-menu-items">${secondary}${common}</div></details></div></div><p class="connection-note">${esc(note)}</p>${billingLine(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 // Écrans (feature luminosité). Un curseur par écran pilotable, indépendant des autres — pas de
 // mode « lié » (voir design). L'écriture n'a lieu qu'au relâchement (« change »), pas à chaque
