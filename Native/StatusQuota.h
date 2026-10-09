@@ -100,6 +100,9 @@ NSDictionary *TMEmptyClaudeAccount(void);
 NSString *TMSupportDirectory(void);
 NSString *TMHistoryPath(void);
 NSArray *TMLoadHistory(void);
+// Historique allégé pour l'affichage : tous les points des 3 dernières heures, puis le dernier
+// point de chaque tranche de 20 minutes. L'historique sur disque n'est pas modifié.
+NSArray *TMHistoryForDisplay(NSArray *history, NSTimeInterval now);
 
 // Cache du dernier état de comptes connu (volumes courants), pour réafficher les volumes tout de
 // suite au lancement au lieu d'attendre le premier sondage. Écriture atomique. `accounts` est un

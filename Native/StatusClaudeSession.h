@@ -55,6 +55,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)checkManualResetAvailabilityForWeeklyUsedPercent:(double)expectedUsed
                                               completion:(void (^)(NSDictionary *availability))completion;
 
+// Ramène la session sur le document léger (robots.txt) pour libérer l'application claude.ai.
+// À appeler après un relevé qui ne sera pas suivi d'une lecture de la page Utilisation.
+- (void)park;
+
 // GET /api/organizations — sert à résoudre l'org id d'un compte à partir de son seul cookie, la
 // CLI locale n'étant plus consultée. Renvoie [{ uuid, name }].
 - (void)fetchOrganizations:(void (^)(NSArray * _Nullable organizations, NSError * _Nullable error))completion;

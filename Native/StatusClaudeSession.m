@@ -20,7 +20,17 @@ static NSError *TMSessionError(NSString *message) {
 // comme un cookie à recoller.
 @property NSMutableArray<void (^)(BOOL ok)> *loadWaiters;
 @property (copy, nullable) NSString *seededCookie;
+// Mémoire : l'application web claude.ai pèse jusqu'à 1-2 Go par WebContent quand elle reste
+// chargée. Les appels d'API partent donc d'un document minuscule de la même origine
+// (robots.txt) ; l'application complète n'est chargée que pour franchir un défi Cloudflare ou
+// lire la page Utilisation, puis la session y revient (« park »).
+@property BOOL needsFullPage;
+@property double lastProbeAt;
+@property (nullable) NSDictionary *lastAvailability;
 @end
+
+static NSString *const TMClaudeLightURL = @"https://claude.ai/robots.txt";
+static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
 
 @implementation TMClaudeSession
 
@@ -145,7 +155,7 @@ static NSError *TMSessionError(NSString *message) {
     [self.loadWaiters addObject:[completion copy]];
     if (self.loadWaiters.count > 1) return;  // un chargement est déjà en vol : on s'y accroche
     [[self ensureWebView] loadRequest:
-        [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://claude.ai/settings/usage"]]];
+        [NSURLRequest requestWithURL:[NSURL URLWithString:self.needsFullPage ? TMClaudeUsageURL : TMClaudeLightURL]]];
     // Cloudflare interpose parfois un défi qui se résout par une redirection JavaScript que WebKit
     // ne signale pas toujours comme une nouvelle navigation : se fier au seul didFinishNavigation
     // laissait l'app bloquée après un redémarrage, quand la réputation IP force un défi persistant.
@@ -166,10 +176,14 @@ static NSError *TMSessionError(NSString *message) {
         [self finishLoad:NO];
         return;
     }
-    [self.webView evaluateJavaScript:@"document.title" completionHandler:^(id title, NSError *error) {
+    [self.webView evaluateJavaScript:@"[document.title, location.pathname]" completionHandler:^(id state, NSError *error) {
         if (!self.loadWaiters.count) return;  // résolu entre-temps
+        NSArray *pair = [state isKindOfClass:NSArray.class] && [state count] == 2 ? state : @[@"", @""];
+        id title = pair[0];
         BOOL challenging = [title isKindOfClass:NSString.class] && [(NSString *)title containsString:@"Just a moment"];
-        BOOL loaded = [title isKindOfClass:NSString.class] && [(NSString *)title length] && !challenging;
+        // Le document léger (texte brut) n'a pas de titre : son chemin suffit.
+        BOOL light = [pair[1] isEqual:@"/robots.txt"];
+        BOOL loaded = !challenging && (light || ([title isKindOfClass:NSString.class] && [(NSString *)title length]));
         if (loaded) {
             self.loaded = YES;
             [self finishLoad:YES];
@@ -206,6 +220,13 @@ static NSError *TMSessionError(NSString *message) {
                            inContentWorld:WKContentWorld.pageWorld
                         completionHandler:^(id result, NSError *error) {
             if (error || ![result isKindOfClass:NSString.class]) {
+                // Depuis le document léger, un échec signale le plus souvent un défi Cloudflare à
+                // franchir : une seule nouvelle tentative, depuis l'application complète.
+                if (!optional && !self.needsFullPage && !self.loginVisible) {
+                    self.needsFullPage = YES; self.loaded = NO;
+                    [self fetchJSON:path optional:optional completion:completion];
+                    return;
+                }
                 // Une session périmée nous renvoie à la page de connexion, où le fetch part en 401.
                 if (!optional) self.loaded = NO;
                 completion(nil, TMSessionError(@"Session Claude indisponible. Vérifiez votre connexion web et réessayez."));
@@ -244,13 +265,23 @@ static NSError *TMSessionError(NSString *message) {
 - (void)checkManualResetAvailabilityForWeeklyUsedPercent:(double)expectedUsed
                                               completion:(void (^)(NSDictionary *availability))completion {
     NSDictionary *unknown = @{@"status": @"unknown"};
-    if (!isfinite(expectedUsed) || expectedUsed < 0 || expectedUsed > 100) { completion(unknown); return; }
+    if (!isfinite(expectedUsed) || expectedUsed < 0 || expectedUsed > 100) { [self park]; completion(unknown); return; }
+    // Les crédits de reset et leurs expirations bougent rarement : la page Utilisation (l'application
+    // complète, lourde) n'est relue qu'une fois par demi-heure ; entre-temps, le dernier état connu.
+    double now = NSDate.date.timeIntervalSince1970;
+    if (self.lastAvailability && now - self.lastProbeAt < 1800 && !self.loginVisible) {
+        [self park]; completion(self.lastAvailability); return;
+    }
     // La page est une SPA. Un sondage JSON des quotas ne met pas forcément son DOM à jour ; on
     // recharge la page Usage avant de lire l'offre, sauf si l'utilisateur y navigue lui-même.
-    if (!self.loginVisible) self.loaded = NO;
+    if (!self.loginVisible) { self.loaded = NO; self.needsFullPage = YES; }
     [self ensureLoaded:^(BOOL ok) {
-        if (!ok) { completion(unknown); return; }
-        [self probeManualResetForExpectedUsed:expectedUsed attempts:12 completion:completion];
+        if (!ok) { [self park]; completion(unknown); return; }
+        [self probeManualResetForExpectedUsed:expectedUsed attempts:12 completion:^(NSDictionary *availability) {
+            if (![availability[@"status"] isEqual:@"unknown"]) { self.lastAvailability = availability; self.lastProbeAt = NSDate.date.timeIntervalSince1970; }
+            [self park];
+            completion(availability);
+        }];
     }];
 }
 
@@ -322,6 +353,20 @@ static NSError *TMSessionError(NSString *message) {
             [self probeManualResetForExpectedUsed:expectedUsed attempts:attempts - 1 completion:completion];
         });
     }];
+}
+
+- (void)park {
+    if (self.loginVisible || !self.webView || self.loadWaiters.count) return;
+    if ([self.webView.URL.path isEqual:@"/robots.txt"]) { self.needsFullPage = NO; return; }
+    // Naviguer ailleurs ne suffit pas : WebKit garde l'application quittée (cache de pages, tas
+    // JavaScript) et le processus reste à 400 Mo+. On libère donc la vue elle-même, ce qui termine
+    // son processus ; les cookies vivent dans le magasin persistant du compte, et la prochaine
+    // lecture recrée une vue sur le document léger.
+    self.needsFullPage = NO; self.loaded = NO;
+    [self.webView stopLoading];
+    self.webView.navigationDelegate = nil; self.webView.UIDelegate = nil;
+    [self.webView removeFromSuperview];
+    self.webView = nil;
 }
 
 - (void)fetchOrganizations:(void (^)(NSArray *organizations, NSError *error))completion {

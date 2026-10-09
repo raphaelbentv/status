@@ -493,9 +493,38 @@ NSString *TMHistoryToCSV(NSArray *history) {
 }
 
 NSArray *TMLoadHistory(void) {
-    NSData *data = [NSData dataWithContentsOfFile:TMHistoryPath()];
+    // Appelé à chaque rafraîchissement d'interface (plusieurs fois par minute) sur un fichier de
+    // l'ordre du Mo : on ne le relit et ne le réanalyse que s'il a changé sur disque.
+    static NSArray *cached; static NSDate *cachedDate; static unsigned long long cachedSize;
+    static NSString *cachedPath;
+    NSString *path = TMHistoryPath();
+    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
+    NSDate *date = attributes.fileModificationDate; unsigned long long size = attributes.fileSize;
+    @synchronized (NSFileManager.class) {
+        if (cached && date && [date isEqual:cachedDate] && size == cachedSize && [path isEqual:cachedPath]) return cached;
+    }
+    NSData *data = [NSData dataWithContentsOfFile:path];
     NSArray *history = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    return [history isKindOfClass:NSArray.class] ? history : @[];
+    history = [history isKindOfClass:NSArray.class] ? history : @[];
+    @synchronized (NSFileManager.class) { cached = history; cachedDate = date; cachedSize = size; cachedPath = path; }
+    return history;
+}
+
+NSArray *TMHistoryForDisplay(NSArray *history, NSTimeInterval now) {
+    if (![history isKindOfClass:NSArray.class]) return @[];
+    NSMutableArray *out = [NSMutableArray array];
+    long long lastBucket = LLONG_MIN;
+    for (NSDictionary *point in history) {
+        if (![point isKindOfClass:NSDictionary.class]) continue;
+        double t = [point[@"t"] doubleValue];
+        if (t >= now - 3 * 3600) { [out addObject:point]; continue; }
+        long long bucket = (long long)floor(t / 1200);
+        // Le dernier point d'une tranche remplace le précédent : la courbe garde l'état le plus récent.
+        if (bucket == lastBucket && out.count) out[out.count - 1] = point;
+        else [out addObject:point];
+        lastBucket = bucket;
+    }
+    return out;
 }
 
 #pragma mark - Clés d'historique par compte

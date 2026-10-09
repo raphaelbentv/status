@@ -361,6 +361,7 @@ static const CGFloat TMTitleBarHeight = 28;
 // suivants n'envoient qu'un delta (TMMetricsDeltaPayload) et la série glisse côté web. L'amorçage
 // retombe quand la surface se ferme ou que sa webview se recharge.
 @property BOOL dashboardMetricsPrimed, popoverMetricsPrimed, widgetMetricsPrimed;
+@property BOOL dashboardStale;  // payload complet non envoyé car fenêtre cachée
 @property BOOL monitorViewActive;
 @property BOOL macToolsVisible;
 @property BOOL notificationsAuthorized;
@@ -384,7 +385,9 @@ static const CGFloat TMTitleBarHeight = 28;
     self.awake = [TMAwake new];
     self.lidMode = [TMLidClient new];
     __weak typeof(self) weakSelf = self;
-    self.lidMode.onChange = ^{ [weakSelf pushData]; };
+    // Le service répond toutes les 5 s (vitesse des ventilateurs) : seul l'état des outils est
+    // renvoyé, pas tout le payload (historique, comptes…) à chaque fois.
+    self.lidMode.onChange = ^{ [weakSelf pushTools]; };
     self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
         [weakSelf.lidMode refresh];
     }];
@@ -1488,6 +1491,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
 - (void)openDashboard:(id)sender {
     [self.statusPopover close];
     [self.window makeKeyAndOrderFront:nil];
+    if (self.dashboardStale) [self pushData];
     [NSApp activateIgnoringOtherApps:YES];
     [self startSystemMonitor];
 }
@@ -1815,10 +1819,9 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     return @{
         @"accounts": [self accountPayloadList],
         @"accountLimit": @(TMMaxAccountsPerProvider),
-        @"history": history,
+        @"history": TMHistoryForDisplay(history, NSDate.date.timeIntervalSince1970),
         @"displays": [self.displayManager snapshot] ?: @[],
         @"costs": [self costPayload],
-        @"forecasts": [self forecastsFromHistory:history],
         @"metricsLog": self.metricsLog ?: @[],  // 24 h, une ligne/minute — cadence lente, pas dans pushMetrics
         @"prefs": @{
             @"launchAtLogin": @([self launchAtLoginEnabled]),
@@ -1845,32 +1848,10 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"notificationsAuthorized": @(self.notificationsAuthorized),
             @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint"
         },
-        @"tools": @{
-        @"awake": @{ @"active": @(self.awake.isEnabled) },
-        @"lidMode": self.lidMode.snapshot ?: @{},
-        @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
-                                    : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
-    },
+        @"tools": [self toolsPayload],
         @"backoffCount": @([self pausedAccountCount]),
         @"refreshing": @(self.refreshing), @"updatedAt": @(self.lastQuotaRefreshAt * 1000)
     };
-}
-
-// Une prévision par fenêtre exploitable. Le calcul vit ici et non dans le JavaScript : la logique
-// est testée dans native-tests, et les deux surfaces (tableau de bord, popover) la partagent.
-- (NSDictionary *)forecastsFromHistory:(NSArray *)history {
-    NSMutableDictionary *forecasts = [NSMutableDictionary dictionary];
-    for (NSArray *pair in [self historyPairs]) {
-        for (NSDictionary *window in pair[2]) {
-            NSString *key = TMHistoryKey(pair[0], pair[1],
-                                         window[@"windowId"] ?: window[@"label"] ?: @"");
-            NSTimeInterval at = 0;
-            if (TMForecastExhaustion(history, key, TMNumber(window[@"resetsAt"]), &at)) {
-                forecasts[key] = @(at * 1000);  // millisecondes : ce que Date attend côté web
-            }
-        }
-    }
-    return forecasts;
 }
 
 // Export de l'historique en CSV (feature 15). Panneau de sauvegarde système ; l'utilisateur
@@ -2009,17 +1990,44 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     }
 }
 
+- (NSDictionary *)toolsPayload {
+    return @{
+        @"awake": @{ @"active": @(self.awake.isEnabled) },
+        @"lidMode": self.lidMode.snapshot ?: @{},
+        @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
+                                    : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
+    };
+}
+
+- (void)pushTools {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"tools": [self toolsPayload]} options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (self.menuWebReady)
+        [self.menuWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusMenu && window.StatusMenu.patch && window.StatusMenu.patch(%@);", json] completionHandler:nil];
+    if (self.webReady && self.window.isVisible)
+        [self.webView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusApp && window.StatusApp.patch && window.StatusApp.patch(%@);", json] completionHandler:nil];
+}
+
 - (void)pushData {
     [self persistAccountsCache];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:[self payload] options:0 error:nil];
-    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (self.webReady) {
+    NSDictionary *payload = [self payload];
+    // Le tableau de bord (historique, journal 24 h, coûts : plus d'1 Mo) n'est alimenté que fenêtre
+    // visible ; openDashboard le remet à jour à l'ouverture. Le popup reçoit une version allégée.
+    BOOL dashboardVisible = self.webReady && self.window.isVisible;
+    self.dashboardStale = !dashboardVisible;
+    if (dashboardVisible) {
+        NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         NSString *script = [NSString stringWithFormat:@"window.StatusApp && window.StatusApp.update(%@);", json];
         [self.webView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
             if (error) NSLog(@"Status dashboard JavaScript error: %@", error);
         }];
     }
     if (self.menuWebReady) {
+        NSMutableDictionary *menu = [payload mutableCopy];
+        [menu removeObjectsForKeys:@[@"history", @"metricsLog", @"costs"]];
+        NSData *menuData = [NSJSONSerialization dataWithJSONObject:menu options:0 error:nil];
+        NSString *json = [[NSString alloc] initWithData:menuData encoding:NSUTF8StringEncoding];
         NSString *script = [NSString stringWithFormat:@"window.StatusMenu && window.StatusMenu.update(%@);", json];
         [self.menuWebView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
             if (error) NSLog(@"Status menu JavaScript error: %@", error);
@@ -2915,6 +2923,7 @@ static NSDictionary *TMAlertDefaults(void) {
             [self mergePayload:@{@"manualReset": availability} forAccount:accountId];
             [self pushData];
         }];
+        else [session park];  // pas de lecture de la page Utilisation : libérer claude.ai tout de suite
     }];
 }
 

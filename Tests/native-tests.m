@@ -336,6 +336,19 @@ static void TestResetCredits(void) {
     Check(c[2][@"expiresAt"] == nil, @"sans expiration : en dernier, jamais une fausse date");
 }
 
+static void TestHistoryForDisplay(void) {
+    Section(@"TMHistoryForDisplay — historique allégé pour l'interface");
+    NSTimeInterval now = 1791100000;
+    NSMutableArray *h = [NSMutableArray array];
+    for (int i = 0; i < 600; i++) [h addObject:@{@"t":@(now - (600 - i) * 60), @"p":@{@"k":@(i)}}];  // 10 h à la minute
+    NSArray *d = TMHistoryForDisplay(h, now);
+    Check(d.count < 230 && d.count > 190, @"10 h minute par minute réduites à ~200 points");
+    CheckEqual([d.lastObject[@"t"] description], [h.lastObject[@"t"] description], @"le point le plus récent est conservé");
+    NSUInteger recent = 0; for (NSDictionary *p in d) if ([p[@"t"] doubleValue] >= now - 3 * 3600) recent++;
+    CheckEqual(@(recent), @180, @"les 3 dernières heures restent complètes");
+    CheckEqual(@(TMHistoryForDisplay(nil, now).count), @0, @"entrée invalide : liste vide");
+}
+
 static void TestBilling(void) {
     Section(@"Facturation — prochaine échéance par compte");
     NSTimeInterval now=1791100000; // 2026-10-04
@@ -2201,7 +2214,7 @@ int main(void) {
         TestClaudeWebIdentity();
         TestParseClaudeLine();
         TestParseCodex();
-        TestBilling(); TestResetCredits(); TestExtraCredits();
+        TestBilling(); TestResetCredits(); TestHistoryForDisplay(); TestExtraCredits();
         TestHistoryCSV();
         TestStaleAlert();
         TestWatchdog();

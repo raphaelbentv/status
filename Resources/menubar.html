@@ -379,7 +379,7 @@ function mergeMetricsDelta(state,payload){
   delete merged.delta;
   return merged;
 }
-window.StatusMenu={update(data){lastData=data;renderMenu(data)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
+window.StatusMenu={update(data){lastData=data;renderMenu(data)},patch(part){if(!lastData)return;lastData={...lastData,...part};renderMenu(lastData)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
 // Keep the "dans X min" countdowns honest between polls.
 setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
 </script>

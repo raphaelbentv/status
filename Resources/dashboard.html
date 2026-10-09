@@ -1236,7 +1236,7 @@ function mergeMetricsDelta(state,payload){
   delete merged.delta;
   return merged;
 }
-window.StatusApp={update(data){appData=data;render()},updateMetrics(data){const m=mergeMetricsDelta(metricsData,data);if(m){metricsData=m;renderMonitor()}}};
+window.StatusApp={update(data){appData=data;render()},patch(part){if(!appData)return;appData={...appData,...part};render()},updateMetrics(data){const m=mergeMetricsDelta(metricsData,data);if(m){metricsData=m;renderMonitor()}}};
 // Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
 // encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.
 function goToView(view){
