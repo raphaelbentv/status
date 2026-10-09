@@ -852,7 +852,8 @@ function accountPanel(account,name,subtitle,primary,secondary,note){
 // mode « lié » (voir design). L'écriture n'a lieu qu'au relâchement (« change »), pas à chaque
 // frame du glisser (« input » mettrait à jour l'affichage local seulement, sans spammer le natif).
 function displayCard(display){
-  const badge=`<span class="display-badge ${display.kind==='builtin'?'builtin':''}">${display.kind==='builtin'?'interne':'externe'}</span>`;
+  const label={builtin:'interne',keyboard:'clavier'}[display.kind]||'externe';
+  const badge=`<span class="display-badge ${display.kind==='builtin'?'builtin':''}">${label}</span>`;
   if(!display.available){
     return `<div class="display-card"><div class="display-head"><span class="display-name">${esc(display.name)}</span>${badge}</div><div class="display-unavailable">DDC/CI indisponible — ce moniteur ne répond pas au pilotage de luminosité.</div></div>`;
   }
@@ -862,7 +863,7 @@ function displayCard(display){
 function displaysView(data){
   const displays=data.displays||[];
   const cards=displays.length?displays.map(displayCard).join(''):'<div class="quota-empty">Aucun écran détecté.</div>';
-  return `<div class="toolbar"><h1>Écrans</h1></div><div class="section-head"><div><h2>Luminosité</h2><p>Un curseur par écran détecté. Un moniteur externe qui ne répond pas au DDC/CI reste listé, sans curseur actionnable.</p></div></div><div class="display-grid">${cards}</div>`;
+  return `<div class="toolbar"><h1>Écrans</h1></div><div class="section-head"><div><h2>Luminosité</h2><p>Un curseur par écran détecté, puis le rétroéclairage du clavier. Un moniteur externe qui ne répond pas au DDC/CI reste listé, sans curseur actionnable.</p></div></div><div class="display-grid">${cards}</div>`;
 }
 function connectionsView(data){
   const limit=data.accountLimit||5;

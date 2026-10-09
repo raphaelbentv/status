@@ -281,8 +281,9 @@ function brightnessRow(displays){
   const pilotable=(displays||[]).filter(d=>d.available);
   if(!pilotable.length)return '';
   // Un glyphe ☀ ouvre la section : le curseur se lit alors comme « luminosité », pas comme une
-  // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne.
-  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="Luminosité — ${esc(d.name)}">☀</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
+  // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne,
+  // puis le rétroéclairage du clavier (kind « keyboard »), signalé par ⌨ au lieu de ☀.
+  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="${d.kind==='keyboard'?'Rétroéclairage':'Luminosité'} — ${esc(d.name)}">${d.kind==='keyboard'?'⌨':'☀'}</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
 }
 // Grammaire de menuBarMetric, identique à celle du natif (voir StatusQuota.h) :
 //   "lowest" | "<provider>:<kind>" (agrégat) | "acct:<provider>:<accountId>:<kind>" (épinglé).

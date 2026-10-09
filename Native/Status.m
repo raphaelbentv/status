@@ -319,7 +319,9 @@ static const CGFloat TMTitleBarHeight = 28;
 @property id brightnessGlobalMonitor, brightnessLocalMonitor;
 @property CFMachPortRef brightnessTap;          // chemin privilégié : consomme la touche
 @property CFRunLoopSourceRef brightnessTapSource;
-@property BOOL brightnessKeyConsumed;           // l'appui en cours a-t-il été intercepté
+@property NSThread *brightnessTapThread;        // le tap tourne hors du thread principal
+@property CFRunLoopRef brightnessTapRunLoop;
+@property BOOL brightnessPushPending;           // rafraîchissement UI déjà programmé
 @property NSArray<NSDictionary *> *quotaWidgetFamilies;  // familles quota injectées dans le snapshot widgets
 @property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
 // widgetId → signature du dernier rendu poussé (TMWidgetRenderSignature). Réassigner l'image d'un
@@ -1106,7 +1108,24 @@ static const double TMBrightnessKeyStepPercent = 6.0;
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [weakSelf.displayManager syncBuiltinDisplaysFromHardware];
-        [weakSelf pushData];
+        [weakSelf scheduleBrightnessPush];
+    });
+}
+
+// Rafraîchit les curseurs APRÈS coup, une fois par rafale d'appuis. pushData recalcule tout le
+// payload (XPC vers smd, validation de signature du service capot…) : mesuré jusqu'à 3,2 s.
+// Appelé dans le callback du tap, il retenait chaque appui suivant, puis la file se vidait d'un
+// coup — la luminosité « continuait à monter toute seule » après deux ou trois appuis rapides.
+- (void)scheduleBrightnessPush {
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf || strongSelf.brightnessPushPending) return;
+        strongSelf.brightnessPushPending = YES;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            weakSelf.brightnessPushPending = NO;
+            [weakSelf pushData];
+        });
     });
 }
 
@@ -1124,7 +1143,7 @@ static const double TMBrightnessKeyStepPercent = 6.0;
     if (!target.available || !target.brightnessPercent) return NO;  // écran sans réponse : rien à régler
     double next = TMSteppedBrightness(target.brightnessPercent.doubleValue, increase, TMBrightnessKeyStepPercent);
     if (![target setBrightnessPercent:next]) return NO;
-    [self pushData];
+    [self scheduleBrightnessPush];
     return YES;
 }
 
@@ -1151,6 +1170,9 @@ static BOOL TMDecodeBrightnessKey(NSEvent *event, BOOL *outIncrease, BOOL *outIs
 // Chemin privilégié : un tap CoreGraphics, seul moyen d'EMPÊCHER macOS de régler l'écran interne
 // quand la souris est ailleurs. Sans lui, la touche réglerait toujours l'interne en plus de
 // l'externe visé — exactement ce qu'on cherche à supprimer.
+// Le callback s'exécute sur un thread dédié (voir installBrightnessTap) et ne fait que le strict
+// nécessaire — choisir l'écran, écrire la luminosité, quelques millisecondes : tant qu'il n'a pas
+// rendu la main, les touches système suivantes attendent derrière lui.
 static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *context) {
     TMAppDelegate *delegate = (__bridge TMAppDelegate *)context;
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
@@ -1161,14 +1183,17 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
     BOOL increase = NO, isDown = NO;
     if (!nsEvent || !TMDecodeBrightnessKey(nsEvent, &increase, &isDown)) return event;
 
-    // Décision prise à l'appui ; le relâchement suit le même sort, pour ne pas laisser passer à
-    // macOS la moitié d'une séquence qu'on a interceptée.
-    if (!isDown) return delegate.brightnessKeyConsumed ? NULL : event;
-    BOOL handled = [delegate applyBrightnessStepIncrease:increase];
-    delegate.brightnessKeyConsumed = handled;
-    return handled ? NULL : event;
+    // Le relâchement passe TOUJOURS. macOS répète lui-même la touche, en aval du tap, tant qu'il
+    // n'a pas vu son relâchement (vérifié : un appui sans relâchement mène l'écran de 69 % à 0 %
+    // en 1,5 s). L'ancien code avalait le relâchement dès que l'appui précédent avait été
+    // consommé ; si l'appui, lui, était passé (tap suspendu par macOS pendant un callback lent),
+    // la luminosité filait toute seule. Un relâchement orphelin, lui, est sans effet (vérifié).
+    if (!isDown) return event;
+    return [delegate applyBrightnessStepIncrease:increase] ? NULL : event;
 }
 
+// Thread dédié plutôt que la boucle principale : celle-ci est régulièrement occupée (tick du
+// moniteur, quotas, rendu des WebView), et un appui reçu pendant ce temps était appliqué en retard.
 - (BOOL)installBrightnessTap {
     if (!AXIsProcessTrusted()) return NO;  // sans Accessibilité, pas de tap : repli sur les moniteurs
     self.brightnessTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault,
@@ -1176,7 +1201,21 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
                                           (__bridge void *)self);
     if (!self.brightnessTap) return NO;  // permission listée mais pas effective
     self.brightnessTapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, self.brightnessTap, 0);
-    CFRunLoopAddSource(CFRunLoopGetMain(), self.brightnessTapSource, kCFRunLoopCommonModes);
+    CFRunLoopSourceRef source = self.brightnessTapSource;
+    dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+    __weak typeof(self) weakSelf = self;
+    NSThread *thread = [[NSThread alloc] initWithBlock:^{
+        CFRunLoopRef runLoop = CFRunLoopGetCurrent();
+        weakSelf.brightnessTapRunLoop = runLoop;
+        CFRunLoopAddSource(runLoop, source, kCFRunLoopCommonModes);
+        dispatch_semaphore_signal(ready);
+        CFRunLoopRun();  // rend la main quand removeBrightnessKeyMonitor arrête la boucle
+    }];
+    thread.name = @"com.raphael.status.brightness-keys";
+    thread.qualityOfService = NSQualityOfServiceUserInteractive;
+    self.brightnessTapThread = thread;
+    [thread start];
+    dispatch_semaphore_wait(ready, DISPATCH_TIME_FOREVER);
     CGEventTapEnable(self.brightnessTap, true);
     return YES;
 }
@@ -1195,7 +1234,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [builtin setBrightnessPercent:before.doubleValue];
-        [weakSelf pushData];
+        [weakSelf scheduleBrightnessPush];
     });
 }
 
@@ -1218,12 +1257,16 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
 - (void)removeBrightnessKeyMonitor {
     if (self.brightnessGlobalMonitor) { [NSEvent removeMonitor:self.brightnessGlobalMonitor]; self.brightnessGlobalMonitor = nil; }
     if (self.brightnessLocalMonitor) { [NSEvent removeMonitor:self.brightnessLocalMonitor]; self.brightnessLocalMonitor = nil; }
-    if (self.brightnessTapSource) {
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), self.brightnessTapSource, kCFRunLoopCommonModes);
-        CFRelease(self.brightnessTapSource); self.brightnessTapSource = NULL;
+    if (self.brightnessTap) CGEventTapEnable(self.brightnessTap, false);
+    if (self.brightnessTapRunLoop) {
+        if (self.brightnessTapSource) CFRunLoopRemoveSource(self.brightnessTapRunLoop, self.brightnessTapSource, kCFRunLoopCommonModes);
+        CFRunLoopStop(self.brightnessTapRunLoop);
+        self.brightnessTapRunLoop = NULL;
+        self.brightnessTapThread = nil;
     }
+    if (self.brightnessTapSource) { CFRelease(self.brightnessTapSource); self.brightnessTapSource = NULL; }
     if (self.brightnessTap) {
-        CGEventTapEnable(self.brightnessTap, false);
+        CFMachPortInvalidate(self.brightnessTap);
         CFRelease(self.brightnessTap); self.brightnessTap = NULL;
     }
 }
@@ -1545,8 +1588,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"closeMenuIconPreviews"]) [self closeIconPreviews];
     if ([action isEqualToString:@"setBrightness"]) {
         NSString *displayId = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
-        TMDisplay *display = displayId ? [self.displayManager displayWithIdentifier:displayId] : nil;
-        if (display) [display setBrightnessPercent:[body[@"value"] doubleValue]];
+        if (displayId) [self.displayManager setBrightnessPercent:[body[@"value"] doubleValue] forIdentifier:displayId];
         [self pushData];
     }
     if ([action isEqualToString:@"resizeWidgetPanel"]) {

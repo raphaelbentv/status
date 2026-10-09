@@ -2,6 +2,9 @@
 #import <AppKit/AppKit.h>
 #import <IOKit/IOKitLib.h>
 #import <dlfcn.h>
+#import <objc/message.h>
+
+NSString *const TMKeyboardBacklightIdentifier = @"keyboard";
 
 #pragma mark - Logique pure
 
@@ -168,6 +171,8 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
 
 @implementation TMDisplay {
     CGDirectDisplayID _displayID;
+    BOOL _available;
+    NSNumber *_brightnessPercent;
     CFTypeRef _avService;    // +1, écrans externes uniquement ; libéré au dealloc
     uint16_t _ddcMaximum;    // maximum VCP relevé à la détection ; nécessaire pour reconvertir un %
     BOOL _useDisplayServices; // méthode retenue : DisplayServices (Apple) plutôt que DDC/CI (tiers)
@@ -196,7 +201,14 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
 
 - (CGDirectDisplayID)displayID { return _displayID; }
 
-- (void)syncFromHardware {
+// Les touches F1/F2 arrivent sur le thread du tap (voir Status.m), les curseurs et la relecture
+// sur le thread principal : l'état d'un écran est donc lu et écrit sous son propre verrou.
+- (nullable NSNumber *)brightnessPercent { @synchronized (self) { return _brightnessPercent; } }
+- (BOOL)available { @synchronized (self) { return _available; } }
+
+- (void)syncFromHardware { @synchronized (self) { [self lockedSyncFromHardware]; } }
+
+- (void)lockedSyncFromHardware {
     TMLoadPrivateDisplaySymbols();
 
     // 1) DisplayServices d'abord, pour TOUT écran. C'est le canal de l'écran interne — mais aussi
@@ -246,7 +258,9 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     }
 }
 
-- (BOOL)setBrightnessPercent:(double)percent {
+- (BOOL)setBrightnessPercent:(double)percent { @synchronized (self) { return [self lockedSetBrightnessPercent:percent]; } }
+
+- (BOOL)lockedSetBrightnessPercent:(double)percent {
     double clamped = TMClampBrightnessPercent(percent);
     if (_useDisplayServices) {
         if (!TMDisplayServicesSet) return NO;
@@ -266,9 +280,80 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
 
 @end
 
+#pragma mark - TMKeyboardBacklight
+
+// Rétroéclairage du clavier intégré : KeyboardBrightnessClient (framework privé CoreBrightness),
+// le client qu'utilise le Centre de contrôle. Résolu à l'exécution par NSClassFromString — jamais
+// lié — comme les symboles d'écran : absent sur une future version de macOS, la ligne disparaît
+// simplement. Vérifié sur la machine de développement (macOS 27, M4 Max) : setBrightness:
+// forKeyboard: s'applique immédiatement et brightnessForKeyboard: relit la valeur écrite.
+// La valeur est relue à chaque instantané (pas de cache) : les touches du clavier, l'atténuation
+// automatique et le Centre de contrôle la modifient sans prévenir Status.
+@implementation TMKeyboardBacklight {
+    id _client;
+    unsigned long long _keyboardID;
+}
+
+- (instancetype)init {
+    if ((self = [super init])) {
+        dlopen("/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness", RTLD_LAZY);
+        Class clientClass = NSClassFromString(@"KeyboardBrightnessClient");
+        SEL idsSelector = NSSelectorFromString(@"copyKeyboardBacklightIDs");
+        if (!clientClass || ![clientClass instancesRespondToSelector:idsSelector]
+            || ![clientClass instancesRespondToSelector:NSSelectorFromString(@"brightnessForKeyboard:")]
+            || ![clientClass instancesRespondToSelector:NSSelectorFromString(@"setBrightness:forKeyboard:")]) return self;
+        id client = [clientClass new];
+        id (*copyIDs)(id, SEL) = (void *)objc_msgSend;
+        NSArray *ids = copyIDs(client, idsSelector);
+        if (![ids isKindOfClass:NSArray.class]) return self;
+        // Le clavier intégré d'abord : c'est lui qu'on règle depuis le Mac ; un clavier externe
+        // rétroéclairé n'est retenu qu'à défaut.
+        BOOL (*isBuiltIn)(id, SEL, unsigned long long) = (void *)objc_msgSend;
+        SEL builtInSelector = NSSelectorFromString(@"isKeyboardBuiltIn:");
+        NSNumber *chosen = nil;
+        for (NSNumber *candidate in ids) {
+            if (![candidate isKindOfClass:NSNumber.class]) continue;
+            if (!chosen) chosen = candidate;
+            if ([client respondsToSelector:builtInSelector] && isBuiltIn(client, builtInSelector, candidate.unsignedLongLongValue)) { chosen = candidate; break; }
+        }
+        if (!chosen) return self;
+        _client = client;
+        _keyboardID = chosen.unsignedLongLongValue;
+    }
+    return self;
+}
+
+- (BOOL)available { return _client != nil; }
+
+- (nullable NSNumber *)brightnessPercent {
+    if (!_client) return nil;
+    float (*get)(id, SEL, unsigned long long) = (void *)objc_msgSend;
+    float value = get(_client, NSSelectorFromString(@"brightnessForKeyboard:"), _keyboardID);
+    if (isnan(value) || value < 0) return nil;
+    return @(round(TMClampBrightnessPercent(value * 100.0)));
+}
+
+- (BOOL)setBrightnessPercent:(double)percent {
+    if (!_client) return NO;
+    BOOL (*set)(id, SEL, float, unsigned long long) = (void *)objc_msgSend;
+    return set(_client, NSSelectorFromString(@"setBrightness:forKeyboard:"),
+               (float)(TMClampBrightnessPercent(percent) / 100.0), _keyboardID);
+}
+
+@end
+
 #pragma mark - TMDisplayManager
 
-@implementation TMDisplayManager
+@implementation TMDisplayManager {
+    NSArray<TMDisplay *> *_displays;
+}
+
+- (NSArray<TMDisplay *> *)displays { @synchronized (self) { return _displays ?: @[]; } }
+
+- (instancetype)init {
+    if ((self = [super init])) _keyboard = [TMKeyboardBacklight new];
+    return self;
+}
 
 - (void)rescan {
     TMLoadPrivateDisplaySymbols();
@@ -306,7 +391,7 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
         io_service_t rawService = (io_service_t)(uintptr_t)[avHandles[i] pointerValue];
         IOObjectRelease(rawService);
     }
-    _displays = displays;
+    @synchronized (self) { _displays = displays; }
 }
 
 - (NSArray<NSDictionary *> *)snapshot {
@@ -320,7 +405,25 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
             @"brightness": display.brightnessPercent ?: [NSNull null],
         }];
     }
+    // Le rétroéclairage du clavier suit les écrans, sous la même forme : les deux surfaces web lui
+    // dessinent un curseur sans code dédié. Omis quand le Mac n'en a pas (Mac de bureau).
+    NSNumber *keyboardBrightness = self.keyboard.brightnessPercent;
+    if (self.keyboard.available && keyboardBrightness) {
+        [result addObject:@{
+            @"id": TMKeyboardBacklightIdentifier,
+            @"name": @"Clavier",
+            @"kind": @"keyboard",
+            @"available": @YES,
+            @"brightness": keyboardBrightness,
+        }];
+    }
     return result;
+}
+
+- (BOOL)setBrightnessPercent:(double)percent forIdentifier:(NSString *)identifier {
+    if ([identifier isEqualToString:TMKeyboardBacklightIdentifier]) return [self.keyboard setBrightnessPercent:percent];
+    TMDisplay *display = [self displayWithIdentifier:identifier];
+    return display ? [display setBrightnessPercent:percent] : NO;
 }
 
 - (nullable TMDisplay *)displayWithIdentifier:(NSString *)identifier {
@@ -336,12 +439,14 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     }
 }
 
-// Le curseur vit dans le repère Cocoa (origine en bas à gauche de l'écran principal) ; CoreGraphics
-// compte depuis le haut. D'où le retournement avant d'interroger CGGetDisplaysWithPoint.
+// Position lue sur un CGEvent vierge plutôt que NSEvent.mouseLocation : appelable depuis le thread
+// du tap clavier, et déjà dans le repère CoreGraphics (origine en haut à gauche) qu'attend
+// CGGetDisplaysWithPoint — plus de retournement depuis le repère Cocoa.
 - (nullable TMDisplay *)displayUnderMouse {
-    NSPoint mouse = NSEvent.mouseLocation;
-    CGRect mainBounds = CGDisplayBounds(CGMainDisplayID());
-    CGPoint point = CGPointMake(mouse.x, CGRectGetHeight(mainBounds) - mouse.y);
+    CGEventRef probe = CGEventCreate(NULL);
+    if (!probe) return nil;
+    CGPoint point = CGEventGetLocation(probe);
+    CFRelease(probe);
     CGDirectDisplayID ids[8];
     uint32_t count = 0;
     if (CGGetDisplaysWithPoint(point, 8, ids, &count) != kCGErrorSuccess || count == 0) return nil;

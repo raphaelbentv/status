@@ -1762,6 +1762,32 @@ static void TestDisplayManagerLive(void) {
     }
     NSArray *snapshot = [manager snapshot];
     Check([NSJSONSerialization isValidJSONObject:snapshot], @"snapshot des écrans sérialisable");
+
+    // Rétroéclairage clavier : lecture seule ici (on ne touche pas au matériel en test).
+    NSDictionary *keyboard = [snapshot.lastObject[@"kind"] isEqual:@"keyboard"] ? snapshot.lastObject : nil;
+    if (manager.keyboard.available) {
+        Check(keyboard != nil, @"clavier rétroéclairé : dernière entrée du snapshot, kind=keyboard");
+        double value = [keyboard[@"brightness"] doubleValue];
+        Check(value >= 0 && value <= 100, @"luminosité clavier en pourcentage 0–100");
+        Check([keyboard[@"id"] isEqual:TMKeyboardBacklightIdentifier], @"id du clavier stable");
+        printf("  clavier : brightness=%s\n", [keyboard[@"brightness"] description].UTF8String);
+    } else {
+        Check(keyboard == nil, @"sans rétroéclairage, aucune ligne clavier");
+    }
+    Check(![manager setBrightnessPercent:50 forIdentifier:@"inconnu"], @"identifiant inconnu : refusé, rien n'est réglé");
+
+    // Les touches F1/F2 sont traitées sur le thread du tap : displayUnderMouse doit y répondre
+    // comme sur le thread principal.
+    TMDisplay *onMain = [manager displayUnderMouse];
+    __block TMDisplay *onBackground = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+        onBackground = [manager displayUnderMouse];
+        dispatch_semaphore_signal(done);
+    });
+    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+    Check(onMain == onBackground, @"écran sous la souris : même réponse hors du thread principal");
+    Check(onMain != nil, @"écran sous la souris trouvé");
 }
 
 #pragma mark - Gestionnaire de fenêtres
