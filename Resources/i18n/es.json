@@ -154,6 +154,7 @@
  "disp.brightnessDesc": "Un control deslizante por pantalla detectada y, después, la retroiluminación del teclado. Un monitor externo que no responde a DDC/CI aparece en la lista, sin control utilizable.",
  "disp.external": "Pantalla externa",
  "disp.internal": "Pantalla interna",
+ "disp.keyboard": "Teclado",
  "disp.none": "Ninguna pantalla detectada.",
  "disp.unavailable": "DDC/CI no disponible: este monitor no responde al control de brillo.",
  "e.claude.install": "Instale Claude Code y vuelva a hacer clic en Iniciar sesión.",

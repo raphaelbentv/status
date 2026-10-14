@@ -412,7 +412,7 @@ static NSArray<NSValue *> *TMCopyExternalAVServiceHandles(void) {
     if (self.keyboard.available && keyboardBrightness) {
         [result addObject:@{
             @"id": TMKeyboardBacklightIdentifier,
-            @"name": @"Clavier",
+            @"name": TMT(@"disp.keyboard"),
             @"kind": @"keyboard",
             @"available": @YES,
             @"brightness": keyboardBrightness,

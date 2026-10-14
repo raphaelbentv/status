@@ -154,6 +154,7 @@
  "disp.brightnessDesc": "Un curseur par écran détecté, puis le rétroéclairage du clavier. Un moniteur externe qui ne répond pas au DDC/CI reste listé, sans curseur actionnable.",
  "disp.external": "Écran externe",
  "disp.internal": "Écran interne",
+ "disp.keyboard": "Clavier",
  "disp.none": "Aucun écran détecté.",
  "disp.unavailable": "DDC/CI indisponible — ce moniteur ne répond pas au pilotage de luminosité.",
  "e.claude.install": "Installez Claude Code, puis cliquez à nouveau sur Se connecter.",
