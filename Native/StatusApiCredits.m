@@ -59,6 +59,8 @@ NSArray<NSDictionary *> *TMNormalizeApiRegistry(id raw) {
             account[@"baselineUSD"] = @(!isnan(baseline) && baseline > 0 ? baseline : 0);
             account[@"baselinePending"] = @([entry[@"baselinePending"] isKindOfClass:NSNumber.class]
                                             && [entry[@"baselinePending"] boolValue]);
+            account[@"baselineApprox"] = @([entry[@"baselineApprox"] isKindOfClass:NSNumber.class]
+                                           && [entry[@"baselineApprox"] boolValue]);
         }
         if (hasBudget) account[@"budgetUSD"] = @(budget);
         // Le solde et le budget restent mémorisés quand on change de mode : revenir en arrière ne
@@ -125,14 +127,17 @@ NSArray *TMApiRegistrySettingLabel(NSArray *registry, NSString *accountId, NSStr
     return TMApiRegistryChanging(registry, accountId, ^(NSMutableDictionary *a) { a[@"label"] = clean; });
 }
 
-NSArray *TMApiRegistrySettingBalance(NSArray *registry, NSString *accountId, double balanceUSD, NSTimeInterval now) {
+NSArray *TMApiRegistrySettingBalance(NSArray *registry, NSString *accountId, double balanceUSD,
+                                     NSTimeInterval now, double provisionalBaselineUSD) {
     if (!isfinite(balanceUSD) || balanceUSD < 0 || balanceUSD > TMApiMaxAmount) return TMNormalizeApiRegistry(registry);
+    double provisional = isfinite(provisionalBaselineUSD) && provisionalBaselineUSD > 0 ? provisionalBaselineUSD : 0;
     return TMApiRegistryChanging(registry, accountId, ^(NSMutableDictionary *a) {
         a[@"mode"] = TMApiModePrepaid;
         a[@"balanceUSD"] = @(balanceUSD);
         a[@"balanceSetAt"] = @(now);
-        a[@"baselineUSD"] = @0;
+        a[@"baselineUSD"] = @(provisional);
         a[@"baselinePending"] = @YES;
+        a[@"baselineApprox"] = @NO;
     });
 }
 
@@ -165,10 +170,14 @@ NSArray *TMApiRegistryResolvingBaseline(NSArray *registry, NSString *accountId,
     return TMApiRegistryChanging(registry, accountId, ^(NSMutableDictionary *a) {
         if (![a[@"baselinePending"] boolValue]) return;
         NSTimeInterval setAt = [a[@"balanceSetAt"] doubleValue];
-        BOOL sameDay = TMUTCDayStart(setAt) == TMUTCDayStart(now);
-        double spent = TMDbl(daily[TMDayKey(setAt)]);
-        a[@"baselineUSD"] = @(sameDay && !isnan(spent) && spent > 0 ? spent : 0);
         a[@"baselinePending"] = @NO;
+        if (TMUTCDayStart(setAt) == TMUTCDayStart(now)) {
+            double spent = TMDbl(daily[TMDayKey(setAt)]);
+            a[@"baselineUSD"] = @(!isnan(spent) && spent > 0 ? spent : 0);
+            a[@"baselineApprox"] = @NO;
+        } else {
+            a[@"baselineApprox"] = @YES;  // jour de saisie fini avant tout relevé : base provisoire
+        }
     });
 }
 
@@ -298,19 +307,22 @@ static NSTimeInterval TMParseISODate(NSString *text) {
     return date ? date.timeIntervalSince1970 : NAN;
 }
 
-NSDictionary *TMApiParseCostPage(NSString *provider, id json) {
-    if (![json isKindOfClass:NSDictionary.class] || ![json[@"data"] isKindOfClass:NSArray.class]) return nil;
+NSDictionary *TMApiParseCostPage(NSString *provider, id json, NSString **outErrorKey) {
+    // Un relevé douteux ne doit jamais remplacer des chiffres connus : au premier doute, rien.
+    NSString *(^fail)(NSString *) = ^NSString *(NSString *key) { if (outErrorKey) *outErrorKey = key; return key; };
+    if (outErrorKey) *outErrorKey = nil;
+    if (![json isKindOfClass:NSDictionary.class] || ![json[@"data"] isKindOfClass:NSArray.class]) { fail(@"api.err.malformed"); return nil; }
     BOOL anthropic = [provider isEqualToString:TMApiProviderAnthropic];
-    if (!anthropic && ![provider isEqualToString:TMApiProviderOpenAI]) return nil;
+    if (!anthropic && ![provider isEqualToString:TMApiProviderOpenAI]) { fail(@"api.err.malformed"); return nil; }
     NSMutableDictionary<NSString *, NSNumber *> *days = [NSMutableDictionary dictionary];
     for (id bucket in json[@"data"]) {
-        if (![bucket isKindOfClass:NSDictionary.class]) continue;
+        if (![bucket isKindOfClass:NSDictionary.class]) { fail(@"api.err.malformed"); return nil; }
         NSTimeInterval start = anthropic ? TMParseISODate(bucket[@"starting_at"]) : TMDbl(bucket[@"start_time"]);
-        if (isnan(start)) continue;
+        // Un jour vide se signale par une liste vide ; sans liste, on ne sait pas.
+        if (isnan(start) || ![bucket[@"results"] isKindOfClass:NSArray.class]) { fail(@"api.err.malformed"); return nil; }
         double total = 0;
-        NSArray *results = [bucket[@"results"] isKindOfClass:NSArray.class] ? bucket[@"results"] : @[];
-        for (id result in results) {
-            if (![result isKindOfClass:NSDictionary.class]) continue;
+        for (id result in bucket[@"results"]) {
+            if (![result isKindOfClass:NSDictionary.class]) { fail(@"api.err.malformed"); return nil; }
             double value = NAN;
             NSString *currency = @"";
             if (anthropic) {
@@ -330,14 +342,20 @@ NSDictionary *TMApiParseCostPage(NSString *provider, id json) {
                 value = TMDbl(amount[@"value"]);
                 currency = TMStr(amount[@"currency"]);
             }
-            // Les deux fournisseurs facturent en dollars ; une autre devise ne s'additionne pas.
-            if (currency.length && [currency caseInsensitiveCompare:@"usd"] != NSOrderedSame) continue;
-            if (!isnan(value) && isfinite(value)) total += value;
+            // Les deux fournisseurs facturent en dollars : une autre devise (ou aucune) ne
+            // s'additionne pas, et l'ignorer sous-estimerait la dépense.
+            if ([currency caseInsensitiveCompare:@"usd"] != NSOrderedSame) { fail(@"api.err.currency"); return nil; }
+            if (isnan(value) || !isfinite(value)) { fail(@"api.err.malformed"); return nil; }
+            total += value;
         }
         NSString *key = TMDayKey(start);
         days[key] = @(days[key].doubleValue + total);
     }
-    NSString *next = [json[@"has_more"] boolValue] ? TMStr(json[@"next_page"]) : @"";
+    NSString *next = @"";
+    if ([json[@"has_more"] boolValue]) {
+        next = TMStr(json[@"next_page"]);
+        if (!next.length) { fail(@"api.err.incomplete"); return nil; }  // la suite existe mais reste hors d'atteinte
+    }
     return @{ @"days": days, @"nextPage": next };
 }
 
@@ -347,6 +365,57 @@ NSString *TMApiErrorKey(NSInteger status) {
     if (status == 429) return @"api.err.rateLimited";
     if (status >= 500) return @"api.err.server";
     return @"api.err.http";
+}
+
+NSTimeInterval TMApiFetchStart(NSTimeInterval queryStart, BOOL hasCache, NSTimeInterval coveredFrom,
+                               NSTimeInterval lastSuccess, NSTimeInterval now, BOOL *outIncremental) {
+    BOOL incremental = hasCache && coveredFrom > 0 && coveredFrom <= queryStart && lastSuccess > 0;
+    if (outIncremental) *outIncremental = incremental;
+    if (!incremental) return queryStart;
+    NSTimeInterval resume = MIN(TMUTCDayStart(lastSuccess) - 86400, TMUTCDayStart(now) - 2 * 86400);
+    return MAX(queryStart, resume);
+}
+
+@implementation TMApiFetchGate {
+    NSMutableDictionary<NSString *, NSNumber *> *_tokens;
+    NSMutableSet<NSString *> *_fetching;
+    NSUInteger _counter;
+}
+- (instancetype)init {
+    if ((self = [super init])) { _tokens = [NSMutableDictionary dictionary]; _fetching = [NSMutableSet set]; }
+    return self;
+}
+- (NSUInteger)beginForAccount:(NSString *)accountId {
+    NSUInteger token = ++_counter;
+    _tokens[accountId] = @(token);
+    [_fetching addObject:accountId];
+    return token;
+}
+- (BOOL)isCurrent:(NSUInteger)token forAccount:(NSString *)accountId {
+    return [_fetching containsObject:accountId] && _tokens[accountId].unsignedIntegerValue == token;
+}
+- (BOOL)finish:(NSUInteger)token forAccount:(NSString *)accountId {
+    if (![self isCurrent:token forAccount:accountId]) return NO;
+    [_fetching removeObject:accountId];
+    return YES;
+}
+- (void)invalidateAccount:(NSString *)accountId {
+    _tokens[accountId] = @(++_counter);
+    [_fetching removeObject:accountId];
+}
+- (BOOL)isFetching:(NSString *)accountId { return [_fetching containsObject:accountId]; }
+@end
+
+#pragma mark - Trousseau
+
+NSString *TMKeychainReadOutcome(OSStatus status) {
+    if (status == errSecSuccess) return @"found";
+    if (status == errSecItemNotFound) return @"absent";
+    return @"denied";
+}
+
+BOOL TMKeychainDeleteSucceeded(OSStatus status) {
+    return status == errSecSuccess || status == errSecItemNotFound;
 }
 
 #pragma mark - Calcul
@@ -413,10 +482,14 @@ NSDictionary *TMApiSummary(NSDictionary *account, NSDictionary *daily, NSTimeInt
     if ([mode isEqualToString:TMApiModePrepaid]) {
         double balance = TMDbl(account[@"balanceUSD"]), setAt = TMDbl(account[@"balanceSetAt"]);
         if (isnan(balance) || isnan(setAt)) { summary[@"mode"] = TMApiModeNone; return summary; }
-        // Base en attente : la dépense du jour déjà connue en tient lieu jusqu'au prochain relevé.
-        double baseline = [account[@"baselinePending"] boolValue]
-            ? (isnan(TMDbl(daily[TMDayKey(setAt)])) ? 0 : TMDbl(daily[TMDayKey(setAt)]))
-            : (isnan(TMDbl(account[@"baselineUSD"])) ? 0 : TMDbl(account[@"baselineUSD"]));
+        // Base en attente le jour même : la dépense de ce jour déjà connue en tient lieu jusqu'au
+        // prochain relevé. Le jour de saisie passé, seule la base provisoire reste, approximative.
+        double stored = isnan(TMDbl(account[@"baselineUSD"])) ? 0 : TMDbl(account[@"baselineUSD"]);
+        BOOL pending = [account[@"baselinePending"] boolValue];
+        BOOL sameDay = TMUTCDayStart(setAt) == TMUTCDayStart(now);
+        double knownToday = isnan(TMDbl(daily[TMDayKey(setAt)])) ? 0 : TMDbl(daily[TMDayKey(setAt)]);
+        double baseline = pending && sameDay ? MAX(stored, knownToday) : stored;
+        summary[@"baselineApprox"] = @([account[@"baselineApprox"] boolValue] || (pending && !sameDay));
         double since = MAX(0, TMSumSince(daily, TMUTCDayStart(setAt), now) - baseline);
         double remaining = balance - since;
         summary[@"sinceSetUSD"] = @(since);

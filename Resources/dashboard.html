@@ -959,6 +959,7 @@ function apiNote(a){
   if(!a.keyConfigured)return t('api.note.noKey');
   const parts=[];
   if(a.mode==='prepaid')parts.push(t('api.note.prepaid',{v:usd(a.balanceUSD),date:I.date(a.balanceSetAt,{day:'numeric',month:'long'})}));
+  if(a.mode==='prepaid'&&a.baselineApprox)parts.push(t('api.note.approx'));
   if(a.mode==='budget')parts.push(t('api.note.budget',{v:usd(a.budgetUSD)}));
   if(a.mode==='none')parts.push(t('api.note.none'));
   parts.push(a.refreshing?t('api.note.refreshing'):a.updatedAt?t('api.note.updated',{age:ageLabel(a.updatedAt/1000)}):t('api.note.waiting'));

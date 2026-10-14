@@ -778,6 +778,8 @@ section('Comptes API — réglages et popover');
   checkEqual(dashboard(`apiWidgetAccountRow('anthropicApi',{})`), '', 'widget Anthropic : un seul compte, pas de choix');
   checkEqual(dashboard(`apiWidgetAccountRow('cpu',{})`), '', 'autre widget : rien');
 
+  dashboard(`appData.apiAccounts[0].baselineApprox=true`);
+  check(plain(dashboard('apiConnectionsView(appData)')).includes('base approximative'), 'base approximative : signalée dans l\u2019estimation');
   checkEqual(menubar('apiCredits([])'), '', 'popover : rien sans compte API');
   const popup = plain(menubar(`apiCredits(${JSON.stringify(api)})`));
   check(popup.includes('≈ 0,00 $') && popup.includes('80,00 $ de budget'), 'popover : reste estimé et reste du budget');

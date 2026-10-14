@@ -99,7 +99,7 @@ check(nativeWidgetIds.every(id => defined('mw.' + id)), 'un libellé mw.* pour c
 // lecteur ci-dessus ne les voit pas, elles sont énumérées ici.
 const apiNativeKeys = ['anthropic', 'openai'].flatMap(p => ['title', 'body', 'placeholder', 'invalid'].map(k => `api.key.${k}.${p}`))
   .concat(['low', 'empty', 'budget80', 'budget100'].flatMap(k => [`n.api.${k}.title`, `n.api.${k}.body`]))
-  .concat(['auth', 'notFound', 'rateLimited', 'server', 'http', 'network', 'malformed', 'noKey'].map(k => `api.err.${k}`));
+  .concat(['auth', 'notFound', 'rateLimited', 'server', 'http', 'network', 'malformed', 'noKey', 'currency', 'incomplete', 'keychain'].map(k => `api.err.${k}`));
 check(apiNativeKeys.every(defined), `${apiNativeKeys.length} clés construites des comptes API définies`, apiNativeKeys.filter(k => !defined(k)).join(', '));
 // Les thèmes écrivent aussi du texte en CSS : il passe par var(--i18n-…), alimentée par les clés css.*.
 const themeCSS = ['themes.css', ...readdirSync(join(root, 'Resources', 'themes')).map(f => 'themes/' + f)]

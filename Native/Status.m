@@ -36,7 +36,9 @@ static NSString *TMClaudeCookieAccount(NSString *accountId) {
     return [NSString stringWithFormat:@"claude-session-cookie:%@", accountId];
 }
 
-static NSString *TMKeychainRead(NSString *account) {
+// Lecture avec son issue (TMKeychainReadOutcome) : « absent » prouve qu'il n'y a pas d'entrée,
+// « denied » (accès refusé, Trousseau verrouillé) ne prouve rien et ne doit pas être mémorisé.
+static NSString *TMKeychainReadWithOutcome(NSString *account, NSString **outOutcome) {
     NSDictionary *query = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService: TMService,
@@ -45,24 +47,28 @@ static NSString *TMKeychainRead(NSString *account) {
         (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne
     };
     CFTypeRef result = NULL;
-    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess) return @"";
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+    if (outOutcome) *outOutcome = TMKeychainReadOutcome(status);
+    if (status != errSecSuccess) return @"";
     NSData *data = CFBridgingRelease(result);
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
 }
 
-static BOOL TMKeychainSave(NSString *account, NSString *value) {
+static NSString *TMKeychainRead(NSString *account) {
+    return TMKeychainReadWithOutcome(account, NULL);
+}
+
+// Valeur vide = suppression, réussie seulement si l'entrée n'existe plus.
+static BOOL TMKeychainSaveWithAccess(NSString *account, NSString *value, CFStringRef accessible) {
     NSDictionary *query = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService: TMService,
         (__bridge id)kSecAttrAccount: account
     };
-    if (value.length == 0) {
-        SecItemDelete((__bridge CFDictionaryRef)query);
-        return YES;
-    }
+    if (value.length == 0) return TMKeychainDeleteSucceeded(SecItemDelete((__bridge CFDictionaryRef)query));
     NSDictionary *attributes = @{
         (__bridge id)kSecValueData: [value dataUsingEncoding:NSUTF8StringEncoding],
-        (__bridge id)kSecAttrAccessible: (__bridge id)kSecAttrAccessibleAfterFirstUnlock
+        (__bridge id)kSecAttrAccessible: (__bridge id)accessible
     };
     OSStatus status = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)attributes);
     if (status == errSecItemNotFound) {
@@ -71,6 +77,15 @@ static BOOL TMKeychainSave(NSString *account, NSString *value) {
         status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
     }
     return status == errSecSuccess;
+}
+
+static BOOL TMKeychainSave(NSString *account, NSString *value) {
+    return TMKeychainSaveWithAccess(account, value, kSecAttrAccessibleAfterFirstUnlock);
+}
+
+// Clés d'administration : jamais copiées vers un autre appareil (sauvegarde, migration).
+static BOOL TMApiKeySave(NSString *accountId, NSString *value) {
+    return TMKeychainSaveWithAccess(TMApiKeychainAccount(accountId), value, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly);
 }
 
 
@@ -359,7 +374,8 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property NSMutableDictionary<NSString *, NSString *> *apiKeyCache;
 @property NSMutableDictionary<NSString *, NSDictionary *> *apiDaily;     // accountId → { jour UTC : dollars }
 @property NSMutableDictionary<NSString *, NSDictionary *> *apiStatus;    // accountId → { updatedAt, coveredFrom, error }
-@property NSMutableSet<NSString *> *apiFetching;
+@property TMApiFetchGate *apiGate;                                       // relevés en vol, jeton par compte
+@property NSMutableDictionary<NSString *, NSURLSessionTask *> *apiTasks;  // requête en cours, pour l'annuler
 @property NSMutableDictionary<NSString *, NSDate *> *apiNextAllowed;     // débit minimal et backoff
 @property NSMutableDictionary<NSString *, NSNumber *> *apiErrorCounts;
 @property NSTimer *apiTimer;
@@ -1354,6 +1370,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
     NSDictionary *body = [message.body isKindOfClass:NSDictionary.class] ? message.body : nil;
     NSString *action = body ? body[@"action"] : message.body;
+    if (![action isKindOfClass:NSString.class]) return;  // message mal formé : jamais isEqualToString: sur autre chose
     if ([action isEqualToString:@"refresh"]) [self refresh:self];  // explicit click: bypass backoff
     // Un clic dans le popover vaut épinglage, comme un clic sur l'icône (voir toggleStatusPopover).
     if ([action isEqualToString:@"pinPopover"]) {
@@ -3038,7 +3055,8 @@ static NSString *TMApiCostsPath(void) {
     self.apiKeyCache = [NSMutableDictionary dictionary];
     self.apiDaily = [NSMutableDictionary dictionary];
     self.apiStatus = [NSMutableDictionary dictionary];
-    self.apiFetching = [NSMutableSet set];
+    self.apiGate = [TMApiFetchGate new];
+    self.apiTasks = [NSMutableDictionary dictionary];
     self.apiNextAllowed = [NSMutableDictionary dictionary];
     self.apiErrorCounts = [NSMutableDictionary dictionary];
     // Derniers coûts connus : l'icône et le popover ont un chiffre dès le lancement, et le premier
@@ -3083,9 +3101,34 @@ static NSString *TMApiCostsPath(void) {
 - (NSString *)apiKeyForAccount:(NSString *)accountId {
     NSString *cached = self.apiKeyCache[accountId];
     if (cached) return cached;
-    NSString *key = TMKeychainRead(TMApiKeychainAccount(accountId)) ?: @"";
+    NSString *outcome = nil;
+    NSString *key = TMKeychainReadWithOutcome(TMApiKeychainAccount(accountId), &outcome) ?: @"";
+    // Accès refusé : ne rien mémoriser, la prochaine lecture pourra réussir (Trousseau déverrouillé,
+    // accès accordé). Seule une absence avérée se retient.
+    if ([outcome isEqualToString:@"denied"]) {
+        [self setApiStatus:@{ @"error": @"api.err.keychain" } forAccount:accountId];
+        return @"";
+    }
     self.apiKeyCache[accountId] = key;
     return key;
+}
+
+// Clé changée, effacée ou compte supprimé : le relevé en vol est abandonné (requête annulée,
+// réponses tardives ignorées). `resetHistory` oublie les coûts relevés, qui peuvent appartenir à
+// une autre organisation que la nouvelle clé.
+- (void)abandonApiFetchForAccount:(NSString *)accountId resetHistory:(BOOL)resetHistory {
+    [self.apiGate invalidateAccount:accountId];
+    [self.apiTasks[accountId] cancel];
+    [self.apiTasks removeObjectForKey:accountId];
+    [self.apiErrorCounts removeObjectForKey:accountId];
+    [self.apiNextAllowed removeObjectForKey:accountId];
+    if (!resetHistory) return;
+    [self.apiDaily removeObjectForKey:accountId];
+    [self.apiStatus removeObjectForKey:accountId];
+    NSMutableDictionary *state = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"apiAlertState"] ?: @{}) mutableCopy];
+    for (NSString *key in state.allKeys) if ([key hasPrefix:[accountId stringByAppendingString:@":"]]) [state removeObjectForKey:key];
+    [NSUserDefaults.standardUserDefaults setObject:state forKey:@"apiAlertState"];
+    [self saveApiCosts];
 }
 
 - (NSInteger)apiRefreshIntervalSeconds {
@@ -3125,7 +3168,7 @@ static NSString *TMApiCostsPath(void) {
 
 - (void)refreshApiAccount:(NSString *)accountId force:(BOOL)force {
     NSDictionary *account = TMApiAccountWithID(self.apiRegistry, accountId);
-    if (!account || [self.apiFetching containsObject:accountId]) return;
+    if (!account || [self.apiGate isFetching:accountId]) return;
     // Anthropic recommande au plus une requête par minute en continu : même un clic manuel attend
     // 15 s entre deux relevés du même compte, et la cadence automatique respecte le backoff.
     NSDate *nextAllowed = self.apiNextAllowed[accountId];
@@ -3136,25 +3179,29 @@ static NSString *TMApiCostsPath(void) {
 
     NSString *key = [self apiKeyForAccount:accountId];
     if (!key.length) {
-        [self setApiStatus:@{ @"error": @"api.err.noKey" } forAccount:accountId];
+        if (![self.apiStatus[accountId][@"error"] isEqual:@"api.err.keychain"])
+            [self setApiStatus:@{ @"error": @"api.err.noKey" } forAccount:accountId];
         [self scheduleApiPush];
         return;
     }
     NSTimeInterval queryStart = TMApiQueryStart(account, now);
     NSTimeInterval coveredFrom = [self.apiStatus[accountId][@"coveredFrom"] doubleValue];
-    // Relevé incrémental dès que tout l'intervalle est déjà en cache : les jours clos ne bougent
-    // plus, relire les deux derniers suffit (le jour d'hier se complète encore quelques minutes).
-    BOOL incremental = self.apiDaily[accountId] && coveredFrom > 0 && coveredFrom <= queryStart;
-    NSTimeInterval start = incremental ? MAX(queryStart, TMUTCDayStart(now) - 2 * 86400) : queryStart;
+    NSTimeInterval lastSuccess = [self.apiStatus[accountId][@"updatedAt"] doubleValue];
+    // Relevé incrémental dès que tout l'intervalle est en cache : depuis le dernier relevé réussi,
+    // un jour de recouvrement compris (les jours clos ne bougent plus).
+    BOOL incremental = NO;
+    NSTimeInterval start = TMApiFetchStart(queryStart, self.apiDaily[accountId] != nil, coveredFrom, lastSuccess, now, &incremental);
     NSString *provider = account[@"provider"];
 
-    [self.apiFetching addObject:accountId];
+    NSUInteger token = [self.apiGate beginForAccount:accountId];
     [self setApiStatus:@{ @"attemptAt": @(now) } forAccount:accountId];
     [self scheduleApiPush];
-    [self fetchApiCosts:provider key:key start:start page:nil days:@{} pages:0
+    [self fetchApiCosts:provider key:key start:start page:nil days:@{} pages:0 account:accountId token:token
              completion:^(NSDictionary *days, NSString *errorKey) {
-        [self.apiFetching removeObject:accountId];
-        if (!TMApiAccountWithID(self.apiRegistry, accountId)) return;  // supprimé pendant le relevé
+        // Réponse d'un relevé abandonné (clé changée, compte supprimé) : rien n'en est gardé.
+        if (![self.apiGate finish:token forAccount:accountId]) return;
+        [self.apiTasks removeObjectForKey:accountId];
+        if (!TMApiAccountWithID(self.apiRegistry, accountId)) return;
         if (errorKey) {
             NSInteger failures = MIN([self.apiErrorCounts[accountId] integerValue] + 1, 5);
             self.apiErrorCounts[accountId] = @(failures);
@@ -3181,13 +3228,16 @@ static NSString *TMApiCostsPath(void) {
 // Pages successives du rapport de coûts. Tout revient sur le fil principal. Les erreurs ne portent
 // qu'un code (clé i18n) : ni le corps de la réponse ni la requête ne sont journalisés.
 - (void)fetchApiCosts:(NSString *)provider key:(NSString *)key start:(NSTimeInterval)start page:(NSString *)page
-                 days:(NSDictionary *)days pages:(NSInteger)pages
+                 days:(NSDictionary *)days pages:(NSInteger)pages account:(NSString *)accountId token:(NSUInteger)token
            completion:(void (^)(NSDictionary *days, NSString *errorKey))completion {
+    // Abandonné entre deux pages : pas de requête de plus avec l'ancienne clé.
+    if (![self.apiGate isCurrent:token forAccount:accountId]) { completion(nil, @"api.err.http"); return; }
     NSMutableURLRequest *request = TMApiCostRequest(provider, key, start, page, [self apiUserAgent]);
     if (!request) { completion(nil, @"api.err.http"); return; }
     NSURLSessionDataTask *task = [self.apiSession dataTaskWithRequest:request
                                                     completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (![self.apiGate isCurrent:token forAccount:accountId]) { completion(nil, @"api.err.http"); return; }
             NSHTTPURLResponse *http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
             if (error || !http) { completion(nil, @"api.err.network"); return; }
             if (!TMApiURLAllowed(http.URL)) { completion(nil, @"api.err.http"); return; }
@@ -3197,18 +3247,21 @@ static NSString *TMApiCostsPath(void) {
                 return;
             }
             id json = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-            NSDictionary *parsed = TMApiParseCostPage(provider, json);
-            if (!parsed) { completion(nil, @"api.err.malformed"); return; }
+            NSString *parseError = nil;
+            NSDictionary *parsed = TMApiParseCostPage(provider, json, &parseError);
+            if (!parsed) { completion(nil, parseError ?: @"api.err.malformed"); return; }
             NSMutableDictionary *merged = [days mutableCopy];
             [merged addEntriesFromDictionary:parsed[@"days"]];
             NSString *next = parsed[@"nextPage"];
-            // 30 pages couvrent largement l'année de recul permise ; au-delà, une boucle serait un bug.
-            if (next.length && pages < 30)
-                [self fetchApiCosts:provider key:key start:start page:next days:merged pages:pages + 1 completion:completion];
-            else
-                completion(merged, nil);
+            if (!next.length) { completion(merged, nil); return; }
+            // 30 pages couvrent largement l'année de recul permise. Au-delà, le relevé est
+            // incomplet : il ne remplace pas les chiffres connus.
+            if (pages + 1 >= 30) { completion(nil, @"api.err.incomplete"); return; }
+            [self fetchApiCosts:provider key:key start:start page:next days:merged pages:pages + 1
+                        account:accountId token:token completion:completion];
         });
     }];
+    self.apiTasks[accountId] = task;
     [task resume];
 }
 
@@ -3243,7 +3296,7 @@ static NSString *TMApiCostsPath(void) {
             payload[@"keyConfigured"] = @([self apiKeyForAccount:accountId].length > 0);
             payload[@"hasData"] = @(self.apiDaily[accountId] != nil);
             payload[@"updatedAt"] = @([status[@"updatedAt"] doubleValue] * 1000);
-            payload[@"refreshing"] = @([self.apiFetching containsObject:accountId]);
+            payload[@"refreshing"] = @([self.apiGate isFetching:accountId]);
             payload[@"error"] = status[@"error"] ?: @"";
             if (account[@"balanceUSD"]) payload[@"balanceUSD"] = account[@"balanceUSD"];
             if (account[@"balanceSetAt"]) payload[@"balanceSetAt"] = @([account[@"balanceSetAt"] doubleValue] * 1000);
@@ -3394,8 +3447,9 @@ static NSString *TMApiCostsPath(void) {
     alert.window.initialFirstResponder = field;
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
         if (response == NSAlertThirdButtonReturn) {
-            TMKeychainSave(TMApiKeychainAccount(accountId), @"");
+            if (!TMApiKeySave(accountId, @"")) { [self showApiError:TMT(@"api.key.deleteFailed")]; return; }
             self.apiKeyCache[accountId] = @"";
+            [self abandonApiFetchForAccount:accountId resetHistory:YES];
             [self setApiStatus:@{ @"error": @"api.err.noKey" } forAccount:accountId];
             [self pushData];
             return;
@@ -3407,14 +3461,15 @@ static NSString *TMApiCostsPath(void) {
             [self showApiError:TMT([@"api.key.invalid." stringByAppendingString:provider])];
             return;
         }
-        if (!TMKeychainSave(TMApiKeychainAccount(accountId), key)) {
+        if (!TMApiKeySave(accountId, key)) {
             [self showApiError:TMT(@"api.key.saveFailed")];
             return;
         }
+        // Une clé neuve peut viser une autre organisation : relevé en vol abandonné, coûts oubliés,
+        // le relevé suivant repart de zéro et valide la clé.
+        BOOL replaced = ![self.apiKeyCache[accountId] isEqualToString:key];
         self.apiKeyCache[accountId] = key;
-        // Une clé neuve remet le compte à zéro côté erreurs : le relevé suivant la valide.
-        [self.apiErrorCounts removeObjectForKey:accountId];
-        [self.apiNextAllowed removeObjectForKey:accountId];
+        [self abandonApiFetchForAccount:accountId resetHistory:replaced];
         [self setApiStatus:@{ @"error": NSNull.null, @"attemptAt": @0 } forAccount:accountId];
         [self refreshApiAccount:accountId force:YES];
         [self pushData];
@@ -3453,7 +3508,12 @@ static NSString *TMApiCostsPath(void) {
 - (void)promptApiBalanceForAccount:(NSString *)accountId {
     [self promptApiAmountTitle:TMT(@"api.balance.title") body:TMT(@"api.balance.body") initial:nil
                     completion:^(double amount) {
-        self.apiRegistry = TMApiRegistrySettingBalance(self.apiRegistry, accountId, amount, NSDate.date.timeIntervalSince1970);
+        // Base provisoire : la dépense du jour en cache, si le dernier relevé date du même jour UTC.
+        NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+        NSTimeInterval last = [self.apiStatus[accountId][@"updatedAt"] doubleValue];
+        double provisional = TMUTCDayStart(last) == TMUTCDayStart(now)
+            ? [self.apiDaily[accountId][[NSString stringWithFormat:@"%lld", (long long)TMUTCDayStart(now)]] doubleValue] : 0;
+        self.apiRegistry = TMApiRegistrySettingBalance(self.apiRegistry, accountId, amount, now, provisional);
         [self saveApiRegistry];
         // Relevé immédiat : il fixe la dépense déjà comptée aujourd'hui (ligne de base).
         [self setApiStatus:@{ @"attemptAt": @0 } forAccount:accountId];
@@ -3512,15 +3572,11 @@ static NSString *TMApiCostsPath(void) {
     [alert addButtonWithTitle:TMT(@"a.cancel")];
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
         if (response != NSAlertFirstButtonReturn) return;
-        TMKeychainSave(TMApiKeychainAccount(accountId), @"");  // supprime l'entrée du Trousseau
+        // Le compte n'est retiré que si sa clé a bien quitté le Trousseau : sinon elle y resterait,
+        // orpheline, sans plus rien dans Status pour l'effacer.
+        if (!TMApiKeySave(accountId, @"")) { [self showApiError:TMT(@"api.key.deleteFailed")]; return; }
         [self.apiKeyCache removeObjectForKey:accountId];
-        [self.apiDaily removeObjectForKey:accountId];
-        [self.apiStatus removeObjectForKey:accountId];
-        [self.apiNextAllowed removeObjectForKey:accountId];
-        [self.apiErrorCounts removeObjectForKey:accountId];
-        NSMutableDictionary *state = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"apiAlertState"] ?: @{}) mutableCopy];
-        for (NSString *key in state.allKeys) if ([key hasPrefix:[accountId stringByAppendingString:@":"]]) [state removeObjectForKey:key];
-        [NSUserDefaults.standardUserDefaults setObject:state forKey:@"apiAlertState"];
+        [self abandonApiFetchForAccount:accountId resetHistory:YES];
         self.apiRegistry = TMApiRegistryRemoving(self.apiRegistry, accountId);
         [self saveApiRegistry];
         [self saveApiCosts];

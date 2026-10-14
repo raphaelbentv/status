@@ -2048,7 +2048,7 @@ static void TestApiRegistry(void) {
 
 static void TestApiBaseline(void) {
     Section(@"Comptes API — saisie du solde et ligne de base");
-    NSArray *registry = TMApiRegistrySettingBalance(TMApiRegistryAdding(@[], @"anthropic", TM_ACC_A), TM_ACC_A, 100, TM_API_NOW);
+    NSArray *registry = TMApiRegistrySettingBalance(TMApiRegistryAdding(@[], @"anthropic", TM_ACC_A), TM_ACC_A, 100, TM_API_NOW, 0);
     NSDictionary *account = TMApiAccountWithID(registry, TM_ACC_A);
     CheckEqual(account[@"mode"], @"prepaid", @"saisie : mode prepaid");
     CheckEqual(account[@"baselinePending"], @YES, @"ligne de base en attente du relevé");
@@ -2057,8 +2057,23 @@ static void TestApiBaseline(void) {
     NSArray *resolved = TMApiRegistryResolvingBaseline(registry, TM_ACC_A, daily, TM_API_NOW + 60);
     CheckEqual(TMApiAccountWithID(resolved, TM_ACC_A)[@"baselineUSD"], @7.5, @"base = dépense du jour au moment du relevé");
     CheckEqual(TMApiAccountWithID(resolved, TM_ACC_A)[@"baselinePending"], @NO, @"base fixée une seule fois");
-    NSArray *late = TMApiRegistryResolvingBaseline(registry, TM_ACC_A, daily, TM_API_NOW + 86400);
-    CheckEqual(TMApiAccountWithID(late, TM_ACC_A)[@"baselineUSD"], @0, @"relevé le lendemain : base 0 (estimation pessimiste)");
+    CheckEqual(TMApiAccountWithID(resolved, TM_ACC_A)[@"baselineApprox"], @NO, @"relevé le jour même : base exacte");
+
+    // Saisie à 23 h 58 UTC, cache du jour à 7,50 $ ; premier relevé à 0 h 03 le lendemain.
+    NSTimeInterval lateEvening = TM_API_DAY + 86400 - 120, nextDay = TM_API_DAY + 86400 + 180;
+    NSArray *midnight = TMApiRegistrySettingBalance(TMApiRegistryAdding(@[], @"anthropic", TM_ACC_A), TM_ACC_A, 100, lateEvening, 7.5);
+    NSString *tomorrow = [NSString stringWithFormat:@"%lld", (long long)(TM_API_DAY + 86400)];
+    NSDictionary *after = @{ today: @9, tomorrow: @1 };
+    NSArray *crossed = TMApiRegistryResolvingBaseline(midnight, TM_ACC_A, after, nextDay);
+    NSDictionary *crossedAccount = TMApiAccountWithID(crossed, TM_ACC_A);
+    CheckEqual(crossedAccount[@"baselineUSD"], @7.5, @"minuit franchi : la base dépend du jour de saisie (provisoire gardée)");
+    CheckEqual(crossedAccount[@"baselineApprox"], @YES, @"minuit franchi : base marquée approximative");
+    NSDictionary *crossedSummary = TMApiSummary(crossedAccount, after, nextDay, 10);
+    CheckEqual(crossedSummary[@"sinceSetUSD"], @2.5, @"minuit franchi : seul l'après-saisie compte (9 − 7,5 + 1)");
+    CheckEqual(crossedSummary[@"baselineApprox"], @YES, @"minuit franchi : l'estimation le dit");
+    NSArray *noCache = TMApiRegistrySettingBalance(TMApiRegistryAdding(@[], @"anthropic", TM_ACC_A), TM_ACC_A, 100, lateEvening, 0);
+    CheckEqual(TMApiSummary(TMApiAccountWithID(noCache, TM_ACC_A), after, nextDay, 10)[@"baselineApprox"], @YES,
+               @"base en attente, jour de saisie fini : approximative avant même le relevé");
     NSArray *again = TMApiRegistryResolvingBaseline(resolved, TM_ACC_A, @{ today: @20 }, TM_API_NOW + 120);
     CheckEqual(TMApiAccountWithID(again, TM_ACC_A)[@"baselineUSD"], @7.5, @"une base fixée n'est plus recalculée");
 }
@@ -2128,32 +2143,82 @@ static void TestApiNetwork(void) {
 
 static void TestApiParsing(void) {
     Section(@"Comptes API — lecture des rapports de coûts");
+    NSString *error = nil;
     NSDictionary *anthropic = TMApiParseCostPage(@"anthropic", @{
         @"data": @[
             @{ @"starting_at": @"2026-10-13T00:00:00Z", @"ending_at": @"2026-10-14T00:00:00Z",
                @"results": @[ @{ @"amount": @"1234.5", @"currency": @"USD" }, @{ @"amount": @"65.5", @"currency": @"USD" } ] },
             @{ @"starting_at": @"2026-10-14T00:00:00Z", @"ending_at": @"2026-10-15T00:00:00Z", @"results": @[] },
-            @{ @"starting_at": @"pas une date", @"results": @[ @{ @"amount": @"999" } ] },
         ],
-        @"has_more": @YES, @"next_page": @"page_abc" });
+        @"has_more": @YES, @"next_page": @"page_abc" }, &error);
     NSString *d13 = [NSString stringWithFormat:@"%lld", (long long)(TM_API_DAY - 86400)];
     NSString *d14 = [NSString stringWithFormat:@"%lld", (long long)TM_API_DAY];
     CheckEqual(anthropic[@"days"][d13], @13, @"cents en chaîne → dollars, résultats additionnés");
-    CheckEqual(anthropic[@"days"][d14], @0, @"jour sans coût : 0");
-    CheckEqual(@([anthropic[@"days"] count]), @2, @"bucket illisible ignoré");
+    CheckEqual(anthropic[@"days"][d14], @0, @"jour sans coût (liste vide) : 0, valide");
     CheckEqual(anthropic[@"nextPage"], @"page_abc", @"page suivante");
+    Check(error == nil, @"page valide : pas d'erreur");
 
     NSDictionary *openai = TMApiParseCostPage(@"openai", @{
         @"object": @"page",
         @"data": @[ @{ @"object": @"bucket", @"start_time": @(TM_API_DAY), @"end_time": @(TM_API_DAY + 86400),
                        @"results": @[ @{ @"amount": @{ @"value": @0.25, @"currency": @"usd" } },
-                                      @{ @"amount": @{ @"value": @1.5, @"currency": @"usd" } },
-                                      @{ @"amount": @{ @"value": @100, @"currency": @"eur" } } ] } ],
-        @"has_more": @NO, @"next_page": [NSNull null] });
-    CheckEqual(openai[@"days"][d14], @1.75, @"dollars additionnés, autre devise écartée");
+                                      @{ @"amount": @{ @"value": @1.5, @"currency": @"usd" } } ] } ],
+        @"has_more": @NO, @"next_page": [NSNull null] }, &error);
+    CheckEqual(openai[@"days"][d14], @1.75, @"dollars additionnés");
     CheckEqual(openai[@"nextPage"], @"", @"dernière page");
-    Check(TMApiParseCostPage(@"openai", @{ @"error": @{} }) == nil, @"réponse sans data : nil");
-    Check(TMApiParseCostPage(@"openai", @[]) == nil, @"réponse non objet : nil");
+    CheckEqual(TMApiParseCostPage(@"openai", @{ @"data": @[], @"has_more": @NO }, &error)[@"days"], @{}, @"page vide : valide");
+
+    // Relevés douteux : jamais de chiffres partiels.
+    NSDictionary *(^bucket)(id) = ^NSDictionary *(id results) {
+        NSMutableDictionary *b = [@{ @"start_time": @(TM_API_DAY) } mutableCopy];
+        if (results) b[@"results"] = results;
+        return @{ @"data": @[ b ], @"has_more": @NO };
+    };
+    Check(TMApiParseCostPage(@"openai", bucket(nil), &error) == nil && [error isEqual:@"api.err.malformed"], @"bucket sans results : invalide");
+    Check(TMApiParseCostPage(@"openai", bucket(@[ @{ @"amount": @{ @"value": @"abc", @"currency": @"usd" } } ]), &error) == nil
+          && [error isEqual:@"api.err.malformed"], @"montant illisible : invalide");
+    Check(TMApiParseCostPage(@"openai", bucket(@[ @{ @"amount": @{ @"value": @3, @"currency": @"eur" } } ]), &error) == nil
+          && [error isEqual:@"api.err.currency"], @"autre devise : rejetée, pas ignorée");
+    Check(TMApiParseCostPage(@"anthropic", @{ @"data": @[ @{ @"starting_at": @"pas une date", @"results": @[] } ] }, &error) == nil,
+          @"date illisible : invalide");
+    Check(TMApiParseCostPage(@"openai", @{ @"data": @[], @"has_more": @YES, @"next_page": [NSNull null] }, &error) == nil
+          && [error isEqual:@"api.err.incomplete"], @"has_more sans curseur : incomplet");
+    Check(TMApiParseCostPage(@"openai", @{ @"error": @{} }, &error) == nil, @"réponse sans data : nil");
+    Check(TMApiParseCostPage(@"openai", @[], &error) == nil, @"réponse non objet : nil");
+}
+
+static void TestApiFetchControl(void) {
+    Section(@"Comptes API — reprise des relevés, relevés en vol, Trousseau");
+    BOOL incremental = YES;
+    CheckEqual(@(TMApiFetchStart(TM_API_MONTH, NO, 0, 0, TM_API_NOW, &incremental)), @(TM_API_MONTH), @"sans cache : relevé complet");
+    Check(!incremental, @"sans cache : pas incrémental");
+    CheckEqual(@(TMApiFetchStart(TM_API_MONTH, YES, TM_API_MONTH, TM_API_NOW - 600, TM_API_NOW, &incremental)),
+               @(TM_API_DAY - 2 * 86400), @"relevé récent : les deux derniers jours");
+    Check(incremental, @"cache couvrant : incrémental");
+    CheckEqual(@(TMApiFetchStart(TM_API_MONTH, YES, TM_API_MONTH, TM_API_NOW - 6 * 86400, TM_API_NOW, NULL)),
+               @(TM_API_DAY - 7 * 86400), @"six jours sans relevé : reprise au dernier succès moins un jour");
+    CheckEqual(@(TMApiFetchStart(TM_API_DAY - 3 * 86400, YES, TM_API_MONTH, TM_API_NOW - 20 * 86400, TM_API_NOW, NULL)),
+               @(TM_API_DAY - 3 * 86400), @"jamais avant le début de la période");
+    CheckEqual(@(TMApiFetchStart(TM_API_MONTH - 86400, YES, TM_API_MONTH, TM_API_NOW, TM_API_NOW, NULL)),
+               @(TM_API_MONTH - 86400), @"période élargie au-delà du cache : relevé complet");
+
+    TMApiFetchGate *gate = [TMApiFetchGate new];
+    NSUInteger old = [gate beginForAccount:TM_ACC_A];
+    Check([gate isFetching:TM_ACC_A], @"relevé en vol");
+    [gate invalidateAccount:TM_ACC_A];  // clé remplacée
+    Check(![gate isCurrent:old forAccount:TM_ACC_A], @"clé remplacée : l'ancien relevé n'est plus courant");
+    NSUInteger fresh = [gate beginForAccount:TM_ACC_A];
+    Check(![gate finish:old forAccount:TM_ACC_A], @"réponse tardive de l'ancienne clé : ignorée");
+    Check([gate isFetching:TM_ACC_A], @"…sans libérer le nouveau relevé");
+    Check([gate finish:fresh forAccount:TM_ACC_A] && ![gate isFetching:TM_ACC_A], @"réponse du relevé courant : acceptée");
+    Check(![gate finish:fresh forAccount:TM_ACC_A], @"une réponse n'est acceptée qu'une fois");
+
+    CheckEqual(TMKeychainReadOutcome(errSecSuccess), @"found", @"Trousseau : clé trouvée");
+    CheckEqual(TMKeychainReadOutcome(errSecItemNotFound), @"absent", @"Trousseau : clé absente");
+    CheckEqual(TMKeychainReadOutcome(errSecAuthFailed), @"denied", @"Trousseau : accès refusé ≠ absente");
+    CheckEqual(TMKeychainReadOutcome(errSecInteractionNotAllowed), @"denied", @"Trousseau verrouillé ≠ absente");
+    Check(TMKeychainDeleteSucceeded(errSecSuccess) && TMKeychainDeleteSucceeded(errSecItemNotFound), @"suppression : entrée partie");
+    Check(!TMKeychainDeleteSucceeded(errSecAuthFailed), @"suppression refusée : échec, le compte est gardé");
 }
 
 static void TestApiSummary(void) {
@@ -2328,6 +2393,7 @@ int main(void) {
         TestApiInputs();
         TestApiNetwork();
         TestApiParsing();
+        TestApiFetchControl();
         TestApiSummary();
         TestApiAlerts();
 

@@ -13,10 +13,11 @@
 //
 // Un compte API, forme normalisée (plist-safe, rien de secret) :
 //   { accountId, provider, label, mode, balanceUSD, balanceSetAt, baselineUSD, baselinePending,
-//     budgetUSD }
+//     baselineApprox, budgetUSD }
 // mode : « none » (dépense seule), « prepaid » (solde saisi) ou « budget » (budget mensuel).
 
 #import <Foundation/Foundation.h>
+#import <Security/SecBase.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -40,17 +41,20 @@ NSString *TMApiAccountDisplayLabel(NSDictionary *account, NSInteger indexInProvi
 NSArray * _Nullable TMApiRegistryAdding(NSArray *registry, NSString *provider, NSString *accountId);
 NSArray *TMApiRegistryRemoving(NSArray *registry, NSString *accountId);
 NSArray *TMApiRegistrySettingLabel(NSArray *registry, NSString *accountId, NSString *label);
-// Nouveau solde : la saisie repart de maintenant. La dépense déjà comptée ce jour-là est inconnue
-// tant que le prochain relevé n'a pas répondu : baselinePending la fait mesurer à ce moment-là.
+// Nouveau solde : la saisie repart de maintenant. La ligne de base est la dépense du jour UTC de la
+// saisie déjà comptée à ce moment-là. `provisionalBaselineUSD` en est la meilleure valeur connue
+// (le cache, s'il date du même jour UTC ; sinon 0) ; baselinePending la fait remesurer au prochain
+// relevé, tant que ce jour n'est pas fini.
 NSArray *TMApiRegistrySettingBalance(NSArray *registry, NSString *accountId, double balanceUSD,
-                                     NSTimeInterval now);
+                                     NSTimeInterval now, double provisionalBaselineUSD);
 // Recharge : s'ajoute au solde sans déplacer la date de saisie. Sans effet hors mode prepaid.
 NSArray *TMApiRegistryAddingCredit(NSArray *registry, NSString *accountId, double amountUSD);
 NSArray *TMApiRegistrySettingBudget(NSArray *registry, NSString *accountId, double budgetUSD);
 NSArray *TMApiRegistryClearingMode(NSArray *registry, NSString *accountId);
-// Fixe la ligne de base des comptes en attente, avec la dépense du jour de saisie lue dans `daily`.
-// Si ce jour n'est plus le jour courant (relevé en échec toute une journée), la base vaut 0 :
-// l'estimation est alors pessimiste, jamais optimiste.
+// Fixe la ligne de base d'un compte en attente. Relevé le jour UTC de la saisie : la base est la
+// dépense de ce jour lue dans `daily` (au retard de publication près). Relevé un jour plus tard :
+// la dépense de ce jour-là mêle l'avant et l'après saisie, la base provisoire est gardée et marquée
+// baselineApprox, que l'interface affiche.
 NSArray *TMApiRegistryResolvingBaseline(NSArray *registry, NSString *accountId,
                                         NSDictionary<NSString *, NSNumber *> *daily, NSTimeInterval now);
 
@@ -77,12 +81,39 @@ BOOL TMApiURLAllowed(NSURL * _Nullable url);
 NSMutableURLRequest * _Nullable TMApiCostRequest(NSString *provider, NSString *key, NSTimeInterval start,
                                                  NSString * _Nullable page, NSString *userAgent);
 // Une page de réponse → { days: { "<début du jour UTC en secondes>": dollars }, nextPage: "" }.
-// nil si la forme est inattendue. Anthropic donne des cents en chaîne décimale, OpenAI des
-// dollars en nombre.
-NSDictionary * _Nullable TMApiParseCostPage(NSString *provider, id _Nullable json);
+// Anthropic donne des cents en chaîne décimale, OpenAI des dollars en nombre. Une page vide est
+// valide. Une page douteuse rend nil et une clé d'erreur, jamais des chiffres partiels :
+// api.err.malformed (bucket sans results, montant illisible), api.err.currency (autre que l'USD),
+// api.err.incomplete (has_more sans curseur).
+NSDictionary * _Nullable TMApiParseCostPage(NSString *provider, id _Nullable json,
+                                            NSString * _Nullable * _Nullable outErrorKey);
 // Clé i18n d'un échec HTTP : auth (401/403), notFound, rateLimited, server, http.
 NSString *TMApiErrorKey(NSInteger status);
 
+// Premier jour à demander. Sans cache couvrant `queryStart`, tout depuis `queryStart`. Sinon depuis
+// le dernier relevé réussi moins un jour de recouvrement — au moins les deux derniers jours —, pour
+// qu'une interruption de plusieurs jours ne laisse pas de trou.
+NSTimeInterval TMApiFetchStart(NSTimeInterval queryStart, BOOL hasCache, NSTimeInterval coveredFrom,
+                               NSTimeInterval lastSuccess, NSTimeInterval now, BOOL * _Nullable outIncremental);
+
+// Relevés en vol, un jeton par compte. Changer, effacer ou supprimer une clé invalide le jeton :
+// les réponses tardives et les pages suivantes de l'ancien relevé sont ignorées.
+@interface TMApiFetchGate : NSObject
+- (NSUInteger)beginForAccount:(NSString *)accountId;
+- (BOOL)isCurrent:(NSUInteger)token forAccount:(NSString *)accountId;
+// Libère le compte si le jeton est toujours le sien ; renvoie NO pour une réponse périmée.
+- (BOOL)finish:(NSUInteger)token forAccount:(NSString *)accountId;
+- (void)invalidateAccount:(NSString *)accountId;
+- (BOOL)isFetching:(NSString *)accountId;
+@end
+
+#pragma mark - Trousseau
+
+// Lecture : « found », « absent » (errSecItemNotFound, seule preuve qu'il n'y a pas de clé) ou
+// « denied » (accès refusé, Trousseau verrouillé, interaction impossible…).
+NSString *TMKeychainReadOutcome(OSStatus status);
+// Suppression réussie si l'entrée n'existe plus : errSecSuccess ou errSecItemNotFound.
+BOOL TMKeychainDeleteSucceeded(OSStatus status);
 #pragma mark - Calcul
 
 NSTimeInterval TMUTCDayStart(NSTimeInterval t);
@@ -94,7 +125,7 @@ NSDictionary<NSString *, NSNumber *> *TMApiDailyMerging(NSDictionary * _Nullable
                                                         NSDictionary * _Nullable fresh,
                                                         NSTimeInterval keepFrom);
 // Synthèse d'un compte :
-//   mode, todayUSD, monthUSD ; en prepaid sinceSetUSD ; hors mode none : remainingUSD,
+//   mode, todayUSD, monthUSD ; en prepaid sinceSetUSD et baselineApprox ; hors mode none : remainingUSD,
 //   referenceUSD (solde ou budget), fraction (reste / référence, 0…1) et severity (0, 1, 2).
 // Sévérité : prepaid, 2 à 0 $ et 1 sous `alertBelowUSD` ; budget, 2 à 100 % et 1 à 80 %.
 NSDictionary *TMApiSummary(NSDictionary *account, NSDictionary * _Nullable daily, NSTimeInterval now,
