@@ -362,7 +362,7 @@ function renderMetrics(data){
     tiles.push(`<div class="mtile"><div class="mlabel">${label}</div><div class="mvalue">${family.now[key]==null?'—':I.pct(Math.round(family.now[key]))}</div>${miniChart(family,[{key,color:CHART_A}],true)}</div>`)};
   pctTile('cpu','cpu');pctTile('gpu','gpu');pctTile('ram',t('menu.mem'));
   const network=familyById('network');
-  if(network)tiles.push(`<div class="mtile mnet"><div class="mlabel">${t('menu.network')} ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
+  if(network)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.network')} ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
   const sensors=familyById('sensors');
   if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.temp')}</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
   document.querySelector('#metrics').innerHTML=tiles.join('');

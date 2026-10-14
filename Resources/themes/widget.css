@@ -442,8 +442,8 @@ html[data-theme="widget"] .mac-tools>summary::before{content:"";width:6px;height
 html[data-theme="widget"] .mac-tools[open]>summary::before{transform:rotate(45deg)}
 html[data-theme="widget"] .metrics{gap:0;margin-top:10px;padding:10px 4px;border:0;border-radius:22px;background:var(--w-dark);box-shadow:0 0 0 .5px rgba(255,255,255,.18) inset,0 10px 26px rgba(10,10,40,.34)}
 html[data-theme="widget"] .mtile{padding:2px 8px;background:none}
-/* La vitesse réseau (« 2,3 Mo/s ») est la valeur la plus longue : sa tuile prend plus de place, sinon elle se tronque. */
-html[data-theme="widget"] .mtile.mnet{flex:1.8}
+/* Chaque tuile garde au moins la largeur de son contenu : la vitesse réseau (« 2,3 Mo/s ») est la valeur la plus longue et se tronquait. */
+html[data-theme="widget"] .mtile{flex:1 0 auto}
 html[data-theme="widget"] .mtile+.mtile{border-left:1px solid var(--hair)}
 html[data-theme="widget"] .mtile .mlabel{font-size:11.5px;font-weight:600;letter-spacing:0;text-transform:none}
 html[data-theme="widget"] .mtile .mvalue{margin:2px 0 5px;font-size:14px;font-weight:700;letter-spacing:-.02em;color:#fff}
