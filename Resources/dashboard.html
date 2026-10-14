@@ -319,6 +319,17 @@
   .billing-line{font-size:12px;color:var(--muted);margin:4px 0 10px}.billing-line.soon{color:var(--amber)}
   .reset-expiries{margin:4px 0 0;padding-left:16px;font-weight:400}.reset-expiries li{margin-top:2px}.reset-expiries li.soon{color:var(--amber)}
   .reset-later{color:var(--muted)}
+  /* Réglages · Barre des menus : aperçu fidèle, une ligne par fournisseur, styles en pictogrammes. */
+  .bar-preview{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft)}
+  .bar-item{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);white-space:nowrap}.bar-item b{color:var(--text);font-variant-numeric:tabular-nums}
+  .bar-sep{width:1px;align-self:stretch;background:var(--hair-strong)}.bar-chip{font-size:12px;padding:3px 9px;border:1px solid var(--hair-strong);border-radius:99px;color:var(--text);white-space:nowrap}
+  .quota-icon-rows{display:flex;flex-direction:column;gap:14px}.quota-icon-row{padding-top:12px;border-top:1px solid var(--hair)}.quota-icon-row:first-child{border-top:0;padding-top:0}
+  .quota-icon-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.quota-icon-head .dot{width:8px;height:8px;border-radius:50%;background:var(--provider);flex:none}.quota-icon-head strong{min-width:56px}
+  .field-select{background:var(--panel-bg-strong);border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 10px;max-width:260px;min-width:0}.field-note{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+  .icon-style-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .icon-style{display:grid;place-items:center;width:40px;height:34px;padding:0;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft);cursor:pointer}
+  .icon-style:hover{background:var(--soft-hover)}.icon-style.on{border-color:var(--hair-strong);background:var(--soft-hover);box-shadow:0 0 0 1px var(--blue)}
+  .quota-icon-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 </style>
 </head>
 <body>
@@ -774,6 +785,82 @@ function fanBoostSettings(data){
   }
   return `<section class="setting" data-group="system" style="display:block"><div class="setting-copy"><strong>Ventilateurs · Auto Apple / Boost temporaire</strong><small>Vitesse fixée à 60 %, 80 % ou au maximum prévu par le Mac, jamais en dessous de la vitesse du moment, pendant 15 à 60 minutes. Status prend la main sur la gestion thermique de macOS le temps du boost puis la lui rend : à l’échéance, si Status ne répond plus, ou si le Mac chauffe à un palier partiel. Si macOS refuse, le boost est annulé.</small></div><p class="connection-note">${esc(rpm)}</p><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${controls}</div><p class="connection-note" role="status">${esc(note)}</p></section>`;
 }
+// ─── Réglages · Barre des menus ─────────────────────────────────────────────
+// Une icône de quota par fournisseur (OpenAI à gauche, Claude à droite), puis les icônes système.
+// Seules les métriques de quota existent côté natif pour ces deux icônes : `lowest` et `system:*`
+// ne pilotent plus rien (les icônes système passent par menuBarWidgets), on ne les propose plus.
+const ICON_COLORS={openai:'#33A6FF',claude:'#FF8C47'};  // mêmes teintes que TMProviderGauge
+const isSessionWindow=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
+const windowMatchesKind=(w,kind)=>kind==='session'?isSessionWindow(w):kind==='weekly'?isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w):false;
+// Reflet de TMResolveMenuBarMetric pour un fournisseur : fraction RESTANTE montrée par l'icône,
+// compte épinglé d'abord, sinon le plus consommé des comptes ; un compte épinglé sans fenêtre ne
+// prête pas le chiffre d'un autre.
+function menuBarQuota(data,provider){
+  const metric=data?.prefs?.providerMenuMetrics?.[provider]||`${provider}:weekly`,m=parseMetric(metric);
+  const kind=m.kind||'weekly',accounts=accountsOf(data,provider);
+  const best=list=>{let top=null;list.forEach(a=>(a.windows||[]).forEach(w=>{
+    if(!windowMatchesKind(w,kind)||!Number.isFinite(Number(w.usedPercent)))return;
+    const u=Math.max(0,Math.min(100,Number(w.usedPercent)));if(top===null||u>top)top=u;}));return top};
+  const pinned=m.accountId?accounts.find(a=>a.accountId===m.accountId):null;
+  const used=pinned?best([pinned]):best(accounts);
+  return {metric,kind,accountId:pinned?pinned.accountId:'',remaining:used===null?null:(100-used)/100};
+}
+// Réplique SVG des onze dessins de StatusIconDesigns.h (18 × 18, partie pleine = quota restant).
+let iconUid=0;
+function iconSvg(style,remaining,color,size=18){
+  const known=Number.isFinite(remaining),v=known?Math.max(0,Math.min(1,remaining)):0,uid=`ic${iconUid++}`;
+  const f=n=>+n.toFixed(2),dash=`<rect x="6.5" y="8.5" width="5" height="1" fill="${color}"/>`;
+  const ring=(r,w,cx=9,cy=9)=>{const c=2*Math.PI*r;return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-opacity=".28" stroke-width="${w}"/>`
+    +(known&&v>0?`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="${v>=1?'butt':'round'}" stroke-dasharray="${f(c*v)} ${f(c)}" transform="rotate(-90 ${cx} ${cy})"/>`:'')};
+  const arc=(r,a0,a1,w,op)=>{const p=a=>[f(9+r*Math.cos(a*Math.PI/180)),f(13.5-r*Math.sin(a*Math.PI/180))];const [x0,y0]=p(a0),[x1,y1]=p(a1);
+    return `<path d="M${x0} ${y0}A${r} ${r} 0 0 1 ${x1} ${y1}" fill="none" stroke="${color}" stroke-opacity="${op}" stroke-width="${w}" stroke-linecap="round"/>`};
+  let g='';
+  switch(style){
+    case 'doubleRing':g=ring(7.3,1.55)+ring(4.4,1.55)+(known?'':dash);break;
+    case 'boldRing':g=ring(6.3,3.2)+(known?'':dash);break;
+    case 'doubleArc':g=[7.3,4.4].map(r=>arc(r,170,10,1.55,.28)+(known&&v>0?arc(r,170,170-160*v,1.55,1):'')).join('')+(known?'':dash);break;
+    case 'capsules':g=[[2,1.5,15],[10,4.5,12]].map(([x,y,h])=>`<rect x="${x}" y="${y}" width="5.5" height="${h}" rx="2.75" fill="none" stroke="${color}" stroke-width="1.2"/>`
+      +(known&&v>0?`<rect x="${x+1.3}" y="${f(y+1.3+(h-2.6)*(1-v))}" width="2.9" height="${f((h-2.6)*v)}" rx="1.4" fill="${color}"/>`:'')).join('')+(known?'':dash);break;
+    case 'reservoir':g=`<rect x="1" y="4" width="16" height="10" rx="3" fill="none" stroke="${color}" stroke-width="1.6"/>`+(known&&v>0?`<rect x="3" y="6" width="${f(12*v)}" height="6" fill="${color}"/>`:'')+(known?'':dash);break;
+    case 'segments':g=[0,1,2,3,4].map(i=>{const x=.5+i*3.5,part=Math.max(0,Math.min(1,v*5-i));
+      return `<rect x="${x}" y="4" width="2.7" height="10" rx="1" fill="${color}" fill-opacity=".25"/>`+(known&&part>0?`<rect x="${x}" y="${f(14-10*part)}" width="2.7" height="${f(10*part)}" rx="1" fill="${color}"/>`:'')}).join('')+(known?'':dash);break;
+    case 'hairline':g=`<rect x="2" y="6" width="14" height="6" rx="2.5" fill="none" stroke="${color}"/>`+(known&&v>0?`<rect x="3.5" y="7.5" width="${f(11*v)}" height="3" fill="${color}"/>`:'')+(known?'':dash);break;
+    case 'thinRing':g=ring(7.3,1.3)+(known?'':dash);break;
+    case 'tube':g=`<rect x="1.6" y="5.8" width="14.8" height="6.4" rx="3.2" fill="none" stroke="${color}" stroke-width="1.2"/>`
+      +(known&&v>0?`<rect x="2.6" y="6.8" width="${f(12.8*v)}" height="4.4" rx="2.2" fill="${color}" fill-opacity=".3"/><rect x="3.4" y="7.8" width="${f(11.2*v)}" height="2.4" rx="1.2" fill="${color}"/>`:'')+(known?'':dash);break;
+    case 'grid':g=Array.from({length:9},(_,i)=>{const x=1.5+(i%3)*5.2,y=18-(1.5+Math.floor(i/3)*5.2+4.4),part=Math.max(0,Math.min(1,v*9-i));
+      return known?`<rect x="${f(x)}" y="${f(y)}" width="4.4" height="4.4" rx="1.2" fill="${color}" fill-opacity="${f(.22+.78*part)}"/>`
+        :`<rect x="${f(x+.5)}" y="${f(y+.5)}" width="3.4" height="3.4" rx="1" fill="none" stroke="${color}"/>`}).join('');break;
+    case 'squircle':g=`<clipPath id="${uid}"><rect x="2.6" y="2.6" width="12.8" height="12.8" rx="4"/></clipPath><rect x="2.6" y="2.6" width="12.8" height="12.8" rx="4" fill="${color}" fill-opacity=".2" stroke="${color}" stroke-width="1.2"/>`
+      +(known&&v>0?`<rect x="2" y="${f(16-14*v)}" width="14" height="${f(14*v)}" fill="${color}" clip-path="url(#${uid})"/>`:'')+(known?'':`<rect x="6.5" y="8.1" width="5" height="1.4" fill="${color}"/>`);break;
+    default:g=ring(6.3,3.2);
+  }
+  return `<svg class="icon-svg" viewBox="0 0 18 18" width="${size}" height="${size}" aria-hidden="true">${g}</svg>`;
+}
+const PROVIDER_NAME={openai:'OpenAI',claude:'Claude'};
+const KIND_LABEL={weekly:'semaine',session:'5 h'};
+function hasSessionWindow(data,provider){return accountsOf(data,provider).some(a=>(a.windows||[]).some(isSessionWindow))}
+function barPreview(data,p){
+  const quotas=['openai','claude'].map(provider=>{const q=menuBarQuota(data,provider),style=p.providerIconStyles?.[provider]||'boldRing';
+    const pct=q.remaining===null?'—':Math.round(q.remaining*100)+' %';
+    return `<div class="bar-item" title="${PROVIDER_NAME[provider]} · ${KIND_LABEL[q.kind]||q.kind} · ${pct} restant">${iconSvg(style,q.remaining,ICON_COLORS[provider],26)}<span>${PROVIDER_NAME[provider]} <b>${pct}</b></span></div>`}).join('');
+  const system=(p.menuBarWidgets||[]).map(id=>(WIDGETS.find(([w])=>w===id)||[])[1]).filter(Boolean).map(l=>`<span class="bar-chip">${esc(l)}</span>`).join('');
+  return `<div class="bar-preview" aria-label="Aperçu de la barre des menus">${quotas}${system?`<i class="bar-sep"></i>${system}`:''}</div>`;
+}
+function quotaIconRow(data,p,provider){
+  const q=menuBarQuota(data,provider),style=p.providerIconStyles?.[provider]||'boldRing',accounts=accountsOf(data,provider);
+  const kinds=[['weekly','Semaine'],...(provider==='claude'||hasSessionWindow(data,provider)||q.kind==='session'?[['session','5 h']]:[])];
+  const metricFor=(kind,accountId)=>accountId?`acct:${provider}:${accountId}:${kind}`:`${provider}:${kind}`;
+  const windows=`<span class="segmented">${kinds.map(([k,l])=>`<button class="seg ${q.kind===k?'on':''}" onclick="send('setMenuBarMetric',{value:'${metricFor(k,q.accountId)}'})">${l}</button>`).join('')}</span>`;
+  const account=accounts.length>1?`<select class="field-select" aria-label="Compte ${PROVIDER_NAME[provider]}" onchange="send('setMenuBarMetric',{value:this.value})"><option value="${metricFor(q.kind,'')}" ${q.accountId?'':'selected'}>Le plus contraint</option>${accounts.map(a=>`<option value="${esc(metricFor(q.kind,a.accountId))}" ${q.accountId===a.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`:`<span class="field-note">${accounts[0]?esc(accounts[0].label):'Aucun compte'}</span>`;
+  const styles=ICON_DESIGNS.map(([v,l])=>`<button class="icon-style ${style===v?'on':''}" title="${l}" aria-label="${l}" aria-pressed="${style===v}" onclick="send('setProviderMenuIconStyle',{provider:'${provider}',value:'${v}'})">${iconSvg(v,.62,ICON_COLORS[provider],22)}</button>`).join('');
+  return `<div class="quota-icon-row" style="--provider:${ICON_COLORS[provider]}"><div class="quota-icon-head"><i class="dot"></i><strong>${PROVIDER_NAME[provider]}</strong>${windows}${account}</div><div class="icon-style-grid" role="group" aria-label="Style de l’icône ${PROVIDER_NAME[provider]}">${styles}</div></div>`;
+}
+function menuBarSettings(data,p){
+  return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>Barre des menus</strong><small>De gauche à droite : les deux icônes de quota, puis les icônes système.</small></div>${barPreview(data,p)}</section>
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>Quotas</strong><small>La partie pleine de l’icône est le quota restant. « Le plus contraint » suit le compte le plus entamé.</small></div><div class="quota-icon-rows">${['openai','claude'].map(pr=>quotaIconRow(data,p,pr)).join('')}</div><div class="quota-icon-actions"><button class="button" onclick="send('previewMenuIcons',{provider:'openai'})">Comparer dans la barre (OpenAI)</button><button class="button" onclick="send('previewMenuIcons',{provider:'claude'})">Comparer dans la barre (Claude)</button><button class="button" onclick="send('closeMenuIconPreviews')">Fermer l’aperçu</button></div></section>
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Icônes système et quotas hebdo</strong><small>Cliquez un nom pour l’afficher ou le masquer ; ← → règlent l’ordre.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>`;
+}
 function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',cur=parseMetric(metric),
   // Un segment de fenêtre reste allumé quand un compte est épinglé dessus : c'est toujours cette
   // fenêtre qui pilote l'icône, seul le compte a été restreint. Sans cela la rangée paraissait
@@ -781,9 +868,7 @@ function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claud
   opt=(v,l)=>{const m=parseMetric(v);const on=m.system||m.lowest?metric===v:(cur.provider===m.provider&&cur.kind===m.kind);
     const target=m.system||m.lowest?v:metricForWindow(p.providerMenuMetrics?.[m.provider]||metric,m.provider,m.kind);
     return `<button class="seg ${on?'on':''}" onclick="send('setMenuBarMetric',{value:'${target}'})">${l}</button>`},theme=p.theme||'blueprint',themeSwatches=THEMES.map(t=>`<button class="theme-swatch ${theme===t.id?'on':''}" onclick="send('setTheme',{value:'${t.id}'})"><span class="dot" style="background:${t.blue}"></span><span class="dot" style="background:${t.purple}"></span>${t.label}</button>`).join('');return `<div class="toolbar"><h1>Réglages</h1></div><div class="section-head"><div><h2>Barre des menus</h2><p>Ce que Status affiche en haut de l’écran, en permanence.</p></div></div><div class="settings">
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Icônes système dans la barre des menus</strong><small><strong>Cliquez un nom pour afficher ou masquer son icône.</strong> Pastille pleine : elle est visible dans la barre. Chaque icône est indépendante ; forme, couleur et contenu de son panneau se règlent sur la même ligne (« Panneau »). Les flèches ← → donnent l’ordre d’affichage (les icônes se recréent, d’où un bref clignotement) ; ⌘-glisser dans la barre reste possible mais macOS ne le mémorise pas ici. Cliquez une icône dans la barre pour ouvrir son panneau d’info.</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>Jauge affichée dans la barre des menus</strong><small>Quelle valeur accompagne l’icône en haut de l’écran. Les agrégats suivent le compte le plus contraint du fournisseur et changent donc de compte tout seuls ; « La plus élevée » fait de même tous fournisseurs confondus. Épinglez un compte précis pour un chiffre qui ne bouge pas de propriétaire. Les trois dernières affichent le système plutôt que les quotas.</small></div><div class="segmented">${opt('claude:weekly','Claude sem.')}${opt('claude:session','Claude 5 h')}${opt('openai:weekly','OpenAI sem.')}${opt('lowest','La plus élevée')}${opt('system:cpu','CPU')}${opt('system:temp','Temp.')}${opt('system:battery','Batterie')}</div>${pinnedOptions(data,metric)}</section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>Icônes des fournisseurs</strong><small>OpenAI en bleu à gauche, Claude en orange à droite. La partie pleine représente le quota restant du compte sélectionné dans le popup, ou du compte le plus contraint en mode « tous ». Aucun symbole à côté. Un tiret indique une donnée indisponible.</small></div>${['openai','claude'].map(provider=>`<div style="margin-top:16px"><strong>${provider==='openai'?'OpenAI':'Claude'}</strong><div class="segmented" style="margin:8px 0;flex-wrap:wrap">${ICON_DESIGNS.map(([v,l])=>`<button class="seg ${(p.providerIconStyles?.[provider]||'boldRing')===v?'on':''}" onclick="send('setProviderMenuIconStyle',{provider:'${provider}',value:'${v}'})">${l}</button>`).join('')}</div><button class="button" onclick="send('previewMenuIcons',{provider:'${provider}'})">Comparer pour ${provider==='openai'?'OpenAI':'Claude'}</button></div>`).join('')}<button class="button" style="margin-top:12px" onclick="send('closeMenuIconPreviews')">Fermer l’aperçu</button><div class="hint">Cliquer sur un aperçu choisit le dessin pour le fournisseur sélectionné. Niveaux fictifs dans l’aperçu.</div></section>
+  ${menuBarSettings(data,p)}
 </div><div class="section-head"><div><h2>Comportement</h2><p>Ces choix sont conservés entre les lancements.</p></div></div><div class="settings">
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>Thème</strong><small>Habillage visuel du popover et du tableau de bord.</small></div><div class="theme-swatch-grid">${themeSwatches}</div></section>
   <section class="setting" data-group="system"><div class="setting-copy"><strong>Lancer au démarrage</strong><small>Sans cela, les jauges ne se mettent plus à jour après un redémarrage tant que Status n’est pas ouvert.</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${p.launchAtLogin?'Activé':'Désactivé'}</button></section>

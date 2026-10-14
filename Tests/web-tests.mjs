@@ -500,17 +500,32 @@ section('accountsOf / historyKey — la liste de comptes');
     check(pickerHTML.includes(`value="${pro.accountId}" selected`), 'le compte épinglé est sélectionné');
     check(!menubar(`provider('claude','Claude',${JSON.stringify([perso, pro])},'claude:weekly')`).includes('" selected>Pro'), 'sans épinglage, l’agrégat est sélectionné');
 
-    // Réglages : la rangée ne doit pas paraître vide dès qu'un compte est épinglé.
-    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs: { menuBarMetric: pinPro } })},'appearance')`);
-    // La liste d'épinglage plus bas allume elle aussi un segment : on ne compte que la rangée
-    // des fenêtres, qui précède « pin-list ».
-    const windowRow = pinned.split('pin-list')[0];
-    const segs = windowRow.split('<button class="seg').filter(b => b.startsWith(' on'));
-    check(segs.length === 1, 'exactement un segment de fenêtre reste allumé');
-    check(segs[0].includes('Claude sem.'), 'et c’est bien la semaine Claude');
-    const onFor = id => pinned.includes(`class="seg on" onclick="send('setMenuBarMetric',{value:'acct:claude:${id}:weekly'})"`);
-    check(onFor(pro.accountId), 'le compte épinglé est marqué dans la liste');
-    check(!onFor(perso.accountId), 'et pas l’autre compte');
+    // Réglages : la fenêtre reste allumée quand un compte est épinglé, et le compte est sélectionné.
+    const prefs = { providerMenuMetrics: { claude: pinPro, openai: 'openai:weekly' } };
+    const pinned = dashboard(`settingsView(${JSON.stringify({ ...data, prefs })},'appearance')`);
+    const claudeRow = pinned.slice(pinned.indexOf('Compte Claude'));
+    check(/class="seg on" onclick="send\('setMenuBarMetric',\{value:'acct:claude:[^']+:weekly'\}\)">Semaine/.test(pinned),
+          'la fenêtre Semaine reste allumée quand un compte est épinglé');
+    check(claudeRow.includes(`value="${`acct:claude:${pro.accountId}:weekly`}" selected`), 'le compte épinglé est sélectionné dans la liste');
+    check(!claudeRow.includes(`value="acct:claude:${perso.accountId}:weekly" selected`), 'et pas l’autre compte');
+    check(!pinned.includes("value:'lowest'") && !pinned.includes("value:'system:"), 'plus de métrique « la plus élevée » ni système dans la jauge');
+    check(!pinned.includes('${'), 'la section Barre des menus rend du HTML complet');
+
+    // menuBarQuota : ce que montre l'icône, comme TMResolveMenuBarMetric.
+    const quotaOf = (provider, prefsX) => dashboard(`menuBarQuota(${JSON.stringify({ ...data, prefs: prefsX })},'${provider}')`);
+    check(Math.abs(quotaOf('claude', { providerMenuMetrics: { claude: pinPro } }).remaining - 0.28) < 1e-9, 'compte épinglé : son restant (72 % consommé)');
+    check(Math.abs(quotaOf('claude', {}).remaining - 0.28) < 1e-9, 'sans épinglage : le compte le plus consommé');
+    checkEqual(quotaOf('claude', { providerMenuMetrics: { claude: `acct:claude:${perso.accountId}:session` } }).remaining, null,
+               'un compte sans fenêtre 5 h : donnée absente, pas le chiffre d’un autre');
+    checkEqual(quotaOf('claude', { providerMenuMetrics: { claude: 'claude:session' } }).kind, 'session', 'la fenêtre 5 h se relit');
+    checkEqual(quotaOf('openai', {}).accountId, '', 'OpenAI sans épinglage : agrégat');
+    const icons = dashboard('ICON_DESIGNS.map(d=>d[0])');
+    check(icons.length === 11, 'onze styles d’icône proposés');
+    icons.forEach(id => { for (const rem of [null, 0, 0.5, 1]) {
+      const svg = dashboard(`iconSvg('${id}',${rem},'#33A6FF',22)`);
+      if (!svg.startsWith('<svg') || /NaN|undefined/.test(svg)) check(false, `${id} @${rem} : SVG valide`);
+    } });
+    check(true, 'chaque style se dessine à 0 %, 50 %, 100 % et sans donnée, sans NaN');
   }
 
   section('popover — le compte le plus contraint, nommé');
