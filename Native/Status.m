@@ -991,9 +991,13 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 }
 
 - (NSString *)iconStyleForProvider:(NSString *)provider {
-    NSString *key=[@"menuBarIconStyle." stringByAppendingString:provider];
-    NSString *style=[NSUserDefaults.standardUserDefaults stringForKey:key];
-    return [TMIconDesignIDs() containsObject:style] ? style : @"boldRing";
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+    NSString *style=[defaults stringForKey:[@"menuBarIconStyle." stringByAppendingString:provider]];
+    if ([TMIconDesignIDs() containsObject:style]) return style;
+    // Clé héritée de l'époque d'un seul dessin pour les deux fournisseurs : sans ce repli, une
+    // installation qui n'a jamais rouvert les Réglages retombait sur l'anneau épais sans prévenir.
+    NSString *legacy=[defaults stringForKey:@"menuBarIconStyle"];
+    return [TMIconDesignIDs() containsObject:legacy] ? legacy : @"boldRing";
 }
 
 #pragma mark - Aperçu au survol
@@ -1597,12 +1601,6 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     if ([action isEqualToString:@"duoPick"]) [self completeDuoWithIndex:[body[@"index"] integerValue]];
     if ([action isEqualToString:@"duoCancel"]) [self closePicker];
     if ([action isEqualToString:@"exportHistoryCSV"]) [self exportHistoryCSV];
-    if ([action isEqualToString:@"setMenuBarIconStyle"]) {
-        [self closeIconPreviews];
-        [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconStyle"];
-        [self updateStatusMenu];
-        [self pushData];
-    }
     if ([action isEqualToString:@"setMenuBarIconColor"]) {
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconColor"];
         [self updateStatusMenu];
@@ -1858,7 +1856,6 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"metricsInterval": @([self metricsInterval]),
             @"monitorInBackground": @([NSUserDefaults.standardUserDefaults boolForKey:@"monitorInBackground"]),
             @"quotaRefreshIntervalSeconds": @([self quotaRefreshIntervalSeconds]),
-            @"menuBarIconStyle": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconStyle"] ?: @"ring",
             @"providerMenuMetrics":@{@"openai":[self metricForProvider:@"openai"],@"claude":[self metricForProvider:@"claude"]},
             @"providerIconStyles":@{@"openai":[self iconStyleForProvider:@"openai"],@"claude":[self iconStyleForProvider:@"claude"]},
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
