@@ -711,5 +711,24 @@ section('Popup : crédits du compte sélectionné');
   checkEqual(credits({extraCredits:{status:'known',unit:'money',used:3}}),'','dépense seule ne devient pas un solde');
   check(credits({extraCredits:{status:'known',unit:'credits',balance:42,observedAt:1}}).includes('Relevé il y a'),'ancienneté du relevé affichée');
 }
+// ── Thèmes : tableau JS, liste blanche native et feuilles de style doivent rester alignés ──
+section('thèmes — THEMES, Status.m et feuilles CSS synchronisés');
+{
+  const ids = dashboard('THEMES.map(t=>t.id)');
+  const native = readFileSync(join(root, 'Native', 'Status.m'), 'utf8');
+  const allowed = [...native.slice(native.indexOf('validThemes = [NSSet setWithArray:'), native.indexOf(']]', native.indexOf('validThemes = [NSSet setWithArray:'))).matchAll(/@"([a-z]+)"/g)].map(m => m[1]);
+  checkEqual([...ids].sort(), [...allowed].sort(), 'les identifiants de THEMES sont ceux acceptés par setTheme');
+  const base = readFileSync(join(root, 'Resources', 'themes.css'), 'utf8');
+  for (const id of ids) {
+    let css = base;
+    try { css += readFileSync(join(root, 'Resources', 'themes', id + '.css'), 'utf8'); } catch {}
+    check(id === 'blueprint' || css.includes(`[data-theme="${id}"]`), `${id} : jetons [data-theme="${id}"] présents`);
+  }
+  for (const page of ['dashboard.html', 'menubar.html']) {
+    const html = readFileSync(join(root, 'Resources', page), 'utf8');
+    for (const id of ids.filter(i => ['moderne','dark','neon','bento','widget'].includes(i)))
+      check(html.includes(`themes/${id}.css`), `${page} charge themes/${id}.css`);
+  }
+}
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

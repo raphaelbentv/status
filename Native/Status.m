@@ -1540,13 +1540,14 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [self pushData];
     }
     if ([action isEqualToString:@"setTheme"]) {
-        // Entrée non fiable (vient de la webview) : seuls les six identifiants de themes.css
+        // Entrée non fiable (vient de la webview) : seuls les identifiants de themes.css et Resources/themes/*.css
         // sont acceptés, sinon un thème mal orthographié figerait l'app sur les jetons par
         // défaut de :root sans jamais le dire.
         static NSSet<NSString *> *validThemes;
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
-            validThemes = [NSSet setWithArray:@[@"blueprint", @"phosphore", @"synthwave", @"circuit", @"holograme", @"ion"]];
+            validThemes = [NSSet setWithArray:@[@"blueprint", @"phosphore", @"synthwave", @"circuit", @"holograme", @"ion",
+                                                    @"moderne", @"dark", @"neon", @"bento", @"widget"]];
         });
         NSString *value = [body[@"value"] isKindOfClass:NSString.class] ? body[@"value"] : @"";
         if ([validThemes containsObject:value]) {

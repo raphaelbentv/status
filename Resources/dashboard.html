@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="themes.css">
+<link rel="stylesheet" href="themes/moderne.css">
+<link rel="stylesheet" href="themes/dark.css">
+<link rel="stylesheet" href="themes/neon.css">
+<link rel="stylesheet" href="themes/bento.css">
+<link rel="stylesheet" href="themes/widget.css">
 <style>
   /* Le thème actif vient de themes.css ([data-theme] sur <html>, poussé par render()).
      --chart-a/--chart-b restent les marques de graphique du Moniteur, définies par thème. */
@@ -362,6 +367,9 @@ const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.duration
 const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
 const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+// Niveau d'une fenêtre d'après ce qu'il RESTE (≤ 20 % : crit, ≤ 45 % : warn) : exposé en data-level
+// pour que les thèmes colorent l'alerte d'après la vraie valeur. Les thèmes historiques l'ignorent.
+const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
 // Les sous-quotas par modèle (Fable) et Spark ne sont pas affichés : seul le volume général compte.
 const windowsFor=(providerId,account)=>{const windows=(account?.windows||[]).filter(w=>!isScopedWeekly(w)&&!/fable/i.test(`${w.windowId||''} ${w.label||''}`));return providerId==='openai'?windows.filter(w=>isWeekly(w)&&!isCodexSpark(w)):windows};
 const PROVIDERS=[{id:'openai',name:'OpenAI'},{id:'claude',name:'Claude'}];
@@ -390,7 +398,12 @@ const THEMES=[
   {id:'synthwave',label:'Synthwave',blue:'#3CF2FF',purple:'#FF3CD6'},
   {id:'circuit',label:'Circuit',blue:'#B4FF3C',purple:'#3CD6FF'},
   {id:'holograme',label:'Holograme',blue:'#7CC8FF',purple:'#E29AFF'},
-  {id:'ion',label:'Ion',blue:'#78E1FF',purple:'#B98CFF'}
+  {id:'ion',label:'Ion',blue:'#78E1FF',purple:'#B98CFF'},
+  {id:'moderne',label:'Moderne',blue:'#111111',purple:'#C2410C'},
+  {id:'dark',label:'Dark',blue:'#F5F5F5',purple:'#FF4A3D'},
+  {id:'neon',label:'Néon',blue:'#3DA9FF',purple:'#FF3DA5'},
+  {id:'bento',label:'Bento',blue:'#1A1816',purple:'#2F4BFF'},
+  {id:'widget',label:'Widget',blue:'#0F8A63',purple:'#C65A2E'}
 ];
 // Widgets système de la barre des menus (mêmes ids que TMMenuBarWidgetIDs côté natif).
 const WIDGETS=[['cpu','CPU'],['memory','Mémoire'],['gpu','GPU'],['network','Réseau'],['temperature','Température'],['battery','Batterie'],['disk','Disque'],['claudeWeek','Claude · semaine'],['codexWeek','Codex · semaine']];
@@ -525,7 +538,7 @@ function resetExpiries(reset){
   }
   return reset.expiryText?`<span class="reset-expiry"> · ${esc(reset.expiryText)}</span>`:'';
 }
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card" data-level="${levelOf(value)}" data-kind="${isWeekly(w)?'weekly':'session'}" style="--pct:${value??0}"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
@@ -605,14 +618,14 @@ function accountBlock(account,history){
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?'Aucune fenêtre disponible pour ce compte.':`Non connecté.<br><button class="account-action" onclick="goToView('connections')">Ouvrir Connexions</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?'⟳ en direct · ':account.stale?'⚠ mesure ancienne · ':'dernière mesure '}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
-  return `<div class="account-block"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${billingLine(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
+  return `<div class="account-block" data-connected="${connected?1:0}" data-error="${account.error?1:0}"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?'Attention':'Connecté'):'Non connecté'}</span></div>${freshness}${billingLine(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(account.error)}</div>`:''}</div>`;
 }
 function providerBlock(provider,accounts,history){
   const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">Aucun compte ${provider.name}.<br><button class="account-action" onclick="goToView('connections')">Ajouter un compte</button></div>`;
   // Le fournisseur annonce combien de comptes il porte et ouvre l'endroit où on en ajoute : sans
   // ce chemin, « voir Connexions » n'était qu'une phrase, et l'ajout restait à découvrir.
   const manage=`<button class="provider-manage" onclick="goToView('connections')" title="Gérer les comptes ${provider.name}">gérer</button>`;
-  return `<section class="provider-block" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
+  return `<section class="provider-block" data-provider="${provider.id}" style="--provider:${providerColor(provider.id)}"><div class="provider-block-head"><div class="provider"><i class="provider-dot"></i>${provider.name}</div><span class="status-label"><i></i>${accounts.length} compte${accounts.length>1?'s':''}${manage}</span></div>${blocks}${providerCostTotal(provider.id)}</section>`;
 }
 // Vue « 7 jours » (feature 7) : superpose les fenêtres hebdomadaires des deux fournisseurs sur
 // une semaine glissante, à partir de l'historique horodaté. OpenAI y figure au même titre que
