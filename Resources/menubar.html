@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="themes.css">
+<script src="i18n.js"></script>
 <link rel="stylesheet" href="themes/moderne.css">
 <link rel="stylesheet" href="themes/dark.css">
 <link rel="stylesheet" href="themes/neon.css">
@@ -136,11 +137,12 @@
 </style>
 </head>
 <body>
-<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><div id="fanControls"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><div id="fanControls"></div><details class="mac-tools"><summary data-i18n="menu.macTools"></summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" data-i18n-title="menu.syncTip">…</button><button class="go" onclick="send('openDashboard')" data-i18n="menu.open"></button><button onclick="send('quit')" style="color:var(--danger)" data-i18n-title="menu.quit">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 document.querySelector('.mac-tools').addEventListener('toggle',event=>
   send('setMacToolsVisible',{visible:event.currentTarget.open}));
+const I=StatusI18n;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
@@ -158,13 +160,13 @@ const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'
 const reset=w=>{
   if(!w?.resetsAt)return '—';
   const s=w.resetsAt-Date.now()/1000;
-  if(s<=0)return 'réinitialisé';
+  if(s<=0)return t('d.reset');
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
-  if(d>0)return `dans ${d} j ${h} h`;
-  if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
-  return `dans ${m} min`;
+  if(d>0)return t('d.in',{v:`${d} ${t('unit.day')} ${h} ${t('unit.hour')}`});
+  if(h>0)return t('d.in',{v:`${h} ${t('unit.hour')} ${String(m).padStart(2,'0')}`});
+  return t('d.in',{v:`${m} ${t('unit.min')}`});
 };
-const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
+const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?t('d.now'):min<60?t('d.agoMin',{n:min}):t('d.agoHour',{n:Math.round(min/60)})};
 // Le popover garde deux colonnes, une par fournisseur, et y montre le compte le plus contraint —
 // celui sur lequel il y a quelque chose à décider. La grille tient huit rangées en face l'une de
 // l'autre : y empiler N comptes la ferait éclater, et le détail par compte a déjà sa place dans le
@@ -194,26 +196,26 @@ function quotaRail(window,primary=false){
   const value=used(window);
   if(value===null||!Number.isFinite(value))return '';
   const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
-  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${esc(window.label||window.windowId||'Quota')} consommé" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${value} % consommé, ${100-value} % restant"><i style="width:${value}%;background:${color}"></i></div>`;
+  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${t('menu.consumed',{label:esc(I.label(window.label)||window.windowId||'Quota')})}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${t('menu.valueText',{used:I.pct(value),left:I.pct(100-value)})}"><i style="width:${value}%;background:${color}"></i></div>`;
 }
 function extraCredits(account){
   if(!account)return '';
   const c=account.extraCredits||{},finite=n=>typeof n==='number'&&Number.isFinite(n);
-  const fmt=n=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(n);
-  let value='Solde indisponible',detail='';
+  const fmt=n=>I.numMax(n,2);
+  let value=t('credits.balanceUnavailable'),detail='';
   if(c.status==='known'&&c.unit==='credits'){
-    value=c.unlimited?'Crédits illimités':finite(c.balance)?`${fmt(c.balance)} crédits restants`:
-      c.hasCredits===false?'Aucun crédit supplémentaire':'Solde indisponible';
+    value=c.unlimited?t('credits.unlimited'):finite(c.balance)?t('credits.left',{v:fmt(c.balance)}):
+      c.hasCredits===false?t('credits.none'):t('credits.balanceUnavailable');
   }else if(c.status==='known'&&c.unit==='money'){
     const currency=c.balanceCurrency||c.currency;
-    if(finite(c.balance))value=c.balance===0?'Aucun crédit supplémentaire':
-      `${/^[A-Z]{3}$/.test(currency||'')?new Intl.NumberFormat('fr-FR',{style:'currency',currency}).format(c.balance):`${fmt(c.balance)} (devise non fournie)`} restants`;
-    if(c.enabled===false)detail='Usage supplémentaire désactivé';
+    if(finite(c.balance))value=c.balance===0?t('credits.none'):
+      t('credits.moneyLeft',{v:/^[A-Z]{3}$/.test(currency||'')?I.money(c.balance,currency,2):t('credits.noCurrency',{v:fmt(c.balance)})});
+    if(c.enabled===false)detail=t('menu.extraDisabled');
   }
   if(c.observedAt&&Date.now()/1000-c.observedAt>120)
-    detail=[detail,`Relevé ${ageLabel(c.observedAt)}`].filter(Boolean).join(' · ');
-  if(c.status!=='known'||value==='Solde indisponible')return '';  // rien d'utile à dire
-  return `<div class="extra-credits"><span>Crédits supplémentaires</span><strong>${esc(value)}</strong>${detail?`<small>${esc(detail)}</small>`:''}</div>`;
+    detail=[detail,t('menu.reading',{v:ageLabel(c.observedAt)})].filter(Boolean).join(' · ');
+  if(c.status!=='known'||value===t('credits.balanceUnavailable'))return '';  // rien d'utile à dire
+  return `<div class="extra-credits"><span>${t('credits.title')}</span><strong>${esc(value)}</strong>${detail?`<small>${esc(detail)}</small>`:''}</div>`;
 }
 // Une carte par fournisseur, pleine largeur : le volume hebdo restant en grand, sa jauge et son
 // renouvellement ; la fenêtre 5 h de Claude en ligne compacte. Ni prévision, ni historique de
@@ -225,19 +227,19 @@ function provider(id,name,accounts,metric){
   const connected=id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
   const ink=id==='openai'?'var(--blue)':'var(--purple)';
   const old=account?.stale||(account?.capturedAt&&Date.now()/1000-account.capturedAt>1800);
-  const note=!connected?'non connecté':account?.liveSource?'⟳ en direct':old?`⚠ mesure ancienne · ${ageLabel(account.capturedAt)}`:account?.capturedAt?`mesure ${ageLabel(account.capturedAt)}`:'connecté · en attente';
+  const note=!connected?t('menu.notConnected'):account?.liveSource?t('menu.live'):old?t('menu.stale',{v:ageLabel(account.capturedAt)}):account?.capturedAt?t('menu.measure',{v:ageLabel(account.capturedAt)}):t('menu.waiting');
   const noteClass=account?.liveSource?'live':old?'stale':'';
   const value=used(weekly),level=value===null?'empty-value':value>=95?'critical':value>=80?'warning':'';
   const pinned=parseMetric(metric).accountId;
   // « le plus contraint » = agrégat : la carte suit seule le compte le plus entamé.
-  const picker=(accounts||[]).length>1?`<select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value);this.blur()"><option value="" ${!pinned?'selected':''}>Le plus entamé</option>${accounts.map(a=>`<option value="${esc(a.accountId)}" ${pinned&&a.accountId===account?.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`
+  const picker=(accounts||[]).length>1?`<select class="provider-picker" aria-label="${t('menu.account',{name})}" onchange="selectPopupAccount('${id}',this.value);this.blur()"><option value="" ${!pinned?'selected':''}>${t('menu.mostUsed')}</option>${accounts.map(a=>`<option value="${esc(a.accountId)}" ${pinned&&a.accountId===account?.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`
     :account?`<span class="account-name">${esc(account.label)}</span>`:'';
-  const action=!connected?`<button class="account-action" onclick="send('${account?(id==='openai'?'loginOpenAI':'connectClaudeWeb'):'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?'connecter':'ajouter un compte'}</button>`:'';
-  const sessionRow=session?`<div class="session-row" data-level="${levelOf(used(session))}"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${100-used(session)} %</b><small>${reset(session)}</small></div>`:'';
+  const action=!connected?`<button class="account-action" onclick="send('${account?(id==='openai'?'loginOpenAI':'connectClaudeWeb'):'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?t('menu.connect'):t('menu.addAccount')}</button>`:'';
+  const sessionRow=session?`<div class="session-row" data-level="${levelOf(used(session))}"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${I.pct(100-used(session))}</b><small>${reset(session)}</small></div>`:'';
   return `<section class="quota-card" data-provider="${id}" data-level="${levelOf(value)}" style="--provider:${ink}">
     <header><span class="provider-name">${name}</span>${picker}</header>
     <div class="quota-main"><div class="value ${level}">${value===null?'—':(100-value)+'<span class="unit">%</span>'}</div>
-      <div class="quota-side"><div class="quota-label">restant cette semaine</div>${quotaRail(weekly,true)}<div class="reset">${weekly?'Renouvellement '+reset(weekly):'—'}</div></div></div>
+      <div class="quota-side"><div class="quota-label">${t('menu.leftThisWeek')}</div>${quotaRail(weekly,true)}<div class="reset">${weekly?t('menu.renewal',{v:reset(weekly)}):'—'}</div></div></div>
     ${sessionRow}${extraCredits(account)}
     <footer>${(accounts||[]).length>1&&!pinned&&account?`<b class="who" title="${esc(account.label)}">${esc(account.label)}</b>`:''}<span class="account-note ${noteClass}">${note}</span>${action}</footer></section>`;
 }
@@ -250,36 +252,36 @@ function tools(t){
   const awake=t?.awake||{},lock=t?.keyboardLock||{},lid=t?.lidMode||{};
   // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
   // après l'avoir accordée dans Réglages système.
-  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?'capot · '+Math.ceil((lid.remainingSeconds||0)/60)+' min':'capot fermé',lid.active&&!lid.unconfirmed)
-    +btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
-    +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
+  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?t('menu.lidShort',{n:Math.ceil((lid.remainingSeconds||0)/60)}):t('menu.lid'),lid.active&&!lid.unconfirmed)
+    +btn('toggleAwake','☾',awake.active?t('menu.awakeOn'):t('menu.awake'),awake.active)
+    +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?t('menu.allowAccess'):t('menu.cleaning'),lock.state==='locked');
 }
 // Ventilateurs : palier (60 %, 80 %, max) et durée choisis d'un geste, sans champ à saisir. Le
 // natif borne et revalide tout ; le service vérifie la vitesse réelle et rend la main à macOS.
 let fanPercent=100,fanMinutes=15;
-const FAN_LEVELS=[[60,'60 %'],[80,'80 %'],[100,'Max']],FAN_DURATIONS=[15,30,60];
+const FAN_LEVELS=[60,80,100],FAN_DURATIONS=[15,30,60];
 function setFanChoice(kind,value){if(kind==='percent')fanPercent=value;else fanMinutes=value;if(lastData)renderMenu(lastData);}
-function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.some(([p])=>p===fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
-const fanLevelLabel=p=>p>=100?'Max':p+' %';
+function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.includes(fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
+const fanLevelLabel=p=>p>=100?t('mon.maxCap'):I.pct(p);
 function fanControls(tools){
   const lid=tools?.lidMode||{},f=lid.fanBoost||{},service=lid.authorized&&f.version===2&&!lid.unconfirmed;
   const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost;
-  const rpm=(f.fans||[]).map(v=>Math.round(v.rpm).toLocaleString('fr-FR')).join(' · ');
+  const rpm=(f.fans||[]).map(v=>I.num(Math.round(v.rpm),0)).join(' · ');
   const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="setFanChoice('${kind}',${value})">${label}</button>`;
-  let body,note=f.message||'';
+  let body,note=f.message?I.tm(f.message):'';
   if(needsStop){
-    const state=lid.unconfirmed?'État à vérifier':active?`${f.verified?'Boost':'Montée'} ${fanLevelLabel(f.percent||100)} · ${Math.ceil((f.remainingSeconds||0)/60)} min`:f.manualOutsideBoost?'Ventilateur en manuel':'Retour à vérifier';
-    body=`<div class="fan-row"><span class="fan-state ${active&&f.verified?'on':''}">${state}</span><button class="account-action" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">Auto Apple</button></div>`;
-    if(lid.unconfirmed)note=lid.message||note;
+    const state=lid.unconfirmed?t('lid.toCheck'):active?t('mon.fanState',{state:f.verified?t('mon.boost'):t('mon.ramp'),level:fanLevelLabel(f.percent||100),n:Math.ceil((f.remainingSeconds||0)/60)}):f.manualOutsideBoost?t('mon.fanManual'):t('fan.backToCheck');
+    body=`<div class="fan-row"><span class="fan-state ${active&&f.verified?'on':''}">${state}</span><button class="account-action" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button></div>`;
+    if(lid.unconfirmed)note=I.tm(lid.message||note);
   }else if(service){
-    body=`<div class="fan-row"><span class="segmented">${FAN_LEVELS.map(([p,l])=>seg('percent',p,l,fanPercent===p)).join('')}</span></div>
-      <div class="fan-row"><span class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' min',fanMinutes===m)).join('')}</span><button class="account-action" ${lid.busy?'disabled':''} onclick="startFanBoost()">Boost</button></div>`;
-    note=note&&note!=='Auto Apple'?note:'Auto Apple · macOS pilote les ventilateurs.';
+    body=`<div class="fan-row"><span class="segmented">${FAN_LEVELS.map(p=>seg('percent',p,fanLevelLabel(p),fanPercent===p)).join('')}</span></div>
+      <div class="fan-row"><span class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' '+t('unit.min'),fanMinutes===m)).join('')}</span><button class="account-action" ${lid.busy?'disabled':''} onclick="startFanBoost()">${t('mon.boost')}</button></div>`;
+    note=note&&note!=='Auto Apple'?note:t('fan.macControls');
   }else{
-    body=`<div class="fan-row"><button class="account-action" onclick="send('authorizeLidMode')">${lid.authorized?'Mettre le service à jour':'Autoriser le service macOS'}</button></div>`;
-    note=lid.authorized?'Service à mettre à jour pour piloter les ventilateurs.':'Le contrôle passe par le service Status, installé une fois.';
+    body=`<div class="fan-row"><button class="account-action" onclick="send('authorizeLidMode')">${lid.authorized?t('fan.updateService'):t('lid.authorize')}</button></div>`;
+    note=lid.authorized?t('menu.fanUpdateNote'):t('menu.fanInstallNote');
   }
-  return `<div class="fans"><div class="fan-head"><strong>Ventilateurs</strong><span>${rpm?esc(rpm)+' tr/min':''}</span></div>${body}<small class="fan-note" role="status">${esc(note)}</small></div>`;
+  return `<div class="fans"><div class="fan-head"><strong>${t('w.temp.fans').replace(/^./,c=>c.toUpperCase())}</strong><span>${rpm?esc(rpm)+' '+t('unit.rpm'):''}</span></div>${body}<small class="fan-note" role="status">${esc(note)}</small></div>`;
 }
 // Un curseur par écran pilotable, les non-pilotables omis (popover trop dense pour l'état « sans
 // réponse » détaillé — voir le tableau de bord). Nom tronqué par CSS, pas ici : le survol du
@@ -290,7 +292,7 @@ function brightnessRow(displays){
   // Un glyphe ☀ ouvre la section : le curseur se lit alors comme « luminosité », pas comme une
   // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne,
   // puis le rétroéclairage du clavier (kind « keyboard »), signalé par ⌨ au lieu de ☀.
-  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="${d.kind==='keyboard'?'Rétroéclairage':'Luminosité'} — ${esc(d.name)}">${d.kind==='keyboard'?'⌨':'☀'}</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
+  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="${d.kind==='keyboard'?t('menu.backlight'):t('disp.brightness')} — ${esc(d.name)}">${d.kind==='keyboard'?'⌨':'☀'}</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=I.pct(+this.value)" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${I.pct(d.brightness??0)}</span></div>`).join('');
 }
 // Grammaire de menuBarMetric, identique à celle du natif (voir StatusQuota.h) :
 //   "lowest" | "<provider>:<kind>" (agrégat) | "acct:<provider>:<accountId>:<kind>" (épinglé).
@@ -329,22 +331,22 @@ function renderMenu(data){
   const accounts=data.accounts||[];
   const of=providerId=>accounts.filter(a=>a.provider===providerId);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
-  setHTML('#notificationNotice',data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>Alertes désactivées sur ce Mac</span><button onclick="send('openNotificationSettings')">Réglages</button></div>`:'');
+  setHTML('#notificationNotice',data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>${t('notice.title')}</span><button onclick="send('openNotificationSettings')">${t('set.title')}</button></div>`:'');
   setHTML('#providers',provider('openai','OpenAI',of('openai'),data.prefs?.providerMenuMetrics?.openai||metric)+provider('claude','Claude',of('claude'),data.prefs?.providerMenuMetrics?.claude||metric));
   setHTML('#brightness',brightnessRow(data.displays));
   setHTML('#tools',tools(data.tools));
   setHTML('#fanControls',fanControls(data.tools));
   const sync=document.querySelector('#sync');
   sync.textContent=data.refreshing
-    ? 'actualisation…'
+    ? t('menu.refreshing')
     : data.backoffUntil
-      ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
-      : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
+      ? t('menu.pause',{v:reset({resetsAt:data.backoffUntil/1000})})
+      : t('menu.updated',{v:I.date(data.updatedAt,{hour:'2-digit',minute:'2-digit'})});
   sync.disabled=Boolean(data.refreshing);
 }
 // Métriques système : flux séparé, poussé à 1 Hz par le natif tant que le popover est ouvert.
 const CHART_A='#0891B2',CHART_B='#8B5CF6';
-const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const units=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+units[i]};
+const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const units=['b','kb','mb','gb'].map(k=>t('unit.'+k));let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return I.num(i&&v<10?v:Math.round(v),i&&v<10?1:0)+' '+units[i]+'/s'};
 function miniChart(family,specs,percent){
   const drawn=specs.map(s=>({...s,values:family.series?.[s.key]||[]})).filter(s=>s.values.length>1);
   if(!drawn.length)return '';
@@ -357,12 +359,12 @@ function renderMetrics(data){
   const familyById=id=>data?.families?.find(f=>f.id===id);
   const tiles=[];
   const pctTile=(id,label)=>{const family=familyById(id);if(!family)return;const key=id==='gpu'?'usage':id==='ram'?'usedPercent':'total';
-    tiles.push(`<div class="mtile"><div class="mlabel">${label}</div><div class="mvalue">${family.now[key]==null?'—':Math.round(family.now[key])+' %'}</div>${miniChart(family,[{key,color:CHART_A}],true)}</div>`)};
-  pctTile('cpu','cpu');pctTile('gpu','gpu');pctTile('ram','mém');
+    tiles.push(`<div class="mtile"><div class="mlabel">${label}</div><div class="mvalue">${family.now[key]==null?'—':I.pct(Math.round(family.now[key]))}</div>${miniChart(family,[{key,color:CHART_A}],true)}</div>`)};
+  pctTile('cpu','cpu');pctTile('gpu','gpu');pctTile('ram',t('menu.mem'));
   const network=familyById('network');
-  if(network)tiles.push(`<div class="mtile"><div class="mlabel">réseau ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
+  if(network)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.network')} ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
   const sensors=familyById('sensors');
-  if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">temp</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
+  if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.temp')}</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
   document.querySelector('#metrics').innerHTML=tiles.join('');
 }
 // Tick incrémental : même mécanique que dashboard.html — le natif n'envoie les séries qu'à
@@ -386,6 +388,8 @@ function mergeMetricsDelta(state,payload){
   delete merged.delta;
   return merged;
 }
+I.onChange(()=>{I.apply();if(lastData)renderMenu(lastData);if(lastMetrics)renderMetrics(lastMetrics)});
+I.apply();
 window.StatusMenu={update(data){lastData=data;renderMenu(data)},patch(part){if(!lastData)return;lastData={...lastData,...part};renderMenu(lastData)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
 // Keep the "dans X min" countdowns honest between polls.
 setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
