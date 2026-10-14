@@ -18,7 +18,7 @@ clang -fobjc-arc -O2 -I "$ROOT/Native" \
   "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusI18n.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
-mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/icons"
+mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/icons" "$OUTPUT/Contents/Resources/fonts" "$OUTPUT/Contents/Resources/themes"
 cp "$BUILD" "$OUTPUT/Contents/MacOS/Status"
 cp "$ROOT/Resources/Info.plist" "$OUTPUT/Contents/Info.plist"
 cp "$ROOT/Resources/StatusIcon.icns" "$OUTPUT/Contents/Resources/StatusIcon.icns"
@@ -31,6 +31,8 @@ cp "$ROOT/Resources/i18n.js" "$OUTPUT/Contents/Resources/i18n.js"
 mkdir -p "$OUTPUT/Contents/Resources/i18n"
 cp "$ROOT/Resources/i18n/"*.json "$OUTPUT/Contents/Resources/i18n/"
 cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"
+cp "$ROOT/Resources/fonts/"* "$OUTPUT/Contents/Resources/fonts/"
+cp "$ROOT/Resources/themes/"*.css "$OUTPUT/Contents/Resources/themes/"
 
 clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation \
   "$ROOT/Native/StatusClaudeCollector.m" "$ROOT/Native/StatusClaudeBridge.m" \

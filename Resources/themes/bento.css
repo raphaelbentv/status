@@ -1,0 +1,436 @@
+/* bento — thème clair crème : grosses cartes arrondies, navigation en pilule en haut, encre + un seul
+   accent cobalt. Maquette : designs/v4/bento.html. Chargé par dashboard.html et menubar.html après
+   themes.css et leur <style> inline : tout est préfixé html[data-theme="bento"] pour l'emporter en
+   spécificité sur ce <style>. Les thèmes historiques ne sont pas touchés. */
+
+/* ═══ 1. Jetons ═══════════════════════════════════════════════════════════════
+   Aussi lus par widget.html et picker.html. OpenAI = encre, Claude = cobalt. Les couleurs d'état
+   sont des variantes « texte » (≥ 4,5:1 sur la carte claire) ; en contexte encre elles sont
+   redéfinies plus bas. Les jetons dérivés sont écrits en littéraux : un var() déclaré ici serait
+   figé à la racine et ne suivrait pas les contextes sombres. */
+[data-theme="bento"]{
+  color-scheme:light;
+  --bg:#EBE9E2;--sidebar:#EBE9E2;--panel-bg:#FBFAF6;--panel-bg-strong:#FBFAF6;
+  --text:#171613;--muted:#5B5850;
+  --hair:#D6D2C6;--hair-strong:#C3BEAF;
+  --soft:rgba(23,22,19,.055);--soft-hover:rgba(23,22,19,.09);
+  --blue:#171613;--blue-soft:rgba(23,22,19,.06);
+  --purple:#2F55FF;--purple-soft:rgba(47,85,255,.08);
+  --green:#17784A;--amber:#9A5200;--danger:#C42E1C;
+  --chart-a:#171613;--chart-b:#2F55FF;
+  --grid:transparent;--bg-image:none;--bg-size:auto;
+  --font:"Instrument Sans",-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --radius:12px;--clip:none;
+  /* Jetons propres au thème (contexte clair par défaut). */
+  --disp:"Bricolage Grotesque","Instrument Sans",ui-rounded,-apple-system,sans-serif;
+  --b-tile:#FBFAF6;--b-stone:#DEDBD1;--b-ink:#171613;--b-acc:#2F55FF;
+  --trk:rgba(23,22,19,.11);--chip-bg:#E4E1D7;--chip-fg:#171613;
+  --btn-bg:#171613;--btn-fg:#FFFFFF;--seg-on-bg:#FBFAF6;--seg-on-fg:#171613;
+  --warn:#9A5200;--crit:#C42E1C;--on-warn:#FFFFFF;--on-crit:#FFFFFF;
+  --dot:#2F55FF;--ring:#2F55FF;
+}
+
+/* Contextes « encre » (carte sombre) et « cobalt » : on redéclare les jetons lus par le contenu,
+   tout ce qui est dedans (boutons, chips, jauges, filets) s'adapte seul. */
+html[data-theme="bento"] :is(
+  .provider-block[data-provider="claude"],.connection-panel[style*="--blue"],
+  .metric-card[data-family="sensors"],.display-card:first-child,
+  .popover .quota-card[data-provider="claude"]){
+  --text:#FFFFFF;--muted:rgba(255,255,255,.72);
+  --hair:rgba(255,255,255,.16);--hair-strong:rgba(255,255,255,.28);
+  --soft:rgba(255,255,255,.08);--soft-hover:rgba(255,255,255,.15);
+  --panel-bg:rgba(255,255,255,.07);--panel-bg-strong:rgba(255,255,255,.07);
+  --trk:rgba(255,255,255,.2);--chip-bg:rgba(255,255,255,.16);--chip-fg:#FFFFFF;
+  --btn-bg:#FFFFFF;--btn-fg:#171613;--seg-on-bg:#FFFFFF;--seg-on-fg:#171613;
+  --warn:#FFB454;--crit:#FF7A66;--on-warn:#171613;--on-crit:#171613;
+  --amber:#FFB454;--danger:#FF8A78;--green:#6EE7A8;
+  --chart-a:#FFFFFF;--chart-b:#8EA2FF;--dot:#8EA2FF;--ring:#8EA2FF;
+  background:#171613;color:#FFFFFF;
+}
+html[data-theme="bento"] .connection-panel[style*="--purple"]{
+  --text:#FFFFFF;--muted:rgba(255,255,255,.86);
+  --hair:rgba(255,255,255,.3);--hair-strong:rgba(255,255,255,.45);
+  --soft:rgba(255,255,255,.14);--soft-hover:rgba(255,255,255,.22);
+  --panel-bg:rgba(255,255,255,.12);--panel-bg-strong:rgba(255,255,255,.12);
+  --trk:rgba(255,255,255,.28);--chip-bg:rgba(255,255,255,.2);--chip-fg:#FFFFFF;
+  --btn-bg:#FFFFFF;--btn-fg:#1B3BD6;--seg-on-bg:#FFFFFF;--seg-on-fg:#171613;
+  --warn:#FFD27A;--crit:#FFB4A8;--on-warn:#171613;--on-crit:#171613;
+  --amber:#FFD27A;--danger:#FFD0C8;--green:#C5F5DC;--dot:#FFFFFF;--ring:#FFFFFF;
+  background:#2F55FF;color:#FFFFFF;
+}
+
+/* ═══ 2. Base, coque et barre supérieure ═════════════════════════════════════ */
+html[data-theme="bento"] body{font:400 13.5px/1.4 var(--font);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+html[data-theme="bento"] .shell{--muted:#5B5850;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);padding-top:0;background:var(--bg)}
+/* La sidebar devient la barre du haut. 88 px à gauche : place des boutons de fenêtre macOS. */
+html[data-theme="bento"] .sidebar{flex-direction:row;align-items:center;gap:14px;min-height:58px;padding:8px 24px 4px 88px;background:transparent;border:0;min-width:0}
+html[data-theme="bento"] .product{display:flex;align-items:center;gap:8px;margin:0;font:800 21px/1 var(--disp);letter-spacing:-.04em;text-transform:none;color:var(--text);flex:none}
+html[data-theme="bento"] .product::before{content:"";width:22px;height:22px;border-radius:7px;flex:none;
+  background:linear-gradient(#FBFAF6,#FBFAF6) 4px 4px/14px 8px no-repeat,linear-gradient(#FBFAF6,#FBFAF6) 4px 14px/6px 4px no-repeat,linear-gradient(#2F55FF,#2F55FF) 12px 14px/6px 4px no-repeat,#171613}
+html[data-theme="bento"] .nav{display:flex;gap:4px;padding:4px;margin-left:10px;border-radius:99px;background:var(--b-stone);flex:none}
+html[data-theme="bento"] .nav button{width:auto;margin:0;padding:7px 16px 7px 39px;border:0;border-radius:99px;font:500 13.5px/1.4 var(--font);color:var(--muted);white-space:nowrap;background:transparent}
+html[data-theme="bento"] .nav button:hover{background:rgba(23,22,19,.07);color:var(--text)}
+html[data-theme="bento"] .nav button.active{background:#171613;color:#FFFFFF;font-weight:500}
+html[data-theme="bento"] .nav button::before{content:"";left:16px;width:16px;height:16px;opacity:1;background:currentColor;
+  -webkit-mask:var(--ico) center/contain no-repeat;mask:var(--ico) center/contain no-repeat}
+html[data-theme="bento"] .nav button.active::before{color:#FFFFFF}
+html[data-theme="bento"] .nav button[data-view="overview"]::before{content:"";--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 14a7 7 0 1 1 14 0'/%3E%3Cpath d='M10 14l3.5-5'/%3E%3C/svg%3E")}
+html[data-theme="bento"] .nav button[data-view="monitor"]::before{content:"";--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 10h3l2-5 3 10 2-5h6'/%3E%3C/svg%3E")}
+html[data-theme="bento"] .nav button[data-view="displays"]::before{content:"";--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='3.5' width='15' height='10' rx='1.5'/%3E%3Cpath d='M7 17h6M10 13.5V17'/%3E%3C/svg%3E")}
+html[data-theme="bento"] .nav button[data-view="settings"]::before{content:"";--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10' cy='10' r='2.6'/%3E%3Cpath d='M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6'/%3E%3C/svg%3E")}
+html[data-theme="bento"] .sidebar-spacer{flex:1}
+html[data-theme="bento"] .sidebar-bottom{border:0;padding:0;flex:none}
+html[data-theme="bento"] .connection-state{padding:7px 14px;border-radius:99px;background:var(--b-tile);color:var(--muted);font-size:12.5px;white-space:nowrap}
+html[data-theme="bento"] .connection-state i{width:7px;height:7px;border-radius:50%;background:#B7B2A3}
+html[data-theme="bento"] .connection-state i.live{background:#2F55FF}
+html[data-theme="bento"] .connection-state i.warn{background:#D98A1B}
+html[data-theme="bento"] main{padding:6px 24px 24px;overflow:auto;overflow-x:hidden}
+html[data-theme="bento"] main::-webkit-scrollbar{width:10px}
+html[data-theme="bento"] main::-webkit-scrollbar-thumb{background:rgba(23,22,19,.22);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+html[data-theme="bento"] button:focus-visible,html[data-theme="bento"] summary:focus-visible,html[data-theme="bento"] select:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+
+/* Barre d'outils de chaque vue : le titre devient muet (la nav le dit déjà), restent méta + actions. */
+html[data-theme="bento"] .toolbar{height:auto;border:0;display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0}
+html[data-theme="bento"] .toolbar h1{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+html[data-theme="bento"] .toolbar>:not(h1){margin-bottom:12px}
+html[data-theme="bento"] .toolbar-meta{margin-left:auto;padding:7px 14px;border-radius:99px;background:var(--b-tile);font-size:12.5px;color:var(--muted);white-space:nowrap}
+html[data-theme="bento"] .toolbar .view-toggle{margin-left:0}
+html[data-theme="bento"] .toolbar-warn{padding:7px 14px;border-radius:99px;background:var(--b-tile);color:var(--warn);font-size:12.5px;font-weight:600}
+
+/* Boutons, segmentés et sélecteurs : pilules. */
+html[data-theme="bento"] .button{border:0;border-radius:99px;background:var(--btn-bg);color:var(--btn-fg);padding:8px 16px;font:600 13px/1.3 var(--font);white-space:nowrap}
+html[data-theme="bento"] .button:hover{background:var(--btn-bg);opacity:.86}
+html[data-theme="bento"] .button[disabled]{opacity:.45}
+html[data-theme="bento"] .settings .button,html[data-theme="bento"] .setting .button{background:var(--chip-bg);color:var(--chip-fg)}
+html[data-theme="bento"] .button.on,html[data-theme="bento"] .settings .button.on{background:#2F55FF;color:#FFFFFF;border:0}
+html[data-theme="bento"] .segmented,html[data-theme="bento"] .view-toggle{display:flex;width:max-content;max-width:100%;align-items:center;gap:2px;padding:3px;border:0;border-radius:99px;background:var(--trk);overflow:visible;flex:none}
+html[data-theme="bento"] .seg,html[data-theme="bento"] .view-toggle button{border:0;border-radius:99px;padding:5px 12px;background:transparent;color:var(--muted);font:500 12.5px/1.3 var(--font);white-space:nowrap;cursor:pointer}
+html[data-theme="bento"] .seg+.seg{border-left:0}
+html[data-theme="bento"] .seg:hover,html[data-theme="bento"] .view-toggle button:hover{background:var(--soft);color:var(--text)}
+html[data-theme="bento"] .seg.on,html[data-theme="bento"] .view-toggle button.on{background:var(--seg-on-bg);color:var(--seg-on-fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.16)}
+html[data-theme="bento"] select{border:0;border-radius:99px;background:var(--b-tile);color:var(--text);padding:7px 14px;font:500 12.5px var(--font)}
+html[data-theme="bento"] .account-action{border:0;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);padding:6px 13px;font:600 12.5px/1.3 var(--font);white-space:nowrap}
+html[data-theme="bento"] .account-action:hover{background:var(--soft-hover)}
+html[data-theme="bento"] .account-action.primary{background:var(--btn-bg);color:var(--btn-fg)}
+html[data-theme="bento"] .account-action.primary:hover{background:var(--btn-bg);opacity:.86}
+html[data-theme="bento"] .account-action[disabled]{opacity:.45}
+
+/* ═══ 3. Quotas ══════════════════════════════════════════════════════════════ */
+/* Vue Quotas : le tri à gauche et les actions à droite partagent la même rangée. */
+html[data-theme="bento"] #overview.view.active{display:flex;flex-wrap:wrap;align-items:center;column-gap:10px}
+html[data-theme="bento"] #overview>.provider-blocks,html[data-theme="bento"] #overview>.weekly,html[data-theme="bento"] #overview>.notice{flex:0 0 100%;min-width:0}
+html[data-theme="bento"] #overview>.notice{order:0}
+html[data-theme="bento"] #overview>.sort-row{order:1;flex:0 1 auto}
+html[data-theme="bento"] #overview>.toolbar{order:2;flex:1 1 auto;justify-content:flex-end}
+html[data-theme="bento"] #overview>.provider-blocks,html[data-theme="bento"] #overview>.weekly{order:3}
+html[data-theme="bento"] .sort-row{margin:0 0 12px;gap:10px}
+html[data-theme="bento"] .sort-row label{font-size:12.5px;color:var(--muted)}
+html[data-theme="bento"] .notice{border:0;border-radius:20px;background:var(--b-tile);box-shadow:inset 4px 0 0 var(--warn);margin:0 0 12px;padding:14px 18px}
+html[data-theme="bento"] .notice strong{color:var(--warn)}
+html[data-theme="bento"] .provider-blocks{gap:12px;margin-top:0;align-items:start}
+/* Une grosse carte par fournisseur : OpenAI sur fond crème, Claude en encre (contexte ci-dessus). */
+html[data-theme="bento"] .provider-block{border:0;border-radius:24px;background:var(--b-tile);padding:18px 18px 16px;clip-path:none;min-width:0}
+html[data-theme="bento"] .provider-block:before{display:none}
+html[data-theme="bento"] .provider-block-head{margin-bottom:14px;gap:10px}
+html[data-theme="bento"] .provider{gap:11px;font:700 17px/1.1 var(--disp);letter-spacing:-.02em;text-transform:none;color:var(--text)}
+html[data-theme="bento"] .provider-dot{width:34px;height:34px;border-radius:11px;background:var(--soft-hover);display:grid;place-items:center;font:800 15px/1 var(--disp);color:var(--text)}
+html[data-theme="bento"] .provider-block[data-provider="openai"] .provider-dot::after{content:"O"}
+html[data-theme="bento"] .provider-block[data-provider="claude"] .provider-dot::after{content:"C"}
+html[data-theme="bento"] .status-label{display:inline-flex;align-items:center;padding:4px 12px;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);font:600 12px/1.3 var(--font);white-space:nowrap}
+html[data-theme="bento"] .status-label i{width:7px;height:7px;border-radius:50%;margin-right:7px;background:var(--dot)}
+html[data-theme="bento"] .account-block[data-connected="0"] .status-label i{background:#9C978A}
+html[data-theme="bento"] .account-block[data-error="1"] .status-label i{background:var(--warn)}
+html[data-theme="bento"] .provider-manage{border:0;border-radius:0;background:none;padding:0;margin-left:8px;color:var(--chip-fg);font:600 12px var(--font);text-decoration:underline;text-underline-offset:2px}
+html[data-theme="bento"] .provider-manage:hover{background:none;color:var(--chip-fg);opacity:.75}
+html[data-theme="bento"] .account-block+.account-block{border-top:1px solid var(--hair);margin-top:16px;padding-top:16px}
+html[data-theme="bento"] .account-block-head{gap:10px;margin-bottom:8px;align-items:center}
+html[data-theme="bento"] .account-block-head strong{font-size:13.5px;font-weight:600}
+html[data-theme="bento"] .account-identity{font-weight:400}
+html[data-theme="bento"] .freshness{margin:-2px 0 10px;font-size:12px;color:var(--muted)}
+html[data-theme="bento"] .freshness.stale{color:var(--warn);font-weight:600}
+html[data-theme="bento"] .billing-line{font-size:12px;margin:0 0 10px;color:var(--muted)}
+html[data-theme="bento"] .billing-line.soon{color:var(--warn);font-weight:600}
+html[data-theme="bento"] .quota-error,html[data-theme="bento"] .quota-stale{margin-top:10px;padding:8px 12px;border-radius:14px;background:var(--soft);font-size:12px}
+html[data-theme="bento"] .quota-error{color:var(--danger)}
+html[data-theme="bento"] .quota-stale{color:var(--warn)}
+html[data-theme="bento"] .quota-empty{padding:14px 16px;border:0;border-radius:18px;background:var(--soft);color:var(--muted)}
+
+/* Carte de quota : étiquette, grand chiffre du restant, jauge, reset, courbe. */
+html[data-theme="bento"] .quota-grid{grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:10px}
+html[data-theme="bento"] .provider-block .quota-card{position:relative;display:flex;flex-direction:column;min-width:0;padding:14px 16px 13px;border:0;border-radius:18px;background:var(--soft)}
+html[data-theme="bento"] .quota-top{flex-direction:column;align-items:flex-start;gap:2px}
+html[data-theme="bento"] .quota-top span{font:500 12.5px/1.3 var(--font);color:var(--muted)}
+html[data-theme="bento"] .quota-top strong{font:700 26px/1 var(--disp);letter-spacing:-.03em;color:var(--text);text-shadow:none;white-space:nowrap}
+/* Chiffre en grand : le restant est recomposé depuis --pct (consommé) par un compteur CSS.
+   Sous @supports seulement ; sinon on garde le texte « 62 % restant » du DOM. */
+@supports (counter-reset:rem calc(100 - 1)){
+  html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top span::after{content:" · restant"}
+  html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top strong{counter-reset:rem calc(100 - var(--pct,0));font-size:0;margin-top:4px}
+  html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top strong::before{content:counter(rem);font:700 62px/.88 var(--disp);letter-spacing:-.045em}
+  html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top strong::after{content:"%";font:600 22px/1 var(--disp);letter-spacing:-.01em;margin-left:3px}
+}
+html[data-theme="bento"] .quota-card[data-level="warn"] .quota-top strong{color:var(--warn)}
+html[data-theme="bento"] .quota-card[data-level="crit"] .quota-top strong{color:var(--crit)}
+/* Pastille d'état, redite textuelle du niveau (pas seulement la couleur). */
+html[data-theme="bento"] .provider-block .quota-card::after{position:absolute;top:12px;right:14px;padding:3px 11px;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);font:600 12px/1.3 var(--font);white-space:nowrap}
+html[data-theme="bento"] .provider-block .quota-card[data-level="ok"]::after{content:"Confortable"}
+html[data-theme="bento"] .provider-block .quota-card[data-level="warn"]::after{content:"Tendu";background:var(--warn);color:var(--on-warn)}
+html[data-theme="bento"] .provider-block .quota-card[data-level="crit"]::after{content:"Critique";background:var(--crit);color:var(--on-crit)}
+html[data-theme="bento"] .quota-track{height:14px;margin:14px 0 10px;border:0;border-radius:99px;background:var(--trk)}
+html[data-theme="bento"] .quota-track i{border-radius:99px;background:var(--provider);box-shadow:none}
+html[data-theme="bento"] .quota-card[data-level="warn"] .quota-track i{background:var(--warn)}
+html[data-theme="bento"] .quota-card[data-level="crit"] .quota-track i{background:var(--crit)}
+html[data-theme="bento"] .quota-foot{flex-direction:column;align-items:stretch;gap:8px;margin-top:0}
+html[data-theme="bento"] .quota-foot small{flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--muted)}
+html[data-theme="bento"] .spark{width:100%;height:30px}
+html[data-theme="bento"] .spark .tip{display:none}
+html[data-theme="bento"] .spark .line{stroke-width:1.5}
+html[data-theme="bento"] .provider-block[data-provider="claude"] .spark{--c:#9DB0FF!important}
+html[data-theme="bento"] .manual-reset{margin-top:8px;font-size:12px;color:var(--muted)}
+html[data-theme="bento"] .manual-reset.available{color:var(--green);font-weight:600}
+html[data-theme="bento"] .extra-credits{border:0!important;border-radius:18px!important;background:var(--soft)!important;padding:12px 16px!important;margin-top:10px!important}
+html[data-theme="bento"] .extra-credits strong{font-family:var(--disp);font-size:15px}
+
+/* Équivalent API : un second bloc dans la carte du fournisseur. */
+html[data-theme="bento"] .cost-total{margin-top:12px;padding:14px 16px;border:0;border-radius:18px;background:var(--soft)}
+html[data-theme="bento"] .cost-total.scanning{background:var(--soft);color:var(--muted)}
+html[data-theme="bento"] .cost-total-label{margin:0;font:500 12.5px/1.35 var(--font);text-transform:none;letter-spacing:0;color:var(--muted)}
+html[data-theme="bento"] .cost-total-head{align-items:flex-start;flex-wrap:wrap}
+html[data-theme="bento"] .cost-total-head .cost-total-label{flex:1;min-width:140px}
+html[data-theme="bento"] .cost-period{margin-bottom:4px}
+html[data-theme="bento"] .cost-total-amount{margin-top:4px;font:700 32px/1.05 var(--disp);letter-spacing:-.04em;color:var(--text);white-space:nowrap}
+html[data-theme="bento"] .cost-warn{color:var(--warn)}
+html[data-theme="bento"] .summary-note{margin-top:6px;font-size:12px;color:var(--muted)}
+html[data-theme="bento"] .model-table th{padding-bottom:6px;font:500 12px var(--font);text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .model-table td{padding:6px 0}
+html[data-theme="bento"] .model-table .num{white-space:nowrap}
+
+/* Consommation sur 7 jours : une carte à part. */
+html[data-theme="bento"] .weekly{margin-top:12px;padding:18px 20px;border-radius:24px;background:var(--b-tile)}
+html[data-theme="bento"] .section-head{margin:0 0 14px}
+html[data-theme="bento"] .section-head h2{margin:0 0 3px;font:700 17px/1.2 var(--disp);letter-spacing:-.02em;text-transform:none;color:var(--text)}
+html[data-theme="bento"] .section-head p{font-size:12.5px;color:var(--muted)}
+html[data-theme="bento"] .wk-svg{border:0;border-radius:16px;background:var(--soft)}
+html[data-theme="bento"] .wk-legend{gap:8px 16px;flex-wrap:wrap;font-size:12.5px}
+html[data-theme="bento"] .wk-leg i{height:3px;border-radius:2px}
+
+/* ═══ 4. Moniteur ════════════════════════════════════════════════════════════ */
+/* Signes vitaux : une rangée de petites cartes. */
+html[data-theme="bento"] .vitals{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;margin-top:0;border:0;border-radius:0;background:transparent;overflow:visible}
+@media(max-width:1100px){html[data-theme="bento"] .vitals{grid-template-columns:repeat(4,minmax(0,1fr))}}
+html[data-theme="bento"] .vital{gap:2px;padding:12px 13px 10px;border:0;border-radius:20px;background:var(--b-tile);min-width:0}
+html[data-theme="bento"] .vital:hover{background:#FFFFFF}
+html[data-theme="bento"] .vital-label{font:500 12px/1.3 var(--font);text-transform:none;letter-spacing:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+html[data-theme="bento"] .vital-value{font:700 23px/1.1 var(--disp);letter-spacing:-.04em;text-overflow:clip}
+html[data-theme="bento"] .vital-value small{font:600 12px var(--disp);letter-spacing:0;color:var(--muted);margin-left:2px}
+html[data-theme="bento"] .vital svg path{stroke:#171613;stroke-width:1.6}
+html[data-theme="bento"] .vital.warn .vital-value{color:var(--warn)}
+html[data-theme="bento"] .vital.crit .vital-value{color:var(--crit)}
+html[data-theme="bento"] .vital.boost .vital-value{color:#1F3FD9}
+html[data-theme="bento"] .monitor-section{margin-top:18px}
+html[data-theme="bento"] .monitor-section>h2{margin:0 0 8px 6px;font:600 13px/1.2 var(--disp);letter-spacing:0;text-transform:none;color:var(--muted)}
+html[data-theme="bento"] .metric-grid{gap:12px}
+html[data-theme="bento"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="bento"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}
+html[data-theme="bento"] .monitor-section .metric-card,html[data-theme="bento"] .metric-card{padding:18px 20px;border:0;border-radius:24px;background:var(--b-tile);min-width:0}
+html[data-theme="bento"] .metric-card[data-family="ram"],html[data-theme="bento"] .metric-card[data-family="battery"],html[data-theme="bento"] .metric-card[data-family="disk"]{background:var(--b-stone)}
+html[data-theme="bento"] .metric-head{align-items:center;gap:12px;margin-bottom:4px}
+html[data-theme="bento"] .metric-head h3{font:700 16px/1.15 var(--disp);letter-spacing:-.02em;text-transform:none;color:var(--text)}
+html[data-theme="bento"] .metric-value{font:700 40px/.9 var(--disp);letter-spacing:-.045em;color:var(--text)}
+html[data-theme="bento"] .metric-value .unit,html[data-theme="bento"] .metric-head .unit{font:600 15px var(--disp);letter-spacing:0;color:var(--muted);margin-left:3px}
+html[data-theme="bento"] .metric-value[style]{font-family:var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .metric-readout{font-size:12.5px;color:var(--muted)}
+html[data-theme="bento"] .metric-chart svg{height:84px}
+html[data-theme="bento"] .metric-chart .line{stroke-width:2.2}
+html[data-theme="bento"] .metric-chart .baseline{stroke:var(--hair-strong)}
+html[data-theme="bento"] .metric-chart .gridline{stroke:var(--hair)}
+html[data-theme="bento"] .metric-legend{gap:8px 16px;flex-wrap:wrap;font-size:12.5px}
+html[data-theme="bento"] .metric-legend i{height:3px;border-radius:2px}
+html[data-theme="bento"] .metric-badge{padding:2px 10px;border:0;border-radius:99px;background:var(--soft-hover);color:var(--text);font:600 12px var(--font)}
+html[data-theme="bento"] .metric-badge.warn{background:var(--warn);color:var(--on-warn)}
+html[data-theme="bento"] .metric-badge.crit{background:var(--crit);color:var(--on-crit)}
+html[data-theme="bento"] .metric-card .chevron{opacity:.5}
+html[data-theme="bento"] .metric-detail{border-top-color:var(--hair)}
+html[data-theme="bento"] .core-bars{height:64px;gap:5px}
+html[data-theme="bento"] .core-schematic .core-bars i{width:12px;border-radius:5px}
+html[data-theme="bento"] .core-bars i{border-radius:5px;background:var(--chart-a)}
+html[data-theme="bento"] .core-group-label{font:500 12px var(--font);text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .stat-row{gap:8px;border:0;background:transparent;margin:10px 0 6px}
+html[data-theme="bento"] .stat-cell{padding:8px 12px;border-radius:14px;background:var(--b-tile)}
+html[data-theme="bento"] .stat-cell b{font:700 18px/1.15 var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .stat-cell span{font:500 12px var(--font);text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .stat-cell.warn b{color:var(--warn)}
+html[data-theme="bento"] .fan-panel{margin-top:12px;padding-top:12px;border-top-color:var(--hair)}
+html[data-theme="bento"] .fan-meter{font-size:12.5px}
+html[data-theme="bento"] .fan-meter .quota-track{height:8px;margin:0}
+html[data-theme="bento"] .fan-meter b{font:700 14px var(--disp)}
+html[data-theme="bento"] .fan-actions strong{color:#1F3FD9}
+html[data-theme="bento"] .storage-summary{font-size:13.5px;line-height:1.6}
+html[data-theme="bento"] .detail-label,html[data-theme="bento"] .proc-head{font-size:12px;text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .proc-head,html[data-theme="bento"] .proc-row{grid-template-columns:minmax(0,1fr) 84px 64px 72px}
+html[data-theme="bento"] .proc-head{padding:8px 0 6px;margin-top:6px;border-bottom:1px solid var(--hair)}
+html[data-theme="bento"] .proc-head .sorted,html[data-theme="bento"] .proc-val.sorted{color:#1F3FD9;font-weight:700}
+html[data-theme="bento"] .proc-row{padding:8px 0;font-size:13px}
+html[data-theme="bento"] .metric-table th{font:500 12px var(--font);text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .day-card{border:0;border-radius:20px;background:var(--b-tile);padding:14px 16px}
+html[data-theme="bento"] .day-head strong{font:700 15px var(--disp);letter-spacing:-.02em;text-transform:none}
+html[data-theme="bento"] .metric-empty{font-size:12.5px}
+
+/* ═══ 5. Écrans ══════════════════════════════════════════════════════════════ */
+html[data-theme="bento"] #displays .section-head{margin:0 6px 12px}
+html[data-theme="bento"] .display-grid{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:0}
+html[data-theme="bento"] .display-card{padding:20px 22px;border:0;border-radius:24px;background:var(--b-tile);min-width:0}
+html[data-theme="bento"] .display-head{margin-bottom:18px;gap:12px}
+html[data-theme="bento"] .display-name{font:700 17px/1.15 var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .display-badge{padding:4px 12px;border:0;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);font:600 12px var(--font);text-transform:none;letter-spacing:0;white-space:nowrap}
+html[data-theme="bento"] .display-badge.builtin{background:#2F55FF;color:#FFFFFF}
+html[data-theme="bento"] .display-unavailable{font-size:12.5px;line-height:1.45}
+html[data-theme="bento"] .brightness-row{gap:14px}
+/* Curseur natif : la partie remplie vient d'une ombre portée de la poignée, rognée par le champ. */
+html[data-theme="bento"] .brightness-slider{height:22px;border:0;border-radius:99px;background:var(--trk);overflow:hidden}
+html[data-theme="bento"] .brightness-slider::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border:5px solid var(--btn-bg);border-radius:50%;background:var(--b-tile);box-shadow:-427px 0 0 416px var(--btn-bg)}
+html[data-theme="bento"] .display-card:first-child .brightness-slider::-webkit-slider-thumb{border-color:#2F55FF;background:#FFFFFF;box-shadow:-427px 0 0 416px #2F55FF}
+html[data-theme="bento"] .brightness-slider:disabled{opacity:.4}
+html[data-theme="bento"] .brightness-value{width:auto;min-width:64px;white-space:nowrap;font:700 24px/1 var(--disp);letter-spacing:-.04em}
+
+/* ═══ 6. Réglages ════════════════════════════════════════════════════════════ */
+html[data-theme="bento"] .settings-layout{grid-template-columns:minmax(0,1fr);gap:14px;margin-top:0}
+/* Sous-navigation : pilule horizontale sous la barre du haut. */
+html[data-theme="bento"] .settings-nav{position:static;flex-direction:row;flex-wrap:wrap;gap:4px;padding:4px;width:max-content;max-width:100%;border-radius:99px;background:var(--b-stone)}
+html[data-theme="bento"] .settings-nav button{padding:6px 16px;border-radius:99px;font:500 13px/1.4 var(--font);color:var(--muted);white-space:nowrap}
+html[data-theme="bento"] .settings-nav button:hover{background:rgba(23,22,19,.07);color:var(--text)}
+html[data-theme="bento"] .settings-nav button.on{background:var(--b-tile);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.16)}
+html[data-theme="bento"] .settings-nav button.on::before{display:none}
+html[data-theme="bento"] .settings-pane-head{margin:2px 6px 14px}
+html[data-theme="bento"] .settings-pane-head h2{margin:0 0 4px;font:700 24px/1.1 var(--disp);letter-spacing:-.035em}
+html[data-theme="bento"] .settings-pane-head p{font-size:13px;color:var(--muted)}
+/* Cartes de réglage : grille à deux colonnes, les réglages complexes (display:block) en pleine largeur. */
+html[data-theme="bento"] .settings-pane .settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+html[data-theme="bento"] .settings-pane .setting{flex-direction:column;flex-wrap:nowrap;align-items:flex-start;justify-content:space-between;gap:14px;padding:18px 20px;border:0;border-radius:24px;background:var(--b-tile);min-width:0}
+html[data-theme="bento"] .settings-pane .setting[style*="display:block"]{grid-column:1/-1;display:block!important}
+html[data-theme="bento"] .settings-pane .setting[style*="display:block"]>*+*{margin-top:14px}
+html[data-theme="bento"] .settings-pane .settings .setting:is(:nth-child(4n+2),:nth-child(4n+3)):not([style*="display:block"]){background:var(--b-stone);--chip-bg:#FBFAF6}
+html[data-theme="bento"] .settings .setting-copy{min-width:0;width:100%}
+html[data-theme="bento"] .settings-pane .setting-copy>strong{margin-bottom:5px;font:700 16px/1.2 var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .setting-copy small{font-size:12.5px;line-height:1.5;color:var(--muted)}
+html[data-theme="bento"] .settings-pane .setting>.button,html[data-theme="bento"] .settings-pane .setting>.segmented,html[data-theme="bento"] .settings-pane .setting>.setting-state{margin-left:0;margin-top:auto}
+html[data-theme="bento"] .setting-state{padding:4px 12px;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);font:600 12px var(--font)}
+html[data-theme="bento"] .setting-state.ok{background:var(--green);color:#FFFFFF}
+html[data-theme="bento"] .connection-note{font-size:12.5px;color:var(--muted)}
+html[data-theme="bento"] .lid-controls input[type="number"]{border:0;border-radius:99px;background:var(--trk);color:var(--text);padding:6px 12px;font:600 13px var(--font)}
+html[data-theme="bento"] .hint{font-size:12.5px;color:var(--muted)}
+/* Comptes : OpenAI en encre, Claude en cobalt (contextes du §1). */
+html[data-theme="bento"] .settings-pane .connections{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+html[data-theme="bento"] .connection-panel{min-height:0;padding:20px 22px;border:0;border-radius:24px;background:var(--b-tile);clip-path:none;min-width:0}
+html[data-theme="bento"] .connection-panel:before{display:none}
+html[data-theme="bento"] .connection-panel h3{margin:0 0 4px;font:700 20px/1.1 var(--disp);letter-spacing:-.03em;text-transform:none;color:var(--text)}
+html[data-theme="bento"] .connection-panel>p{color:var(--muted);font-size:12.5px}
+html[data-theme="bento"] .connection-panel:nth-child(2) h3{color:var(--text)}
+html[data-theme="bento"] .quota-block{border-top-color:var(--hair)}
+html[data-theme="bento"] .account-copy strong{font-size:14px;font-weight:600}
+html[data-theme="bento"] .account-copy small{color:var(--muted)}
+html[data-theme="bento"] .account-actions{flex-wrap:wrap;justify-content:flex-end}
+html[data-theme="bento"] .account-menu summary{border:0;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);padding:4px 13px;font-size:16px;line-height:1.3}
+html[data-theme="bento"] .account-menu-items{--text:#171613;--muted:#5B5850;--chip-bg:#E4E1D7;--chip-fg:#171613;--soft-hover:rgba(23,22,19,.09);
+  border:0;border-radius:18px;background:#FBFAF6;color:#171613;box-shadow:0 14px 34px rgba(23,22,19,.24);padding:8px}
+html[data-theme="bento"] .account-add{border-top-color:var(--hair)}
+html[data-theme="bento"] .pin-list{border-top-color:var(--hair)}
+/* Widgets de la barre des menus : interrupteur-nom, déplacement, forme, couleurs. */
+html[data-theme="bento"] .widget-config{gap:10px}
+html[data-theme="bento"] .wc-row{gap:10px}
+html[data-theme="bento"] .wc-colors{margin-left:6px;align-items:center;flex-wrap:wrap}
+html[data-theme="bento"] .seg.wc-toggle{min-width:116px;padding:6px 14px;border:0;border-radius:99px;background:var(--trk);color:var(--text);font:600 12.5px var(--font)}
+html[data-theme="bento"] .seg.wc-toggle.on{background:var(--btn-bg);color:var(--btn-fg)}
+html[data-theme="bento"] .wc-dot{border-width:1.5px}
+html[data-theme="bento"] .wc-move{display:inline-flex;gap:2px;padding:3px;border:0;border-radius:99px;background:var(--trk)}
+html[data-theme="bento"] .wc-move .seg{padding:4px 10px}
+html[data-theme="bento"] .wc-shapes .seg{padding:5px 11px}
+html[data-theme="bento"] .wc-swatch{width:18px;height:18px;border:0;box-shadow:inset 0 0 0 1px rgba(23,22,19,.18)}
+html[data-theme="bento"] .wc-swatch.on{box-shadow:0 0 0 2px var(--b-tile),0 0 0 4px #171613}
+html[data-theme="bento"] .wc-sub{padding-left:12px;border-left:3px solid var(--hair)}
+html[data-theme="bento"] .wc-sublabel{font:500 12px var(--font);text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .wc-sub .segmented .seg.on{background:var(--btn-bg);color:var(--btn-fg);box-shadow:none}
+html[data-theme="bento"] .seg-wrap .seg{border:0;padding:5px 11px}
+html[data-theme="bento"] .theme-swatch-grid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px}
+html[data-theme="bento"] .theme-swatch{border:0;border-radius:16px;background:var(--soft);padding:10px 12px;font:500 13px var(--font)}
+html[data-theme="bento"] .theme-swatch:hover{background:var(--soft-hover)}
+html[data-theme="bento"] .theme-swatch.on{background:#171613;color:#FFFFFF;font-weight:600}
+html[data-theme="bento"] .theme-swatch .dot{width:12px;height:12px;box-shadow:0 0 0 1px rgba(128,128,128,.45)}
+html[data-theme="bento"] .shortcut-table{max-width:none;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 14px}
+html[data-theme="bento"] .shortcut-row{font-size:12.5px;color:var(--muted)}
+html[data-theme="bento"] .shortcut-row kbd{padding:3px 9px;border:0;border-radius:8px;background:var(--b-stone);color:var(--text);font:500 12.5px var(--font);box-shadow:0 1px 0 rgba(23,22,19,.25)}
+
+/* ═══ 7. Popover (480 × 640) ═════════════════════════════════════════════════ */
+html[data-theme="bento"] .popover{--muted:#5B5850;gap:8px;padding:10px;background:var(--bg)}
+html[data-theme="bento"] .popup-notice{border:0;border-radius:16px;background:var(--b-tile);color:var(--warn);font-weight:600;padding:10px 14px}
+html[data-theme="bento"] .popup-notice button{border:0;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);padding:4px 12px}
+html[data-theme="bento"] .providers{gap:8px;padding:0}
+html[data-theme="bento"] .providers::-webkit-scrollbar{width:0}
+html[data-theme="bento"] .popover .quota-card{position:relative;padding:14px 14px 12px;border:0;border-radius:22px;background:var(--b-tile)}
+html[data-theme="bento"] .popover .quota-card header{margin-bottom:8px;gap:4px}
+html[data-theme="bento"] .provider-name{font:700 16px/1.1 var(--disp);letter-spacing:-.02em;text-transform:none;color:var(--text)}
+html[data-theme="bento"] .account-name{font-size:12px}
+html[data-theme="bento"] .popover .quota-card .provider-picker{margin:0;padding:5px 10px;border:0;border-radius:99px;background:var(--soft-hover);color:var(--text);font:500 12px var(--font)}
+html[data-theme="bento"] .quota-main{gap:6px}
+html[data-theme="bento"] .quota-main .value,html[data-theme="bento"] .value{font:700 56px/.88 var(--disp);letter-spacing:-.05em;color:var(--text);text-shadow:none}
+html[data-theme="bento"] .value .unit{font:600 24px/1 var(--disp);letter-spacing:-.01em;margin-left:3px;opacity:1}
+html[data-theme="bento"] .value.warning{color:var(--warn)}
+html[data-theme="bento"] .value.critical{color:var(--crit)}
+html[data-theme="bento"] .empty-value{color:var(--muted);opacity:1}
+html[data-theme="bento"] .quota-label{font-size:12px;color:var(--muted)}
+html[data-theme="bento"] .reset{margin-top:6px;font-size:12px;color:var(--muted);white-space:nowrap}
+/* Jauges : la couleur inline posée par le JS (seuils sur le consommé) cède au niveau d'état. */
+html[data-theme="bento"] .rail{height:12px;margin-top:8px;border:0;border-radius:99px;background:var(--trk)}
+html[data-theme="bento"] .rail.thin{height:8px;margin:0}
+html[data-theme="bento"] .rail i{border-radius:99px;background:var(--provider)!important;box-shadow:none}
+html[data-theme="bento"] .popover .quota-card[data-level="warn"] .primary-rail i,html[data-theme="bento"] .session-row[data-level="warn"] .rail i{background:var(--warn)!important}
+html[data-theme="bento"] .popover .quota-card[data-level="crit"] .primary-rail i,html[data-theme="bento"] .session-row[data-level="crit"] .rail i{background:var(--crit)!important}
+html[data-theme="bento"] .session-row{margin-top:10px;padding-top:10px;border-top:1px solid var(--hair);font-size:12px}
+html[data-theme="bento"] .session-row>b{font:700 15px var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .session-row>small{white-space:nowrap}
+html[data-theme="bento"] .session-row[data-level="warn"]>b{color:var(--warn)}
+html[data-theme="bento"] .session-row[data-level="crit"]>b{color:var(--crit)}
+html[data-theme="bento"] .popover .quota-card footer{padding-top:10px}
+html[data-theme="bento"] .account-note{font-size:12px}
+html[data-theme="bento"] .account-note.stale{color:var(--warn)}
+html[data-theme="bento"] .account-note.live{color:var(--green);font-weight:600}
+html[data-theme="bento"] .popover .quota-card .who{font-weight:600}
+html[data-theme="bento"] .popover .extra-credits{margin-top:10px;padding-top:9px;border-top-color:var(--hair);font-size:12px}
+/* Ventilateurs, outils du Mac et pied : cartes arrondies empilées. */
+html[data-theme="bento"] .fans{padding:10px 14px;border:0;border-radius:22px;background:var(--b-stone)}
+html[data-theme="bento"] .fan-head strong{font:700 15px var(--disp);letter-spacing:-.02em;text-transform:none}
+html[data-theme="bento"] .fan-state{font-size:12.5px}
+html[data-theme="bento"] .fan-state.on{color:#1F3FD9}
+html[data-theme="bento"] .fan-row .account-action{background:var(--btn-bg);color:var(--btn-fg);padding:6px 14px}
+html[data-theme="bento"] .fan-row .account-action[disabled]{opacity:.45}
+html[data-theme="bento"] .fan-note{font-size:12px}
+html[data-theme="bento"] .popover .segmented{flex:1;width:auto}
+html[data-theme="bento"] .popover .seg{flex:1;padding:5px 4px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+html[data-theme="bento"] .mac-tools{border:0;border-radius:22px;background:var(--b-tile);overflow:hidden}
+html[data-theme="bento"] .mac-tools>summary{padding:9px 16px;font:700 14px var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .metrics{gap:6px;padding:0 8px 6px;border:0;background:transparent}
+html[data-theme="bento"] .mtile{padding:6px 9px 5px;border-radius:14px;background:var(--b-stone)}
+html[data-theme="bento"] .mtile .mlabel{font:500 12px var(--font);text-transform:none;letter-spacing:0}
+html[data-theme="bento"] .mtile .mvalue{margin:0 0 2px;font:700 14px var(--disp);letter-spacing:-.02em}
+html[data-theme="bento"] .mtile svg{height:12px}
+html[data-theme="bento"] .mtile .line{stroke-width:1.8}
+html[data-theme="bento"] .brightness{gap:6px;padding:0 10px 8px;border:0;background:transparent}
+html[data-theme="bento"] .b-row{padding:7px 12px;border-radius:14px;background:var(--b-stone)}
+html[data-theme="bento"] .b-sun{color:var(--text)}
+html[data-theme="bento"] .b-slider{height:16px;border:0;border-radius:99px;background:var(--trk);overflow:hidden}
+html[data-theme="bento"] .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border:4px solid #171613;border-radius:50%;background:#FBFAF6;box-shadow:-304px 0 0 296px #171613}
+html[data-theme="bento"] .b-value{font:600 12.5px var(--font);width:38px}
+html[data-theme="bento"] .tools{gap:6px;padding:0 8px 8px;border:0;background:transparent}
+html[data-theme="bento"] .tool{flex-direction:row;justify-content:center;gap:7px;padding:8px 6px;border-radius:14px;background:var(--b-stone);color:var(--text);font:500 12.5px var(--font);letter-spacing:0;text-transform:none;white-space:nowrap}
+html[data-theme="bento"] .tool:hover{background:#D3D0C5;color:var(--text)}
+html[data-theme="bento"] .tool.on{background:#2F55FF;color:#FFFFFF}
+html[data-theme="bento"] .tool .glyph{height:auto}
+html[data-theme="bento"] .footer{padding:0 2px 2px;gap:0;border:0;background:transparent}
+html[data-theme="bento"] .footer-row{gap:8px}
+html[data-theme="bento"] .footer-row>button{border:0;border-radius:99px;background:var(--b-tile);color:var(--text);padding:7px 16px;font:600 13px var(--font)}
+html[data-theme="bento"] .footer-row>button:hover{background:#FFFFFF;border:0}
+html[data-theme="bento"] .footer-row>button.sync{background:transparent;color:var(--muted);font-weight:500;font-size:12.5px;padding:7px 4px}
+html[data-theme="bento"] .footer-row>button.sync:hover{background:transparent;color:var(--text)}
+html[data-theme="bento"] .footer-row>button.go{background:#2F55FF;color:#FFFFFF}
+html[data-theme="bento"] .footer-row>button.go:hover{background:#2F55FF;opacity:.88}
+html[data-theme="bento"] .footer-row>button[title="Quitter Status"]{color:var(--danger)!important}

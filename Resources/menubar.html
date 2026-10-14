@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="themes.css">
+<link rel="stylesheet" href="themes/moderne.css">
+<link rel="stylesheet" href="themes/dark.css">
+<link rel="stylesheet" href="themes/neon.css">
+<link rel="stylesheet" href="themes/bento.css">
+<link rel="stylesheet" href="themes/widget.css">
 <style>
   /* Le thème actif vient de themes.css ([data-theme] sur <html>, poussé par renderMenu()) ;
      cyan = OpenAI, violet = Claude reste la convention par défaut, mais chaque thème peut
@@ -148,6 +153,8 @@ const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
 const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
 const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+// Même seuils que dashboard.html : data-level pour les thèmes qui colorent l'alerte (≤ 20 % restant : crit, ≤ 45 % : warn).
+const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
 const reset=w=>{
   if(!w?.resetsAt)return '—';
   const s=w.resetsAt-Date.now()/1000;
@@ -226,8 +233,8 @@ function provider(id,name,accounts,metric){
   const picker=(accounts||[]).length>1?`<select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value);this.blur()"><option value="" ${!pinned?'selected':''}>Le plus entamé</option>${accounts.map(a=>`<option value="${esc(a.accountId)}" ${pinned&&a.accountId===account?.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`
     :account?`<span class="account-name">${esc(account.label)}</span>`:'';
   const action=!connected?`<button class="account-action" onclick="send('${account?(id==='openai'?'loginOpenAI':'connectClaudeWeb'):'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?'connecter':'ajouter un compte'}</button>`:'';
-  const sessionRow=session?`<div class="session-row"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${100-used(session)} %</b><small>${reset(session)}</small></div>`:'';
-  return `<section class="quota-card" style="--provider:${ink}">
+  const sessionRow=session?`<div class="session-row" data-level="${levelOf(used(session))}"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${100-used(session)} %</b><small>${reset(session)}</small></div>`:'';
+  return `<section class="quota-card" data-provider="${id}" data-level="${levelOf(value)}" style="--provider:${ink}">
     <header><span class="provider-name">${name}</span>${picker}</header>
     <div class="quota-main"><div class="value ${level}">${value===null?'—':(100-value)+'<span class="unit">%</span>'}</div>
       <div class="quota-side"><div class="quota-label">restant cette semaine</div>${quotaRail(weekly,true)}<div class="reset">${weekly?'Renouvellement '+reset(weekly):'—'}</div></div></div>
