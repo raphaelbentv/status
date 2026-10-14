@@ -24,6 +24,8 @@ const check = (condition, what) => {
   if (condition) process.stdout.write(`  \x1b[32m✓\x1b[0m ${what}\n`);
   else { failures++; process.stdout.write(`  \x1b[31m✗ ${what}\x1b[0m\n`); }
 };
+// Intl met une fine insécable avant « % » en français : on la ramène à une espace pour comparer.
+const plain = text => String(text).replace(/[\u202f\u00a0]/g, ' ');
 const checkEqual = (actual, expected, what) => {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   checks++;
@@ -36,7 +38,14 @@ const checkEqual = (actual, expected, what) => {
 
 // Un DOM juste assez crédible pour que le script s'installe sans lever. Les fonctions testées
 // plus bas sont pures ; ces bouchons ne servent qu'à traverser l'initialisation.
-function sandboxFor(htmlFile) {
+const loadDictionary = lang => JSON.parse(readFileSync(join(root, 'Resources', 'i18n', `${lang}.json`), 'utf8'));
+const LOCALES = { fr: 'fr-FR', en: 'en-US', it: 'it-IT', es: 'es-ES' };
+function i18nPayload(lang) {
+  const reverse = {};
+  for (const [key, value] of Object.entries(loadDictionary('fr'))) if (key.startsWith('msg.')) reverse[value] = key;
+  return { lang, locale: LOCALES[lang], dict: loadDictionary(lang), reverse };
+}
+function sandboxFor(htmlFile, language = 'fr') {
   const html = readFileSync(join(root, 'Resources', htmlFile), 'utf8');
   const script = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
 
@@ -52,7 +61,11 @@ function sandboxFor(htmlFile) {
     Intl, Date, Math, JSON, Number, String, Array, Object, isNaN, parseFloat, parseInt,
   };
   sandbox.window = sandbox;
+  // Le natif injecte le dictionnaire avant la page : on fait de même (français, la langue des
+  // assertions ci-dessous), puis i18n.js définit t() et StatusI18n comme dans l'app.
+  sandbox.__STATUS_I18N__ = i18nPayload(language);
   const context = createContext(sandbox);
+  runInContext(readFileSync(join(root, 'Resources', 'i18n.js'), 'utf8'), context);
   runInContext(script, context);
   // Les `const` de haut niveau vivent dans l'environnement lexical du contexte, pas sur l'objet
   // global : on les récupère en évaluant une expression dans ce même contexte.
@@ -66,8 +79,8 @@ const menubar = sandboxFor('menubar.html');
 section('fmtBytes — débits');
 checkEqual(dashboard('fmtBytes')(0), '0 o/s', 'zéro');
 checkEqual(dashboard('fmtBytes')(512), '512 o/s', 'sous le kilo-octet');
-checkEqual(dashboard('fmtBytes')(1024), '1.0 Ko/s', 'bascule au kilo-octet, une décimale');
-checkEqual(dashboard('fmtBytes')(2411724), '2.3 Mo/s', 'méga-octets');
+checkEqual(dashboard('fmtBytes')(1024), '1,0 Ko/s', 'bascule au kilo-octet, une décimale');
+checkEqual(dashboard('fmtBytes')(2411724), '2,3 Mo/s', 'méga-octets');
 checkEqual(dashboard('fmtBytes')(null), '—', 'valeur absente : tiret, jamais « 0 o/s »');
 checkEqual(dashboard('fmtBytes')(NaN), '—', 'NaN : tiret');
 
@@ -85,10 +98,10 @@ checkEqual(dashboard('stats')(undefined), null, 'série absente');
 checkEqual(dashboard('stats')([7]), { now: 7, min: 7, max: 7, avg: 7 }, 'un seul point');
 
 section('METRIC_LABELS — le format ne se déduit pas de l’unité');
-checkEqual(dashboard('METRIC_LABELS')['system.load1'][2], 'decimal',
+checkEqual(dashboard('METRIC_LABELS')['system.load1'][1], 'decimal',
   'la charge est décimale : arrondie à l’entier, 2,4 deviendrait 2 et ne dirait plus rien');
-checkEqual(dashboard('METRIC_LABELS')['network.rxBytesPerSec'][2], 'bytes', 'les débits passent par fmtBytes');
-checkEqual(dashboard('METRIC_LABELS')['cpu.total'][2], 'int', 'les pourcentages sont entiers');
+checkEqual(dashboard('METRIC_LABELS')['network.rxBytesPerSec'][1], 'bytes', 'les débits passent par fmtBytes');
+checkEqual(dashboard('METRIC_LABELS')['cpu.total'][1], 'int', 'les pourcentages sont entiers');
 
 // ── Sélection de fenêtre (popover) ──────────────────────────────────────────
 section('isWeekly / isSession — reconnaissance des fenêtres');
@@ -115,15 +128,15 @@ const claudeHTML = menubar('provider')('claude', 'Claude', [{ provider: 'claude'
   { windowId: 'seven_day_scoped_fable', label: 'Fable', usedPercent: 54, resetsAt: Date.now() / 1000 + 90000 } ] }], 'claude:weekly');
 check(openaiHTML.includes('58<span class="unit">%</span>') && openaiHTML.includes('restant cette semaine'), 'restant hebdo en grand');
 check(claudeHTML.includes('19<span class="unit">%</span>') && claudeHTML.includes('class="value warning"'), 'Claude : semaine entamée signalée');
-check(claudeHTML.includes('session-row') && claudeHTML.includes('96 %'), 'la fenêtre 5 h reste en ligne compacte');
+check(claudeHTML.includes('session-row') && plain(claudeHTML).includes('96 %'), 'la fenêtre 5 h reste en ligne compacte');
 check(!claudeHTML.includes('Fable') && !claudeHTML.includes('54'), 'aucune jauge Fable');
 check(!openaiHTML.includes('session-row'), 'pas de ligne 5 h côté OpenAI');
 check(!claudeHTML.match(/réinitialisation hebdo|Prévision|épuisé/), 'ni prévision ni historique de reset');
 
 // ── Coût par modèle (dashboard) ─────────────────────────────────────────────
 section('fmtTokens — volumes de tokens, toujours en millions');
-checkEqual(dashboard('fmtTokens')(186207), '0.2 M', 'sous le million : arrondi au dixième de million');
-checkEqual(dashboard('fmtTokens')(61493255), '61.5 M', 'dizaines de millions, une décimale');
+checkEqual(dashboard('fmtTokens')(186207), '0,2 M', 'sous le million : arrondi au dixième de million');
+checkEqual(dashboard('fmtTokens')(61493255), '61,5 M', 'dizaines de millions, une décimale');
 check(/^9.741 M$/.test(dashboard('fmtTokens')(9741100000)), 'milliards : entier en millions avec séparateur (9 741 M)');
 checkEqual(dashboard('fmtTokens')(null), '', 'absent : chaîne vide');
 
@@ -201,7 +214,7 @@ check(/3.184 tr\/min/.test(wSens) && /3.188 tr\/min/.test(wSens), 'Capteurs : le
 
 const wBat = widget('renderBattery()');
 check(noJunk(wBat), 'Batterie : aucun NaN/undefined/null');
-check(/91 %/.test(wBat) && /218/.test(wBat) && /13,10 V/.test(wBat), 'Batterie : santé, cycles, tension française');
+check(/91 %/.test(plain(wBat)) && /218/.test(wBat) && /13,10 V/.test(wBat), 'Batterie : santé, cycles, tension française');
 
 const wDisk = widget('renderDisk()');
 check(noJunk(wDisk), 'Disque : aucun NaN/undefined/null');
@@ -317,7 +330,7 @@ const rows = dashboard(`alertRows({})`);
 check(rows.includes('Quota entamé'), 'la rangée du seuil quota existe');
 check(rows.includes('Réinitialisation hebdo'), 'la rangée du reset hebdo existe');
 const quotaRow = rows.split('<div class="wc-row">').find(r => r.includes('Quota entamé'));
-check(quotaRow && quotaRow.includes('80 %'), 'seuil quota : choix de pourcentages');
+check(quotaRow && plain(quotaRow).includes('80 %'), 'seuil quota : choix de pourcentages');
 const resetRow = rows.split('<div class="wc-row">').find(r => r.includes('Réinitialisation'));
 check(resetRow && !resetRow.includes('wc-shapes'), 'reset hebdo : interrupteur seul, pas de seuil');
 
@@ -610,7 +623,7 @@ section('Popup : jauges, sous-quotas, sélecteurs et état inconnu');
   const windows=[{windowId:'weekly',durationMinutes:10080,label:'Semaine',usedPercent:25,resetsAt:9999999999},{windowId:'spark',durationMinutes:10080,label:'Spark',usedPercent:15,resetsAt:9999999999}];
   const one=openAIAccount(1,'Boulot',windows),two=openAIAccount(2,'Personnel',windows);
   const html=menubar('provider')('openai','OpenAI',[one,two],'openai:weekly');
-  check(html.includes('role="meter"')&&html.includes('75 % restant'),'jauge principale et restant');
+  check(html.includes('role="meter"')&&plain(html).includes('75 % restant'),'jauge principale et restant');
   check(!html.includes('Spark')&&!html.includes('85 % restant'),'jauge Spark masquée dans le popup');
   checkEqual(dashboard('windowsFor')('openai',one).length,1,'listing OpenAI : seule la jauge générale reste');
   checkEqual(dashboard('weeklySeriesFor')({accounts:[one]}).length,1,'historique visuel : Spark exclu');
@@ -684,9 +697,9 @@ section('Ventilateurs : autorisation, vérification et retour automatique');
   check(popup({lidMode:lid}).replace(/[\u202f\u00a0]/g,' ').includes('2 345 tr/min'),'vitesse réelle dans le popup');
   check(popup({lidMode:lid}).includes("setFanChoice('percent',60)")&&popup({lidMode:lid}).includes("setFanChoice('minutes',30)"),'paliers et durées en un geste');
   lid.fanBoost={...lid.fanBoost,active:true,verified:false,percent:80,remainingSeconds:61};
-  check(popup({lidMode:lid}).includes('Montée 80 % · 2 min'),'montée en vitesse ne prétend pas boost confirmé');
+  check(plain(popup({lidMode:lid})).includes('Montée 80 % · 2 min'),'montée en vitesse ne prétend pas boost confirmé');
   lid.fanBoost.verified=true;
-  check(popup({lidMode:lid}).includes('Boost 80 % · 2 min')&&popup({lidMode:lid}).includes('Auto Apple'),'boost confirmé avec arrêt immédiat');
+  check(plain(popup({lidMode:lid})).includes('Boost 80 % · 2 min')&&popup({lidMode:lid}).includes('Auto Apple'),'boost confirmé avec arrêt immédiat');
   const stuck={authorized:true,fanBoost:{version:2,active:false,manualOutsideBoost:true,fans:[{rpm:4900,mode:1}]}};
   check(popup({lidMode:stuck}).includes("send('stopFanBoost')")&&popup({lidMode:stuck}).includes('Ventilateur en manuel'),'ventilateur resté en manuel réparable depuis le popup');
   check(settings({tools:{lidMode:stuck}}).includes('(manuel)'),'mode manuel signalé dans les réglages');

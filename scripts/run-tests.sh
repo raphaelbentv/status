@@ -34,6 +34,9 @@ clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit \
 if command -v node >/dev/null; then
   node "$ROOT/Tests/web-tests.mjs"
   web_status=$?
+  echo "── Traductions (dictionnaires, clés, rendu par langue) ──"
+  node "$ROOT/Tests/i18n-tests.mjs"
+  web_status=$(( web_status + $? ))
 else
   echo "node introuvable — ignoré"
   web_status=0

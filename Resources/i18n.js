@@ -12,13 +12,15 @@
   const state = { lang: 'fr', locale: 'fr-FR', dict: {}, reverse: {} };
   const load = p => { if (p && p.dict) { state.lang = p.lang || 'fr'; state.locale = p.locale || 'fr-FR'; state.dict = p.dict; state.reverse = p.reverse || {}; formatters.clear(); } };
   const formatters = new Map();
+  // Clés demandées mais absentes du dictionnaire : relevées pour les tests plutôt que perdues.
+  const missing = new Set();
 
   const plural = n => state.lang === 'fr' ? (n < 2 ? 'one' : 'other') : (n === 1 ? 'one' : 'other');
   function t(key, params) {
     let s;
     if (params && typeof params.n === 'number') s = state.dict[key + '.' + plural(Math.abs(params.n))];
     if (s === undefined) s = state.dict[key];
-    if (s === undefined) return key;
+    if (s === undefined) { missing.add(key); return key; }
     return params ? s.replace(/\{(\w+)\}/g, (m, k) => params[k] === undefined ? m : params[k]) : s;
   }
   // Texte produit par le natif ou un service en français (messages d'erreur, états) : traduit
@@ -71,6 +73,6 @@
   }
   load(root.__STATUS_I18N__);
   root.t = t;
-  root.StatusI18n = {t, tm, label, num, numMax, pct, money, date, apply, set, onChange: f => listeners.push(f),
+  root.StatusI18n = {t, tm, label, missing, num, numMax, pct, money, date, apply, set, onChange: f => listeners.push(f),
     get lang() { return state.lang; }, get locale() { return state.locale; }, get dict() { return state.dict; }};
 })(typeof window !== 'undefined' ? window : globalThis);

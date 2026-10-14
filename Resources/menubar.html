@@ -247,9 +247,9 @@ function provider(id,name,accounts,metric){
 // macOS le rendait en rectangle vide. La lune, elle, existe bel et bien.
 const GLYPH_KEYBOARD='<svg viewBox="0 0 20 14" width="17" height="12" fill="none" stroke="currentColor" stroke-width="1.3">'
   +'<rect x="1" y="1" width="18" height="12" rx="2"/><path d="M4.5 5h1M8 5h1M11.5 5h1M15 5h1M4.5 8h1M8 8h1M11.5 8h1M15 8h1M6.5 10.7h7" stroke-linecap="round"/></svg>';
-function tools(t){
+function tools(tl){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
-  const awake=t?.awake||{},lock=t?.keyboardLock||{},lid=t?.lidMode||{};
+  const awake=tl?.awake||{},lock=tl?.keyboardLock||{},lid=tl?.lidMode||{};
   // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
   // après l'avoir accordée dans Réglages système.
   return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?t('menu.lidShort',{n:Math.ceil((lid.remainingSeconds||0)/60)}):t('menu.lid'),lid.active&&!lid.unconfirmed)

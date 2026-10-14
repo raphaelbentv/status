@@ -983,7 +983,7 @@ function detailBattery(battery){
 }
 function detailNetwork(net){const ifaces=[...new Set(Object.keys(net.now).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].sort();
   return `<div class="detail-rows">${ifaces.map(name=>`<div class="detail-row"><span class="detail-label">${esc(name)}</span><span>↓ ${fmtBytes(net.now['rx:'+name])} · ↑ ${fmtBytes(net.now['tx:'+name])}</span></div>`).join('')||`<div class="metric-empty">${t('mon.noInterface')}</div>`}</div>`}
-function storageSummary(now){return `<div class="storage-summary">${t('mon.storage',{free:`<strong>${fmtSize(now.freeBytes)}</strong>`,total:fmtSize(now.totalBytes)})}<br><button class="button" onclick="send('openStorageSettings')">${t('mon.manageStorage')}</button></div>`;}
+function storageSummary(now){return `<div class="storage-summary">${t('mon.storage',{free:fmtSize(now.freeBytes),total:fmtSize(now.totalBytes)})}<br><button class="button" onclick="send('openStorageSettings')">${t('mon.manageStorage')}</button></div>`;}
 function detailDisk(disk){const volumes=Object.keys(disk.now).filter(k=>k.startsWith('vol:')).sort();
   return `<div class="detail-rows">${volumes.map(key=>{const pct=Math.round(disk.now[key]);return `<div class="detail-row"><span class="detail-label">${esc(key.slice(4))}</span><span>${t('mon.used',{v:I.pct(pct)})}</span></div><div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${pct}%"></i></div>`}).join('')}</div>`;}
 const DETAILS={cpu:detailCPU,gpu:detailGPU,network:detailNetwork,disk:detailDisk,battery:detailBattery};

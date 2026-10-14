@@ -293,7 +293,7 @@
  "mon.ramp": "Montée",
  "mon.rx": "réception",
  "mon.soc": "SoC · {n} capteurs",
- "mon.storage": "{free} libres sur {total}",
+ "mon.storage": "<strong>{free} libres</strong> sur {total}",
  "mon.system": "Système",
  "mon.table": "tableau",
  "mon.tbl.avg": "Moyenne",
