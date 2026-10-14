@@ -68,10 +68,6 @@
   .provider-manage:hover{background:var(--soft-hover);color:var(--text)}
   .account-add{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)}
   .account-add small{color:var(--muted);font-size:12px}
-  .pin-list{margin-top:14px;padding-top:12px;border-top:1px solid var(--hair)}
-  .pin-list>small{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
-  .pin-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
-  .pin-name{font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .account-row{display:flex;gap:10px;align-items:center;margin-bottom:15px}
   .account-copy{min-width:0;flex:1}.account-copy strong,.account-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .account-copy small{color:var(--muted);font-size:12px;margin-top:3px}
@@ -286,7 +282,7 @@
   .settings-pane .connections{grid-template-columns:1fr;gap:12px}
   .settings-pane .connection-panel{min-height:0;padding:20px}
   @media(max-width:970px){.settings-layout{grid-template-columns:1fr;gap:16px}.settings-nav{position:static;flex-direction:row;flex-wrap:wrap}.settings-nav button.on::before{left:12px;right:12px;top:auto;bottom:2px;width:auto;height:2px}.settings-pane .setting{flex-wrap:wrap}}
-  .settings .setting{gap:20px;flex-wrap:wrap}.settings .setting-copy{min-width:240px}.segmented{flex-wrap:wrap}.pin-name{min-width:90px}
+  .settings .setting{gap:20px;flex-wrap:wrap}.settings .setting-copy{min-width:240px}.segmented{flex-wrap:wrap}
   .storage-summary{font-size:14px;line-height:1.7;margin:8px 0}.storage-summary strong{color:var(--text)}
   button:focus-visible,summary:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
   @media(max-width:970px){.account-actions{flex-wrap:wrap}.notice{align-items:flex-start;flex-wrap:wrap}}
@@ -725,32 +721,6 @@ function parseMetric(metric){
   if(parts.length>=2)return {provider:parts[0],kind:parts.slice(1).join(':'),value};
   return {lowest:true,value};
 }
-// Changer de fenêtre garde le compte épinglé : sinon l'icône rendrait la main à un autre compte
-// sans le dire, et le réglage d'à côté continuerait d'afficher l'ancien choix.
-function metricForWindow(current,provider,kind){
-  const m=parseMetric(current);
-  return m.accountId&&m.provider===provider?`acct:${provider}:${m.accountId}:${kind}`
-                                           :`${provider}:${kind}`;
-}
-
-// Épinglage compte par compte. Le popover de la barre des menus ne propose que les agrégats :
-// avec dix comptes possibles, une liste complète y serait illisible. Ici la place existe.
-function pinnedOptions(data,metric){
-  const rows=[];
-  PROVIDERS.forEach(p=>{
-    const accounts=accountsOf(data,p.id);
-    if(accounts.length<2)return;  // un seul compte : l'agrégat dit déjà exactement la même chose
-    accounts.forEach(account=>{
-      const kinds=p.id==='openai'?[['weekly',t('pin.week')]]:[['weekly',t('pin.week')],['session','5 h']];
-      const buttons=kinds.map(([kind,label])=>{
-        const value=`acct:${account.provider}:${account.accountId}:${kind}`;
-        return `<button class="seg ${(data.prefs?.providerMenuMetrics?.[account.provider]||metric)===value?'on':''}" onclick="send('setMenuBarMetric',{value:'${value}'})">${label}</button>`;
-      }).join('');
-      rows.push(`<div class="pin-row"><span class="pin-name">${esc(account.label)}</span><div class="segmented">${buttons}</div></div>`);
-    });
-  });
-  return rows.length?`<div class="pin-list"><small>${t('pin.title')}</small>${rows.join('')}</div>`:'';
-}
 const onOff=v=>v?t('set.on'):t('set.off');
 let lidMinutes=30;
 function startLidMode(){
@@ -862,13 +832,8 @@ function menuBarSettings(data,p){
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('sg.quotas')}</strong><small>${t('bar.quotasDesc')}</small></div><div class="quota-icon-rows">${['openai','claude'].map(pr=>quotaIconRow(data,p,pr)).join('')}</div><div class="quota-icon-actions"><button class="button" onclick="send('previewMenuIcons',{provider:'openai'})">${t('bar.compare',{name:'OpenAI'})}</button><button class="button" onclick="send('previewMenuIcons',{provider:'claude'})">${t('bar.compare',{name:'Claude'})}</button><button class="button" onclick="send('closeMenuIconPreviews')">${t('set.icons.close')}</button></div></section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>`;
 }
-function settingsAll(data){const p=data.prefs||{},metric=p.menuBarMetric||'claude:weekly',cur=parseMetric(metric),
-  // Un segment de fenêtre reste allumé quand un compte est épinglé dessus : c'est toujours cette
-  // fenêtre qui pilote l'icône, seul le compte a été restreint. Sans cela la rangée paraissait
-  // vide dès qu'un compte était épinglé.
-  opt=(v,l)=>{const m=parseMetric(v);const on=m.system||m.lowest?metric===v:(cur.provider===m.provider&&cur.kind===m.kind);
-    const target=m.system||m.lowest?v:metricForWindow(p.providerMenuMetrics?.[m.provider]||metric,m.provider,m.kind);
-    return `<button class="seg ${on?'on':''}" onclick="send('setMenuBarMetric',{value:'${target}'})">${l}</button>`},theme=p.theme||'blueprint',themeSwatches=THEMES.map(th=>`<button class="theme-swatch ${theme===th.id?'on':''}" onclick="send('setTheme',{value:'${th.id}'})"><span class="dot" style="background:${th.blue}"></span><span class="dot" style="background:${th.purple}"></span>${t('theme.'+th.id)}</button>`).join('');return `<div class="toolbar"><h1>${t('set.title')}</h1></div><div class="section-head"><div><h2>${t('set.menubar')}</h2><p>${t('set.menubarSub')}</p></div></div><div class="settings">
+function settingsAll(data){const p=data.prefs||{},
+  theme=p.theme||'blueprint',themeSwatches=THEMES.map(th=>`<button class="theme-swatch ${theme===th.id?'on':''}" onclick="send('setTheme',{value:'${th.id}'})"><span class="dot" style="background:${th.blue}"></span><span class="dot" style="background:${th.purple}"></span>${t('theme.'+th.id)}</button>`).join('');return `<div class="toolbar"><h1>${t('set.title')}</h1></div><div class="section-head"><div><h2>${t('set.menubar')}</h2><p>${t('set.menubarSub')}</p></div></div><div class="settings">
   ${menuBarSettings(data,p)}
 </div><div class="section-head"><div><h2>${t('set.behavior')}</h2><p>${t('set.behaviorSub')}</p></div></div><div class="settings">
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>${t('set.theme.title')}</strong><small>${t('set.theme.desc')}</small></div><div class="theme-swatch-grid">${themeSwatches}</div></section>

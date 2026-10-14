@@ -495,10 +495,6 @@ section('accountsOf / historyKey — la liste de comptes');
     checkEqual(menubar(`parseMetric('lowest')`).lowest, true, '« lowest » est reconnu');
     checkEqual(menubar(`parseMetric('system:cpu')`).system, true, 'les métriques système aussi');
 
-    // Le piège : changer de fenêtre ne doit pas rendre l'icône à un autre compte en silence.
-    checkEqual(dashboard(`metricForWindow('${pinPro}','claude','session')`),
-               `acct:claude:${pro.accountId}:session`, 'changer de fenêtre garde le compte épinglé');
-
     // Le popover doit montrer le compte épinglé, sinon le geste n'a aucun retour à l'écran.
     checkEqual(menubar(`pickAccount(${JSON.stringify([perso, pro])},'${pinPro}')`).label, 'Pro',
                'la colonne suit le compte épinglé');
