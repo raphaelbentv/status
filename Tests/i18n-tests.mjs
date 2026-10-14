@@ -93,8 +93,14 @@ check(used.exact.size > 300, `${used.exact.size} clés lues dans le code`);
 check(!undefinedKeys.length, 'chaque clé utilisée existe', undefinedKeys.join(', '));
 const deadPrefixes = [...used.prefix].filter(p => !frKeys.some(k => k.startsWith(p)));
 check(!deadPrefixes.length, `${used.prefix.size} préfixes de clés construites ont des entrées`, deadPrefixes.join(', '));
-const nativeWidgetIds = ['cpu', 'memory', 'gpu', 'network', 'temperature', 'battery', 'disk', 'claudeWeek', 'codexWeek'];
+const nativeWidgetIds = ['cpu', 'memory', 'gpu', 'network', 'temperature', 'battery', 'disk', 'claudeWeek', 'codexWeek', 'anthropicApi', 'openaiApi'];
 check(nativeWidgetIds.every(id => defined('mw.' + id)), 'un libellé mw.* pour chaque widget de la barre des menus');
+// Clés construites par le natif des comptes API (fournisseur, type d'alerte, code d'erreur) : le
+// lecteur ci-dessus ne les voit pas, elles sont énumérées ici.
+const apiNativeKeys = ['anthropic', 'openai'].flatMap(p => ['title', 'body', 'placeholder', 'invalid'].map(k => `api.key.${k}.${p}`))
+  .concat(['low', 'empty', 'budget80', 'budget100'].flatMap(k => [`n.api.${k}.title`, `n.api.${k}.body`]))
+  .concat(['auth', 'notFound', 'rateLimited', 'server', 'http', 'network', 'malformed', 'noKey'].map(k => `api.err.${k}`));
+check(apiNativeKeys.every(defined), `${apiNativeKeys.length} clés construites des comptes API définies`, apiNativeKeys.filter(k => !defined(k)).join(', '));
 // Les thèmes écrivent aussi du texte en CSS : il passe par var(--i18n-…), alimentée par les clés css.*.
 const themeCSS = ['themes.css', ...readdirSync(join(root, 'Resources', 'themes')).map(f => 'themes/' + f)]
   .map(f => readFileSync(join(root, 'Resources', f), 'utf8')).join('\n');
@@ -171,16 +177,23 @@ section('Rendu complet de chaque surface : aucune clé orpheline, aucune valeur 
       windows: [win('five_hour', '5 h', 96, now + 4000), win('seven_day', '7 jours', 19), win('seven_day_scoped_opus', '7 j · Opus', 30)] },
     { accountId: 'c2', provider: 'claude', label: 'Claude 2', claudeSource: 'code', connected: false, windows: [] },
   ];
+  const apiAccounts = [
+    { accountId: 'p1', provider: 'anthropic', label: 'Anthropic API 1', mode: 'prepaid', keyConfigured: true, hasData: true, todayUSD: 3.2, monthUSD: 41.5,
+      remainingUSD: 8.4, referenceUSD: 50, fraction: 0.17, severity: 1, balanceUSD: 50, balanceSetAt: Date.now() - 86400000, updatedAt: Date.now() - 120000, error: '' },
+    { accountId: 'p2', provider: 'openai', label: 'OpenAI API 1', mode: 'budget', keyConfigured: true, hasData: true, todayUSD: 0, monthUSD: 120,
+      remainingUSD: 80, referenceUSD: 200, fraction: 0.4, severity: 0, budgetUSD: 200, updatedAt: Date.now() - 60000, error: 'api.err.rateLimited' },
+    { accountId: 'p3', provider: 'openai', label: 'OpenAI API 2', mode: 'none', keyConfigured: false, hasData: false, todayUSD: 0, monthUSD: 0, error: 'api.err.noKey' },
+  ];
   const fans = { version: 2, active: true, verified: true, percent: 80, remainingSeconds: 300, message: 'Boost actif · vitesse vérifiée.', fans: [{ rpm: 2345, mode: 1, maxRPM: 6000 }] };
   const data = {
-    accounts, updatedAt: Date.now(), backoffCount: 2, refreshing: false,
+    accounts, apiAccounts, apiAccountLimit: 5, updatedAt: Date.now(), backoffCount: 2, refreshing: false,
     history: Array.from({ length: 30 }, (_, i) => ({ t: now - (30 - i) * 3600, p: { 'openai:a1:seven_day': 10 + i, 'claude:c1:seven_day': 5 + i } })),
     costs: { asOf: '2026-09-01', fxAsOf: '2026-09-02', eurPerUsd: 0.86, claude: { periods: { d8: { total: 412.8, breakdown: [{ model: 'opus', tokens: 61493255, cost: 412.8 }], prices: { opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 } }, unpricedTokens: 2e6 }, d30: { total: 9000 } } } },
     displays: [{ id: 'd1', name: 'Écran interne', kind: 'builtin', available: true, brightness: 60 }, { id: 'd2', name: 'DELL', kind: 'external', available: false }],
     metricsLog: Array.from({ length: 40 }, (_, i) => ({ t: now - (40 - i) * 60, cpu: 10 + i, temp: 50 + i / 4, ram: 40, gpu: 5, batt: 80 })),
     tools: { awake: { active: false }, keyboardLock: { state: 'unlocked' }, lidMode: { authorized: true, fanBoost: fans, message: 'Désactivé.' } },
     prefs: { theme: 'blueprint', language: 'auto', menuBarMetric: 'claude:weekly', accessibilityTrusted: false, brightnessKeys: true, globalShortcut: true,
-      menuBarWidgets: ['cpu', 'battery', 'claudeWeek'], notificationsAuthorized: false, providerIconStyles: { openai: 'tube', claude: 'grid' }, alerts: {}, quotaRefreshIntervalSeconds: 120, launchAtLogin: true },
+      menuBarWidgets: ['cpu', 'battery', 'claudeWeek', 'openaiApi'], apiRefreshIntervalSeconds: 600, notificationsAuthorized: false, providerIconStyles: { openai: 'tube', claude: 'grid' }, alerts: {}, quotaRefreshIntervalSeconds: 120, launchAtLogin: true },
   };
   const metrics = { families: [
     { id: 'cpu', now: { total: 42, core0: 30, core1: 50, coreTypes: 'PE' }, series: { total: [10, 20, 30, 42], core0: [1, 2, 3, 4], core1: [1, 2, 3, 4] } },
@@ -209,7 +222,8 @@ section('Rendu complet de chaque surface : aucune clé orpheline, aucune valeur 
     out.push(menu(`provider('claude','Claude',${JSON.stringify(accounts.filter(a => a.provider === 'claude'))},'claude:weekly')`),
       menu(`provider('openai','OpenAI',${JSON.stringify(accounts.slice(0, 1))},'openai:weekly')`),
       menu(`fanControls(${JSON.stringify(data.tools)})`), menu(`tools(${JSON.stringify(data.tools)})`),
-      menu(`brightnessRow(${JSON.stringify(data.displays)})`), menu(`extraCredits(${JSON.stringify(accounts[0])})`));
+      menu(`brightnessRow(${JSON.stringify(data.displays)})`), menu(`extraCredits(${JSON.stringify(accounts[0])})`),
+      menu(`apiCredits(${JSON.stringify(apiAccounts)})`));
     wid(`metrics=${JSON.stringify(metrics)};metrics.prefs={}`);
     for (const id of ['cpu', 'memory', 'gpu', 'network', 'temperature', 'battery', 'disk']) {
       wid(`widgetId='${id}'`);

@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 #import "StatusQuota.h"
 #import "StatusAccounts.h"
+#import "StatusApiCredits.h"
 #import "StatusAwake.h"
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
@@ -2001,6 +2002,268 @@ static void TestFxRefresh(void) {
     Check(!TMParseFxResponse((NSDictionary *)@"pas un dict", &rate, &asOf), @"non-dictionnaire : rejeté");
 }
 
+#pragma mark - Comptes API (crédit estimé)
+
+// 2026-10-14 15:30:00 UTC, et les débuts de jour/mois correspondants.
+#define TM_API_NOW 1791991800.0
+#define TM_API_DAY 1791936000.0
+#define TM_API_MONTH 1790812800.0
+
+static void TestApiRegistry(void) {
+    Section(@"Comptes API — registre");
+    NSArray *registry = TMNormalizeApiRegistry(@[
+        @{ @"accountId": TM_ACC_A, @"provider": @"anthropic", @"mode": @"prepaid", @"balanceUSD": @50, @"balanceSetAt": @(TM_API_NOW) },
+        @{ @"accountId": TM_ACC_A, @"provider": @"openai" },                         // doublon
+        @{ @"accountId": @"pas-un-uuid", @"provider": @"openai" },
+        @{ @"accountId": TM_ACC_B, @"provider": @"mistral" },                        // fournisseur inconnu
+        @{ @"accountId": TM_ACC_B, @"provider": @"openai", @"mode": @"budget" },     // budget absent
+        @"bruit"
+    ]);
+    CheckEqual(@(registry.count), @2, @"entrées invalides et doublons écartés");
+    CheckEqual(registry[0][@"mode"], @"prepaid", @"solde complet : mode prepaid gardé");
+    CheckEqual(registry[1][@"mode"], @"none", @"budget sans montant : retombe sur « none »");
+    CheckEqual(TMApiAccountDisplayLabel(registry[1], 0), @"OpenAI API 1", @"nom de repli numéroté");
+    Check(TMNormalizeApiRegistry(@{}).count == 0, @"registre corrompu : vide, sans plantage");
+
+    NSArray *full = @[];
+    for (int i = 0; i < 5; i++) full = TMApiRegistryAdding(full, @"openai", NSUUID.UUID.UUIDString);
+    CheckEqual(@(full.count), @5, @"cinq comptes par fournisseur");
+    Check(TMApiRegistryAdding(full, @"openai", NSUUID.UUID.UUIDString) == nil, @"sixième refusé");
+    Check(TMApiRegistryAdding(full, @"anthropic", NSUUID.UUID.UUIDString) != nil, @"l'autre fournisseur reste libre");
+    Check(TMApiRegistryAdding(@[], @"openai", @"x") == nil, @"identifiant invalide refusé");
+    CheckEqual(@(TMApiRegistryRemoving(registry, TM_ACC_A).count), @1, @"suppression");
+
+    NSArray *budget = TMApiRegistrySettingBudget(registry, TM_ACC_B, 200);
+    CheckEqual(TMApiAccountWithID(budget, TM_ACC_B)[@"mode"], @"budget", @"budget saisi : mode budget");
+    NSArray *cleared = TMApiRegistryClearingMode(budget, TM_ACC_B);
+    CheckEqual(TMApiAccountWithID(cleared, TM_ACC_B)[@"budgetUSD"], @200, @"le budget reste mémorisé hors mode");
+    CheckEqual(TMApiAccountWithID(TMApiRegistrySettingBudget(registry, TM_ACC_B, -3), TM_ACC_B)[@"mode"], @"none", @"budget négatif ignoré");
+
+    NSArray *credited = TMApiRegistryAddingCredit(registry, TM_ACC_A, 25);
+    CheckEqual(TMApiAccountWithID(credited, TM_ACC_A)[@"balanceUSD"], @75, @"recharge ajoutée au solde");
+    CheckEqual(TMApiAccountWithID(credited, TM_ACC_A)[@"balanceSetAt"], @(TM_API_NOW), @"la date de saisie ne bouge pas");
+    CheckEqual(TMApiAccountWithID(TMApiRegistryAddingCredit(budget, TM_ACC_B, 25), TM_ACC_B)[@"balanceUSD"], nil, @"recharge sans effet hors prepaid");
+    CheckEqual(TMApiAccountWithID(TMApiRegistrySettingLabel(registry, TM_ACC_A, @"  Prod  "), TM_ACC_A)[@"label"], @"Prod", @"renommage nettoyé");
+}
+
+static void TestApiBaseline(void) {
+    Section(@"Comptes API — saisie du solde et ligne de base");
+    NSArray *registry = TMApiRegistrySettingBalance(TMApiRegistryAdding(@[], @"anthropic", TM_ACC_A), TM_ACC_A, 100, TM_API_NOW);
+    NSDictionary *account = TMApiAccountWithID(registry, TM_ACC_A);
+    CheckEqual(account[@"mode"], @"prepaid", @"saisie : mode prepaid");
+    CheckEqual(account[@"baselinePending"], @YES, @"ligne de base en attente du relevé");
+    NSString *today = [NSString stringWithFormat:@"%lld", (long long)TM_API_DAY];
+    NSDictionary *daily = @{ today: @7.5 };
+    NSArray *resolved = TMApiRegistryResolvingBaseline(registry, TM_ACC_A, daily, TM_API_NOW + 60);
+    CheckEqual(TMApiAccountWithID(resolved, TM_ACC_A)[@"baselineUSD"], @7.5, @"base = dépense du jour au moment du relevé");
+    CheckEqual(TMApiAccountWithID(resolved, TM_ACC_A)[@"baselinePending"], @NO, @"base fixée une seule fois");
+    NSArray *late = TMApiRegistryResolvingBaseline(registry, TM_ACC_A, daily, TM_API_NOW + 86400);
+    CheckEqual(TMApiAccountWithID(late, TM_ACC_A)[@"baselineUSD"], @0, @"relevé le lendemain : base 0 (estimation pessimiste)");
+    NSArray *again = TMApiRegistryResolvingBaseline(resolved, TM_ACC_A, @{ today: @20 }, TM_API_NOW + 120);
+    CheckEqual(TMApiAccountWithID(again, TM_ACC_A)[@"baselineUSD"], @7.5, @"une base fixée n'est plus recalculée");
+}
+
+static void TestApiInputs(void) {
+    Section(@"Comptes API — montants et clés saisis");
+    double v = -1;
+    Check(TMParseUSDAmount(@"12,50", &v) && v == 12.5, @"virgule décimale");
+    Check(TMParseUSDAmount(@"$1,234.56", &v) && fabs(v - 1234.56) < 1e-9, @"format anglais");
+    Check(TMParseUSDAmount(@"1 234,5 $", &v) && v == 1234.5, @"format français");
+    Check(TMParseUSDAmount(@"1.234,5", &v) && v == 1234.5, @"point des milliers");
+    Check(TMParseUSDAmount(@"1,000", &v) && v == 1000, @"virgule des milliers");
+    Check(TMParseUSDAmount(@"40 USD", &v) && v == 40, @"suffixe USD");
+    Check(!TMParseUSDAmount(@"", &v), @"vide refusé");
+    Check(!TMParseUSDAmount(@"-5", &v), @"négatif refusé");
+    Check(!TMParseUSDAmount(@"douze", &v), @"texte refusé");
+    Check(!TMParseUSDAmount(@"99999999", &v), @"montant absurde refusé");
+
+    NSString *anthropic = [@"sk-ant-admin01-" stringByPaddingToLength:60 withString:@"a" startingAtIndex:0];
+    NSString *openai = [@"sk-admin-" stringByPaddingToLength:60 withString:@"Z" startingAtIndex:0];
+    Check(TMApiKeyHasExpectedShape(@"anthropic", anthropic), @"clé admin Anthropic acceptée");
+    Check(TMApiKeyHasExpectedShape(@"openai", openai), @"clé admin OpenAI acceptée");
+    Check(!TMApiKeyHasExpectedShape(@"openai", anthropic), @"clé de l'autre fournisseur refusée");
+    Check(!TMApiKeyHasExpectedShape(@"anthropic", [@"sk-ant-api03-" stringByPaddingToLength:60 withString:@"a" startingAtIndex:0]),
+          @"clé d'API ordinaire refusée (l'Admin API la rejetterait)");
+    Check(!TMApiKeyHasExpectedShape(@"openai", @"sk-admin-court"), @"clé trop courte refusée");
+    Check(!TMApiKeyHasExpectedShape(@"openai", [openai stringByAppendingString:@"\"x"]), @"caractère hors alphabet refusé");
+    CheckEqual(TMApiKeyCleaned(@"  sk-admin-abc\n def \n"), @"sk-admin-abcdef", @"collage nettoyé des blancs");
+    CheckEqual(TMApiKeychainAccount(TM_ACC_A), @"api-admin-key:" TM_ACC_A, @"une entrée de Trousseau par compte");
+}
+
+static void TestApiNetwork(void) {
+    Section(@"Comptes API — hôtes permis et requêtes");
+    Check(TMApiURLAllowed([NSURL URLWithString:@"https://api.anthropic.com/v1/organizations/cost_report"]), @"api.anthropic.com permis");
+    Check(TMApiURLAllowed([NSURL URLWithString:@"https://API.OpenAI.com/v1/organization/costs"]), @"api.openai.com permis (casse ignorée)");
+    Check(!TMApiURLAllowed([NSURL URLWithString:@"http://api.openai.com/v1/organization/costs"]), @"http refusé");
+    Check(!TMApiURLAllowed([NSURL URLWithString:@"https://api.openai.com.evil.example/v1"]), @"suffixe piégé refusé");
+    Check(!TMApiURLAllowed([NSURL URLWithString:@"https://evil.example/api.openai.com"]), @"hôte tiers refusé");
+    Check(!TMApiURLAllowed([NSURL URLWithString:@"https://api.openai.com:8443/v1"]), @"autre port refusé");
+    Check(!TMApiURLAllowed([NSURL URLWithString:@"https://user:pw@api.openai.com/v1"]), @"identifiants dans l'URL refusés");
+    Check(!TMApiURLAllowed(nil), @"URL absente refusée");
+
+    NSString *key = @"sk-ant-admin01-TESTKEY";
+    NSURLRequest *a = TMApiCostRequest(@"anthropic", key, TM_API_MONTH, nil, @"Status/test");
+    CheckEqual(a.URL.host, @"api.anthropic.com", @"Anthropic : bon hôte");
+    CheckEqual(a.URL.path, @"/v1/organizations/cost_report", @"Anthropic : rapport de coûts");
+    Check([a.URL.query containsString:@"starting_at=2026-10-01T00:00:00Z"], @"Anthropic : début RFC 3339 en UTC");
+    Check([a.URL.query containsString:@"limit=31"] && [a.URL.query containsString:@"bucket_width=1d"], @"Anthropic : 31 jours par page");
+    CheckEqual([a valueForHTTPHeaderField:@"x-api-key"], key, @"Anthropic : clé dans x-api-key");
+    CheckEqual([a valueForHTTPHeaderField:@"anthropic-version"], @"2023-06-01", @"Anthropic : version d'API");
+    Check(![a.URL.absoluteString containsString:key], @"Anthropic : la clé n'est jamais dans l'URL");
+    Check(!a.HTTPShouldHandleCookies, @"pas de cookies");
+
+    NSURLRequest *o = TMApiCostRequest(@"openai", @"sk-admin-TESTKEY", TM_API_MONTH, @"page_2", @"Status/test");
+    CheckEqual(o.URL.host, @"api.openai.com", @"OpenAI : bon hôte");
+    CheckEqual(o.URL.path, @"/v1/organization/costs", @"OpenAI : endpoint des coûts");
+    Check([o.URL.query containsString:@"start_time=1790812800"] && [o.URL.query containsString:@"page=page_2"], @"OpenAI : début en secondes et page");
+    CheckEqual([o valueForHTTPHeaderField:@"Authorization"], @"Bearer sk-admin-TESTKEY", @"OpenAI : jeton Bearer");
+    Check(TMApiCostRequest(@"mistral", key, 0, nil, @"x") == nil, @"fournisseur inconnu : aucune requête");
+    Check(TMApiCostRequest(@"openai", @"", 0, nil, @"x") == nil, @"sans clé : aucune requête");
+
+    CheckEqual(TMApiErrorKey(401), @"api.err.auth", @"401 : clé refusée");
+    CheckEqual(TMApiErrorKey(403), @"api.err.auth", @"403 : droits insuffisants");
+    CheckEqual(TMApiErrorKey(429), @"api.err.rateLimited", @"429 : débit");
+    CheckEqual(TMApiErrorKey(503), @"api.err.server", @"5xx : serveur");
+}
+
+static void TestApiParsing(void) {
+    Section(@"Comptes API — lecture des rapports de coûts");
+    NSDictionary *anthropic = TMApiParseCostPage(@"anthropic", @{
+        @"data": @[
+            @{ @"starting_at": @"2026-10-13T00:00:00Z", @"ending_at": @"2026-10-14T00:00:00Z",
+               @"results": @[ @{ @"amount": @"1234.5", @"currency": @"USD" }, @{ @"amount": @"65.5", @"currency": @"USD" } ] },
+            @{ @"starting_at": @"2026-10-14T00:00:00Z", @"ending_at": @"2026-10-15T00:00:00Z", @"results": @[] },
+            @{ @"starting_at": @"pas une date", @"results": @[ @{ @"amount": @"999" } ] },
+        ],
+        @"has_more": @YES, @"next_page": @"page_abc" });
+    NSString *d13 = [NSString stringWithFormat:@"%lld", (long long)(TM_API_DAY - 86400)];
+    NSString *d14 = [NSString stringWithFormat:@"%lld", (long long)TM_API_DAY];
+    CheckEqual(anthropic[@"days"][d13], @13, @"cents en chaîne → dollars, résultats additionnés");
+    CheckEqual(anthropic[@"days"][d14], @0, @"jour sans coût : 0");
+    CheckEqual(@([anthropic[@"days"] count]), @2, @"bucket illisible ignoré");
+    CheckEqual(anthropic[@"nextPage"], @"page_abc", @"page suivante");
+
+    NSDictionary *openai = TMApiParseCostPage(@"openai", @{
+        @"object": @"page",
+        @"data": @[ @{ @"object": @"bucket", @"start_time": @(TM_API_DAY), @"end_time": @(TM_API_DAY + 86400),
+                       @"results": @[ @{ @"amount": @{ @"value": @0.25, @"currency": @"usd" } },
+                                      @{ @"amount": @{ @"value": @1.5, @"currency": @"usd" } },
+                                      @{ @"amount": @{ @"value": @100, @"currency": @"eur" } } ] } ],
+        @"has_more": @NO, @"next_page": [NSNull null] });
+    CheckEqual(openai[@"days"][d14], @1.75, @"dollars additionnés, autre devise écartée");
+    CheckEqual(openai[@"nextPage"], @"", @"dernière page");
+    Check(TMApiParseCostPage(@"openai", @{ @"error": @{} }) == nil, @"réponse sans data : nil");
+    Check(TMApiParseCostPage(@"openai", @[]) == nil, @"réponse non objet : nil");
+}
+
+static void TestApiSummary(void) {
+    Section(@"Comptes API — estimation, budget, widget");
+    CheckEqual(@(TMUTCDayStart(TM_API_NOW)), @(TM_API_DAY), @"début du jour UTC");
+    CheckEqual(@(TMUTCMonthStart(TM_API_NOW)), @(TM_API_MONTH), @"début du mois UTC");
+    NSString *(^day)(double) = ^NSString *(double t) { return [NSString stringWithFormat:@"%lld", (long long)t]; };
+    NSDictionary *daily = @{ day(TM_API_MONTH - 86400): @50,   // mois dernier
+                             day(TM_API_DAY - 2 * 86400): @4,
+                             day(TM_API_DAY - 86400): @6,
+                             day(TM_API_DAY): @10 };
+
+    NSDictionary *prepaid = @{ @"accountId": TM_ACC_A, @"provider": @"anthropic", @"mode": @"prepaid",
+                               @"balanceUSD": @40, @"balanceSetAt": @(TM_API_DAY - 86400 + 3600), @"baselineUSD": @2 };
+    NSDictionary *s = TMApiSummary(prepaid, daily, TM_API_NOW, 10);
+    CheckEqual(s[@"todayUSD"], @10, @"dépense du jour");
+    CheckEqual(s[@"monthUSD"], @20, @"dépense du mois (UTC), mois précédent exclu");
+    CheckEqual(s[@"sinceSetUSD"], @14, @"depuis la saisie : (6 + 10) − base 2");
+    CheckEqual(s[@"remainingUSD"], @26, @"reste estimé = 40 − 14");
+    CheckEqual(s[@"fraction"], @0.65, @"part restante");
+    CheckEqual(s[@"severity"], @0, @"au-dessus du seuil : normal");
+    CheckEqual(TMApiSummary(prepaid, daily, TM_API_NOW, 30)[@"severity"], @1, @"sous le seuil : avertissement");
+    NSMutableDictionary *empty = [prepaid mutableCopy]; empty[@"balanceUSD"] = @10;
+    CheckEqual(TMApiSummary(empty, daily, TM_API_NOW, 5)[@"severity"], @2, @"épuisé : critique");
+    CheckEqual(TMApiSummary(empty, daily, TM_API_NOW, 5)[@"fraction"], @0, @"épuisé : jauge vide, jamais négative");
+    NSMutableDictionary *pending = [prepaid mutableCopy]; pending[@"baselinePending"] = @YES; pending[@"balanceSetAt"] = @(TM_API_NOW - 60);
+    CheckEqual(TMApiSummary(pending, daily, TM_API_NOW, 10)[@"sinceSetUSD"], @0, @"base en attente : la dépense déjà connue du jour n'est pas décomptée");
+
+    CheckEqual(@(TMApiQueryStart(prepaid, TM_API_NOW)), @(TM_API_MONTH), @"saisie ce mois-ci : relevé depuis le 1er");
+    NSMutableDictionary *old = [prepaid mutableCopy]; old[@"balanceSetAt"] = @(TM_API_MONTH - 10 * 86400 + 500);
+    CheckEqual(@(TMApiQueryStart(old, TM_API_NOW)), @(TM_API_MONTH - 10 * 86400), @"saisie antérieure : relevé depuis son jour");
+    old[@"balanceSetAt"] = @(TM_API_NOW - 900 * 86400);
+    Check(TMApiQueryStart(old, TM_API_NOW) >= TM_API_NOW - 401 * 86400, @"recul plafonné à environ un an");
+
+    NSDictionary *budget = @{ @"accountId": TM_ACC_B, @"provider": @"openai", @"mode": @"budget", @"budgetUSD": @25 };
+    NSDictionary *b = TMApiSummary(budget, daily, TM_API_NOW, 10);
+    CheckEqual(b[@"remainingUSD"], @5, @"budget : reste = 25 − 20");
+    Check(fabs([b[@"fraction"] doubleValue] - 0.2) < 1e-9, @"budget : part restante");
+    CheckEqual(b[@"severity"], @1, @"budget à 80 % : avertissement");
+    NSDictionary *none = TMApiSummary(@{ @"accountId": TM_ACC_B, @"provider": @"openai", @"mode": @"none" }, daily, TM_API_NOW, 10);
+    Check(none[@"fraction"] == nil && none[@"remainingUSD"] == nil, @"dépense seule : pas de jauge");
+    CheckEqual(none[@"monthUSD"], @20, @"dépense seule : le mois est quand même compté");
+
+    NSDictionary *merged = TMApiDailyMerging(daily, @{ day(TM_API_DAY): @12 }, TM_API_MONTH);
+    CheckEqual(merged[day(TM_API_DAY)], @12, @"fusion : le relevé frais l'emporte");
+    Check(merged[day(TM_API_MONTH - 86400)] == nil, @"fusion : jours hors période oubliés");
+
+    NSArray *summaries = @[ s, b, @{ @"accountId": @"x", @"provider": @"anthropic", @"fraction": @0.1 }, none ];
+    CheckEqual(TMApiWidgetPick(summaries, @"anthropic", nil)[@"accountId"], @"x", @"widget : le compte le plus bas");
+    CheckEqual(TMApiWidgetPick(summaries, @"anthropic", TM_ACC_A)[@"accountId"], TM_ACC_A, @"widget : le compte épinglé");
+    CheckEqual(TMApiWidgetPick(summaries, @"openai", @"inconnu")[@"accountId"], TM_ACC_B, @"widget : épinglé disparu → le plus bas");
+    Check(TMApiWidgetPick(@[none], @"openai", nil) == nil, @"widget : aucun compte avec jauge → tiret");
+
+    NSDictionary *readout = TMWidgetReadout(@"anthropicApi", @{ @"families": @[ @{ @"id": @"anthropicApi",
+        @"now": @{ @"fraction": @0.25, @"severity": @1, @"text": @"26,00 $", @"template": @"9 999 $" } } ] });
+    CheckEqual(readout[@"hasValue"], @YES, @"widget API : valeur présente");
+    CheckEqual(readout[@"title"], @"26,00 $", @"widget API : reste en dollars");
+    CheckEqual(readout[@"fraction"], @0.25, @"widget API : jauge = part restante");
+    CheckEqual(readout[@"severity"], @1, @"widget API : sévérité du compte");
+    CheckEqual(readout[@"valueTemplate"], @"9 999 $", @"widget API : largeur réservée");
+    CheckEqual(TMWidgetReadout(@"openaiApi", @{})[@"hasValue"], @NO, @"widget API sans famille : tiret");
+    Check(TMWidgetUsesAccounts(@"openaiApi") && TMWidgetUsesAccounts(@"claudeWeek") && !TMWidgetUsesAccounts(@"cpu"),
+          @"widgets de comptes : ni moniteur ni panneau système");
+    Check([TMMenuBarWidgetIDs() containsObject:@"anthropicApi"] && [TMMenuBarWidgetIDs() containsObject:@"openaiApi"],
+          @"widgets API au catalogue");
+
+    CheckEqual(TMFormatUSD(12.4, @"fr_FR"), @"12,40 $", @"montant en français");
+    CheckEqual(TMFormatUSD(12.4, @"en_US"), @"$12.40", @"montant en anglais");
+    CheckEqual(TMFormatUSD(1234.4, @"en_US"), @"$1,234", @"au-delà de 100 $ : sans centimes");
+}
+
+static void TestApiAlerts(void) {
+    Section(@"Comptes API — alertes");
+    NSDictionary *(^prepaid)(double) = ^NSDictionary *(double remaining) {
+        return @{ @"accountId": TM_ACC_A, @"mode": @"prepaid", @"remainingUSD": @(remaining), @"referenceUSD": @100 };
+    };
+    NSDictionary *r = TMApiAlertDecisions(nil, @[prepaid(50)], 10, YES);
+    CheckEqual(@([r[@"fire"] count]), @0, @"au-dessus du seuil : rien");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(8)], 10, YES);
+    CheckEqual(r[@"fire"], (@[@{ @"accountId": TM_ACC_A, @"kind": @"low" }]), @"sous le seuil : une alerte");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(7)], 10, YES);
+    CheckEqual(@([r[@"fire"] count]), @0, @"toujours sous le seuil : pas de répétition");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(10.5)], 10, YES);
+    CheckEqual(@([r[@"fire"] count]), @0, @"juste au-dessus : pas encore réarmée (marge)");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(9)], 10, YES);
+    CheckEqual(@([r[@"fire"] count]), @0, @"oscillation autour du seuil : silence");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(-1)], 10, YES);
+    CheckEqual(r[@"fire"], (@[@{ @"accountId": TM_ACC_A, @"kind": @"empty" }]), @"épuisé : alerte dédiée");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(80)], 10, YES);
+    CheckEqual(@([r[@"state"] count]), @0, @"recharge : tout se réarme");
+    r = TMApiAlertDecisions(r[@"state"], @[prepaid(0)], 10, YES);
+    CheckEqual(r[@"fire"], (@[@{ @"accountId": TM_ACC_A, @"kind": @"empty" }]), @"chute directe à 0 : seulement la plus grave");
+    NSDictionary *off = TMApiAlertDecisions(nil, @[prepaid(3)], 10, NO);
+    CheckEqual(@([off[@"fire"] count]), @0, @"alerte coupée : rien ne part");
+    CheckEqual(@([TMApiAlertDecisions(off[@"state"], @[prepaid(3)], 10, YES)[@"fire"] count]), @0,
+               @"réactivée : pas de rafale pour un état déjà connu");
+
+    NSDictionary *(^budget)(double) = ^NSDictionary *(double spent) {
+        return @{ @"accountId": TM_ACC_B, @"mode": @"budget", @"remainingUSD": @(100 - spent), @"referenceUSD": @100 };
+    };
+    r = TMApiAlertDecisions(nil, @[budget(85)], 10, YES);
+    CheckEqual(r[@"fire"], (@[@{ @"accountId": TM_ACC_B, @"kind": @"budget80" }]), @"budget à 80 %");
+    r = TMApiAlertDecisions(r[@"state"], @[budget(101)], 10, YES);
+    CheckEqual(r[@"fire"], (@[@{ @"accountId": TM_ACC_B, @"kind": @"budget100" }]), @"budget dépassé");
+    r = TMApiAlertDecisions(r[@"state"], @[budget(2)], 10, YES);
+    CheckEqual(@([r[@"state"] count]), @0, @"nouveau mois : réarmé");
+    r = TMApiAlertDecisions(@{ TM_ACC_A @":low": @YES }, @[], 10, YES);
+    CheckEqual(@([r[@"state"] count]), @0, @"compte disparu : état oublié");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -2060,6 +2323,13 @@ int main(void) {
         TestMenuBarWidgets();
         TestWidgetRenderSignature();
         TestWidgetStableWidth();
+        TestApiRegistry();
+        TestApiBaseline();
+        TestApiInputs();
+        TestApiNetwork();
+        TestApiParsing();
+        TestApiSummary();
+        TestApiAlerts();
 
         printf("\n%s%d vérifications, %d échec(s)\033[0m\n\n",
                gFailures ? "\033[31m" : "\033[32m", gChecks, gFailures);

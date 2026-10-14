@@ -754,5 +754,36 @@ section('thèmes — THEMES, Status.m et feuilles CSS synchronisés');
       check(html.includes(`themes/${id}.css`), `${page} charge themes/${id}.css`);
   }
 }
+
+// ── Comptes API ─────────────────────────────────────────────────────────────
+section('Comptes API — réglages et popover');
+{
+  const api = [
+    { accountId: 'p1', provider: 'anthropic', label: 'Prod', mode: 'prepaid', keyConfigured: true, hasData: true, todayUSD: 3.2, monthUSD: 41.5,
+      remainingUSD: -2, referenceUSD: 50, fraction: 0, severity: 2, balanceUSD: 50, balanceSetAt: Date.now() - 86400000, updatedAt: Date.now() - 120000, error: '' },
+    { accountId: 'p2', provider: 'openai', label: 'Org', mode: 'budget', keyConfigured: true, hasData: true, todayUSD: 0, monthUSD: 120,
+      remainingUSD: 80, referenceUSD: 200, fraction: 0.4, severity: 0, budgetUSD: 200, updatedAt: Date.now(), error: '' },
+    { accountId: 'p3', provider: 'openai', label: 'Neuve', mode: 'none', keyConfigured: false, hasData: false, todayUSD: 0, monthUSD: 0, error: 'api.err.noKey' },
+  ];
+  dashboard(`appData=${JSON.stringify({ apiAccounts: api, apiAccountLimit: 5, prefs: { apiRefreshIntervalSeconds: 600 } })}`);
+  const settings = plain(dashboard('apiConnectionsView(appData)'));
+  check(settings.includes('≈ 0,00 $'), 'solde estimé épuisé : affiché à 0, jamais négatif');
+  check(settings.includes('class="critical"'), 'solde épuisé : chiffre en rouge');
+  check(settings.includes('80,00 $') && settings.includes('Reste du budget'), 'budget : reste du budget affiché');
+  check(settings.includes(`send('configureApiKey',{accountId:'p3'})`), 'compte sans clé : la saisie passe par le natif');
+  check(!/<input[^>]*(password|key)/i.test(settings), 'aucun champ de clé dans la page');
+  check(settings.includes('Ni Anthropic ni OpenAI ne publient le solde'), 'l’estimation est annoncée comme telle');
+  check(settings.includes(`seg on" onclick="send('setApiRefreshInterval',{seconds:600})`), 'cadence de relevé sélectionnée');
+  checkEqual(dashboard(`apiWidgetAccountRow('openaiApi',{})`).includes('Le plus bas'), true, 'widget OpenAI : choix du compte quand il y en a deux');
+  checkEqual(dashboard(`apiWidgetAccountRow('anthropicApi',{})`), '', 'widget Anthropic : un seul compte, pas de choix');
+  checkEqual(dashboard(`apiWidgetAccountRow('cpu',{})`), '', 'autre widget : rien');
+
+  checkEqual(menubar('apiCredits([])'), '', 'popover : rien sans compte API');
+  const popup = plain(menubar(`apiCredits(${JSON.stringify(api)})`));
+  check(popup.includes('≈ 0,00 $') && popup.includes('80,00 $ de budget'), 'popover : reste estimé et reste du budget');
+  check(popup.includes('clé à saisir'), 'popover : clé manquante signalée');
+  check((popup.match(/class="api-row"/g) || []).length === 3, 'popover : une ligne par compte');
+}
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

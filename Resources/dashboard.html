@@ -327,6 +327,17 @@
   .icon-style{display:grid;place-items:center;width:40px;height:34px;padding:0;border:1px solid var(--hair);border-radius:var(--radius);background:var(--soft);cursor:pointer}
   .icon-style:hover{background:var(--soft-hover)}.icon-style.on{border-color:var(--hair-strong);background:var(--soft-hover);box-shadow:0 0 0 1px var(--blue)}
   .quota-icon-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  /* Comptes API (Admin API Anthropic / OpenAI) : crédit estimé, budget, dépense. */
+  .connection-panel.api-anthropic:before{background:var(--purple)}.connection-panel.api-anthropic h3{color:var(--purple)}
+  .api-figures{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+  .api-figures div{min-width:0}.api-figures small{display:block;color:var(--muted);font-size:12px}
+  .api-figures strong{display:block;margin-top:2px;font-size:15px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  .api-figures strong.warning{color:var(--amber)}.api-figures strong.critical{color:var(--danger)}
+  .api-rail{height:6px;margin-top:10px;border-radius:3px;background:var(--soft);overflow:hidden}
+  .api-rail i{display:block;height:100%;background:var(--provider)}
+  .api-rail.warning i{background:var(--amber)}.api-rail.critical i{background:var(--danger)}
+  .api-foot{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;border:1px solid var(--hair);border-radius:var(--radius);background:var(--panel-bg);padding:14px 20px}
+  .api-foot p{margin:0;color:var(--muted);font-size:12px;line-height:1.5;flex:1 1 280px}
 </style>
 </head>
 <body>
@@ -404,7 +415,7 @@ const THEMES=[
   {id:'widget',label:'Widget',blue:'#0F8A63',purple:'#C65A2E'}
 ];
 // Widgets système de la barre des menus (mêmes ids que TMMenuBarWidgetIDs côté natif).
-const WIDGETS=[['cpu'],['memory'],['gpu'],['network'],['temperature'],['battery'],['disk'],['claudeWeek'],['codexWeek']];
+const WIDGETS=[['cpu'],['memory'],['gpu'],['network'],['temperature'],['battery'],['disk'],['claudeWeek'],['codexWeek'],['anthropicApi'],['openaiApi']];
 // Formes valides par widget (défaut = 1re). Ids alignés sur TMWidgetImageStyled.
 // « jauge » (barre horizontale) partout où la donnée est un taux de remplissage — pas pour le
 // réseau, dont le débit n'a pas de plafond connu à représenter.
@@ -413,7 +424,9 @@ const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','bar','text'],gpu:['bars',
   network:['twoLine','text'],temperature:['twoLine','ring','bar','text'],battery:['battery','ring','bar','twoLine','text'],
   // Consommations hebdomadaires : mêmes formes que les taux de remplissage — les deux IA peuvent
   // être affichées côte à côte, chacune avec sa forme et sa couleur.
-  claudeWeek:['pie','ring','bars','graph','bar','text'],codexWeek:['pie','ring','bars','graph','bar','text']};
+  claudeWeek:['pie','ring','bars','graph','bar','text'],codexWeek:['pie','ring','bars','graph','bar','text'],
+  // Crédit API : une part restante, sans historique à tracer.
+  anthropicApi:['ring','pie','bar','text'],openaiApi:['ring','pie','bar','text']};
 // Formes de la jauge des consommations (ids alignés sur updateStatusMenu côté natif). Les quatre
 // dernières viennent du moteur des widgets : une forme ajoutée là profite aux deux.
 const ICON_DESIGNS=['doubleRing','capsules','doubleArc','boldRing','reservoir','segments','hairline','thinRing','tube','grid','squircle'];
@@ -437,6 +450,7 @@ const PANEL_SECTIONS={
 const ALERTS=[
   ['quota',[70,75,80,85,90],v=>I.pct(v)],
   ['quotaReset',[],null],
+  ['apiCredit',[5,10,20,50,100],v=>I.money(v,'USD',0)],
   ['temp',[75,85,90,95,100],v=>v+' °C'],
   ['disk',[80,85,90,95],v=>I.pct(v)],
   ['memory',[2,4],v=>v===4?t('alert.memory.critical'):t('alert.memory.warning')],
@@ -471,7 +485,7 @@ function widgetConfigRows(p){
     const secSel=secs.length?`<div class="wc-sub"><span class="wc-sublabel">${t('widget.panel')}</span><span class="segmented">${secs.map(key=>{const sOn=pcfg[key]!==false;return `<button class="seg ${sOn?'on':''}" onclick="send('setWidgetPanelSection',{id:'${id}',section:'${key}',on:${!sOn}})">${t('panel.'+id+'.'+key)}</button>`}).join('')}</span></div>`:'';
     // Déplacement dans la barre des menus : ← vers la gauche, → vers la droite. Désactivés en butée.
     const move=`<span class="wc-move"><button class="seg" ${index===0?'disabled':''} title="${t('widget.left')}" onclick="send('moveMenuBarWidget',{id:'${id}',delta:-1})">←</button><button class="seg" ${index===enabled.length-1?'disabled':''} title="${t('widget.right')}" onclick="send('moveMenuBarWidget',{id:'${id}',delta:1})">→</button></span>`;
-    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}`;
+    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}${apiWidgetAccountRow(id,cfg)}`;
   }).join('');
 }
 let appData=null,currentView='overview';
@@ -919,7 +933,73 @@ function connectionsView(data){
     // fond sombre — présent, mais invisible.
     return `<article class="connection-panel" style="--provider:${providerColor(provider.id)}"><h3>${provider.name}</h3><p>${note}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
   };
-  return `<div class="connections">${section(PROVIDERS[0],t('conn.openaiNote'),openAIPanel)}${section(PROVIDERS[1],t('conn.claudeNote'),claudePanel)}</div>`;
+  return `<div class="connections">${section(PROVIDERS[0],t('conn.openaiNote'),openAIPanel)}${section(PROVIDERS[1],t('conn.claudeNote'),claudePanel)}${apiConnectionsView(data)}</div>`;
+}
+
+// ── Comptes API (Admin API Anthropic / OpenAI) ─────────────────────────────
+// Aucun des deux fournisseurs ne publie le solde de crédits : le reste affiché est une
+// estimation (solde saisi − coûts relevés depuis la saisie) ou le reste d'un budget mensuel.
+// La clé ne transite jamais par cette page : le natif ouvre un champ masqué et ne renvoie que
+// keyConfigured.
+const API_PROVIDERS=[{id:'openai',name:'OpenAI API',css:'api-openai'},{id:'anthropic',name:'Anthropic API',css:'api-anthropic'}];
+const apiAccountsOf=(data,providerId)=>(data?.apiAccounts||[]).filter(a=>a.provider===providerId);
+const usd=v=>typeof v==='number'&&Number.isFinite(v)?I.money(v,'USD',Math.abs(v)>=100?0:2):'—';
+const apiLevel=a=>a.severity>=2?'critical':a.severity===1?'warning':'';
+function apiAction(action,account,label,primary=false){return `<button class="account-action ${primary?'primary':''}" onclick="send('${action}',{accountId:'${account.accountId}'})">${label}</button>`;}
+function apiFigures(a){
+  const level=apiLevel(a);
+  const cell=(label,value,cls='')=>`<div><small>${label}</small><strong class="${cls}">${value}</strong></div>`;
+  let third='';
+  if(a.mode==='prepaid')third=cell(t('api.remaining'),'≈ '+usd(Math.max(0,a.remainingUSD)),level);
+  else if(a.mode==='budget')third=cell(t('api.budgetLeft'),usd(Math.max(0,a.remainingUSD)),level);
+  const rail=typeof a.fraction==='number'?`<div class="api-rail ${level}"><i style="width:${Math.round(a.fraction*100)}%"></i></div>`:'';
+  return `<div class="api-figures">${cell(t('api.today'),usd(a.todayUSD))}${cell(t('api.month'),usd(a.monthUSD))}${third}</div>${rail}`;
+}
+function apiNote(a){
+  if(!a.keyConfigured)return t('api.note.noKey');
+  const parts=[];
+  if(a.mode==='prepaid')parts.push(t('api.note.prepaid',{v:usd(a.balanceUSD),date:I.date(a.balanceSetAt,{day:'numeric',month:'long'})}));
+  if(a.mode==='budget')parts.push(t('api.note.budget',{v:usd(a.budgetUSD)}));
+  if(a.mode==='none')parts.push(t('api.note.none'));
+  parts.push(a.refreshing?t('api.note.refreshing'):a.updatedAt?t('api.note.updated',{age:ageLabel(a.updatedAt/1000)}):t('api.note.waiting'));
+  return parts.join(' · ');
+}
+function apiAccountPanel(a){
+  const modeLabel=t('api.mode.'+(a.mode||'none'));
+  const subtitle=[a.keyConfigured?t('api.keySaved'):t('api.keyMissing'),modeLabel].join(' · ');
+  const primary=!a.keyConfigured?apiAction('configureApiKey',a,t('api.enterKey'),true)
+    :a.mode==='prepaid'?apiAction('addApiCredit',a,t('api.addCredit'),true)
+    :a.mode==='budget'?apiAction('setApiBudget',a,t('api.editBudget'),true)
+    :apiAction('setApiBalance',a,t('api.enterBalance'),true);
+  const menu=(a.keyConfigured?apiAction('configureApiKey',a,t('api.replaceKey')):'')
+    +apiAction('setApiBalance',a,a.mode==='prepaid'?t('api.correctBalance'):t('api.enterBalance'))
+    +apiAction('setApiBudget',a,a.mode==='budget'?t('api.editBudget'):t('api.useBudget'))
+    +(a.mode!=='none'?apiAction('clearApiMode',a,t('api.spendOnly')):'')
+    +apiAction('renameApiAccount',a,t('conn.rename'))+apiAction('removeApiAccount',a,t('conn.remove'));
+  const figures=a.hasData?apiFigures(a):'';
+  return `<div class="quota-block" style="--provider:${a.provider==='openai'?'var(--blue)':'var(--purple)'}"><div class="account-row"><div class="account-copy"><strong>${esc(a.label)}</strong><small>${esc(subtitle)}</small></div><div class="account-actions">${primary}<details class="account-menu"><summary aria-label="${t('conn.actionsFor',{name:esc(a.label)})}">⋯</summary><div class="account-menu-items">${menu}</div></details></div></div>${figures}<p class="connection-note">${esc(apiNote(a))}</p>${a.error&&a.error!=='api.err.noKey'?`<div class="quota-error">${esc(t(a.error))}</div>`:''}</div>`;
+}
+function apiConnectionsView(data){
+  const limit=data.apiAccountLimit||5;
+  const articles=API_PROVIDERS.map(provider=>{
+    const accounts=apiAccountsOf(data,provider.id),full=accounts.length>=limit;
+    const panels=accounts.map(apiAccountPanel).join('')||`<div class="quota-empty">${t('api.none',{name:provider.name})}</div>`;
+    const add=`<button class="account-action primary" ${full?'disabled':''} onclick="send('addApiAccount',{provider:'${provider.id}'})" title="${full?t('conn.maxReached',{n:limit}):t('api.add')}">${t('api.add')}</button>`;
+    return `<article class="connection-panel ${provider.css}" style="--provider:${provider.id==='openai'?'var(--blue)':'var(--purple)'}"><h3>${provider.name}</h3><p>${t('api.note.'+provider.id)}</p>${panels}<div class="account-add">${add}<small>${accounts.length} / ${limit}</small></div></article>`;
+  }).join('');
+  const seconds=data.prefs?.apiRefreshIntervalSeconds||300;
+  const every=`<span class="segmented">${[300,600,900].map(s=>`<button class="seg ${seconds===s?'on':''}" onclick="send('setApiRefreshInterval',{seconds:${s}})">${t('api.every',{n:s/60})}</button>`).join('')}</span>`;
+  return `${articles}<div class="api-foot"><p>${t('api.estimateNote')}</p>${every}</div>`;
+}
+// Choix du compte affiché par un widget API : « le plus bas » par défaut, comme le popover.
+function apiWidgetAccountRow(id,cfg){
+  if(id!=='anthropicApi'&&id!=='openaiApi')return '';
+  const accounts=apiAccountsOf(appData,id==='openaiApi'?'openai':'anthropic');
+  if(accounts.length<2)return '';
+  const pinned=cfg.accountId||'';
+  const options=[`<button class="seg ${!pinned?'on':''}" onclick="send('setApiWidgetAccount',{id:'${id}',accountId:''})">${t('api.widget.lowest')}</button>`]
+    .concat(accounts.map(a=>`<button class="seg ${pinned===a.accountId?'on':''}" onclick="send('setApiWidgetAccount',{id:'${id}',accountId:'${a.accountId}'})">${esc(a.label)}</button>`));
+  return `<div class="wc-sub"><span class="wc-sublabel">${t('api.widget.account')}</span><span class="segmented">${options.join('')}</span></div>`;
 }
 function render(){
   if(!appData)return;

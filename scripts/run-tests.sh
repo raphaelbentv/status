@@ -12,7 +12,7 @@ mkdir -p "$BUILD"
 echo "── Tests natifs (StatusQuota) ──"
 clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit -framework Cocoa \
   "$ROOT/Tests/native-tests.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" \
-  "$ROOT/Native/StatusAwake.m" \
+  "$ROOT/Native/StatusApiCredits.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusKeyboardLock.m" "$ROOT/Native/StatusSystemMonitor.m" \
   "$ROOT/Native/StatusCost.m" "$ROOT/Native/StatusFx.m" \
   "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusCodexServer.m" \

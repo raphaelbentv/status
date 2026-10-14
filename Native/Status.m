@@ -13,6 +13,7 @@
 #import "StatusKeyboardLock.h"
 #import "StatusCodexServer.h"
 #import "StatusAccounts.h"
+#import "StatusApiCredits.h"
 #import "StatusClaudeSession.h"
 #import "StatusClaudeBridge.h"
 #import "StatusCost.h"
@@ -294,6 +295,20 @@ static void TMInstallI18nScript(WKWebView *view) {
 }
 @end
 
+// Session des comptes API : aucune redirection suivie. Les deux Admin API n'en font pas ; en
+// suivre une pourrait envoyer la clé d'administration ailleurs qu'à api.anthropic.com ou
+// api.openai.com. Le 3xx revient tel quel et s'affiche comme une erreur HTTP.
+@interface TMApiSessionDelegate : NSObject <NSURLSessionTaskDelegate>
+@end
+
+@implementation TMApiSessionDelegate
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request
+ completionHandler:(void (^)(NSURLRequest *))completionHandler {
+    completionHandler(nil);
+}
+@end
+
 @interface TMAppDelegate : NSObject <NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate>
 @property NSWindow *window;
 @property WKWebView *webView;
@@ -337,6 +352,20 @@ static void TMInstallI18nScript(WKWebView *view) {
 @property CFRunLoopRef brightnessTapRunLoop;
 @property BOOL brightnessPushPending;           // rafraîchissement UI déjà programmé
 @property NSArray<NSDictionary *> *quotaWidgetFamilies;  // familles quota injectées dans le snapshot widgets
+// Comptes API (Admin API Anthropic / OpenAI). La clé de chaque compte est lue une fois au
+// Trousseau puis gardée en mémoire (« » = aucune clé, pour ne pas relire) ; elle ne quitte ce
+// processus que dans l'en-tête des requêtes vers l'hôte de son fournisseur.
+@property NSArray<NSDictionary *> *apiRegistry;
+@property NSMutableDictionary<NSString *, NSString *> *apiKeyCache;
+@property NSMutableDictionary<NSString *, NSDictionary *> *apiDaily;     // accountId → { jour UTC : dollars }
+@property NSMutableDictionary<NSString *, NSDictionary *> *apiStatus;    // accountId → { updatedAt, coveredFrom, error }
+@property NSMutableSet<NSString *> *apiFetching;
+@property NSMutableDictionary<NSString *, NSDate *> *apiNextAllowed;     // débit minimal et backoff
+@property NSMutableDictionary<NSString *, NSNumber *> *apiErrorCounts;
+@property NSTimer *apiTimer;
+@property NSURLSession *apiSession;
+@property BOOL apiPushPending;
+@property NSArray<NSDictionary *> *apiWidgetFamilies;
 @property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
 // widgetId → signature du dernier rendu poussé (TMWidgetRenderSignature). Réassigner l'image d'un
 // NSStatusItem redéclenche un dessin WindowServer : à 1 Hz, on ne le fait que si les pixels changent.
@@ -416,6 +445,7 @@ static void TMInstallI18nScript(WKWebView *view) {
     self.accountBackoffUntil = [NSMutableDictionary dictionary];
     self.cookieCache = [NSMutableDictionary dictionary];
     [self loadAccountRegistry];
+    [self loadApiAccounts];
     // Réafficher les derniers volumes connus immédiatement, sans attendre le premier sondage : ils
     // ont été persistés en continu à chaque mise à jour. Sans cela, le grand chiffre et la barre
     // des menus restent à « — » plusieurs secondes après chaque redémarrage.
@@ -442,6 +472,7 @@ static void TMInstallI18nScript(WKWebView *view) {
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--preview-menu-icons"])
         [self showIconPreviews];
     [self scheduleRefresh];
+    [self scheduleApiRefresh];
     [self startSystemMonitor];
     [self rebuildMenuBarWidgets];  // icônes système activées par l'utilisateur, à côté de la jauge quota
     [self refreshCostsInBackground];
@@ -467,6 +498,7 @@ static void TMInstallI18nScript(WKWebView *view) {
         if (cookie.length) [[self claudeSessionForAccount:accountId] seedCookieIfNeeded:cookie];
     }
     [self refresh:nil];
+    [self refreshApiAccountsForce:NO];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
@@ -779,7 +811,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     NSString *wid = sender.identifier;
     // Widgets de consommation : leur détail, c'est le popover des quotas (comptes et fenêtres),
     // pas un panneau moniteur — widget.html ne saurait rien en dire de plus.
-    if (TMWidgetIsQuota(wid)) {
+    if (TMWidgetUsesAccounts(wid)) {
         if (self.statusPopover.shown) { [self.statusPopover close]; return; }
         [self showPopoverFromButton:sender];
         return;
@@ -819,6 +851,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 // Recalculé quand les quotas bougent (pushData), pas à chaque tick du moniteur : la lecture des
 // comptes touche le Trousseau et l'historique sur disque — hors de question à 1 Hz.
 - (void)refreshQuotaWidgetFamilies {
+    [self refreshApiWidgetFamilies];  // même déclencheur : les icônes de crédit API suivent
     NSArray *pairs = @[@[@"claudeWeek", @"claude:weekly"], @[@"codexWeek", @"openai:weekly"]];
     NSMutableArray *wanted = [NSMutableArray array];
     for (NSArray *pair in pairs) if (self.widgetItems[pair[0]]) [wanted addObject:pair];
@@ -841,10 +874,11 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 }
 
 - (NSDictionary *)snapshotWithQuotaFamilies:(NSDictionary *)snapshot {
-    if (!self.quotaWidgetFamilies.count) return snapshot;
+    NSArray *injected = [(self.quotaWidgetFamilies ?: @[]) arrayByAddingObjectsFromArray:self.apiWidgetFamilies ?: @[]];
+    if (!injected.count) return snapshot;
     NSArray *existing = [snapshot[@"families"] isKindOfClass:NSArray.class] ? snapshot[@"families"] : @[];
-    NSMutableDictionary *result = [snapshot mutableCopy];
-    result[@"families"] = [existing arrayByAddingObjectsFromArray:self.quotaWidgetFamilies];
+    NSMutableDictionary *result = [snapshot mutableCopy] ?: [NSMutableDictionary dictionary];
+    result[@"families"] = [existing arrayByAddingObjectsFromArray:injected];
     return result;
 }
 
@@ -878,9 +912,11 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     }];
 }
 
+// Sans moniteur (seuls des widgets de comptes sont actifs, voir startSystemMonitor), un snapshot
+// vide suffit : leurs familles sont injectées. Avant, ces widgets restaient au tiret.
 - (void)updateMenuBarWidgetsFromMonitor {
-    if (self.widgetItems.count && self.systemMonitor)
-        [self updateMenuBarWidgets:[self.systemMonitor snapshot]];
+    if (!self.widgetItems.count) return;
+    [self updateMenuBarWidgets:self.systemMonitor ? [self.systemMonitor snapshot] : @{}];
 }
 
 // Cherche une fenêtre précise chez un fournisseur précis. Les métriques épinglées doivent viser
@@ -1473,8 +1509,9 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             if ([body[@"on"] isKindOfClass:NSNumber.class]) one[@"on"] = @([body[@"on"] boolValue]);
             if ([body[@"threshold"] isKindOfClass:NSNumber.class]) {
                 double value = [body[@"threshold"] doubleValue];
-                double lower = [key isEqualToString:@"memory"] ? 2 : ([key isEqualToString:@"temp"] ? 50 : 50);
-                double upper = [key isEqualToString:@"memory"] ? 4 : ([key isEqualToString:@"temp"] ? 110 : 99);
+                double lower = [key isEqualToString:@"memory"] ? 2 : ([key isEqualToString:@"apiCredit"] ? 1 : 50);
+                double upper = [key isEqualToString:@"memory"] ? 4 : ([key isEqualToString:@"temp"] ? 110
+                             : [key isEqualToString:@"apiCredit"] ? 10000 : 99);
                 one[@"threshold"] = @(MIN(upper, MAX(lower, round(value))));
             }
             alerts[key] = one;
@@ -1560,6 +1597,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         self.awake.enabled = !self.awake.isEnabled;
         [self pushData];
     }
+    if ([self handleApiAction:action body:body]) return;
     // Actions de compte : toutes portent un accountId, sauf l'ajout qui porte un fournisseur.
     NSString *accountId = [body[@"accountId"] isKindOfClass:NSString.class] ? body[@"accountId"] : @"";
     if ([action isEqualToString:@"addAccount"]) {
@@ -1607,6 +1645,8 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
     return @{
         @"accounts": [self accountPayloadList],
         @"accountLimit": @(TMMaxAccountsPerProvider),
+        @"apiAccounts": [self apiAccountPayloadList],
+        @"apiAccountLimit": @(TMMaxApiAccountsPerProvider),
         @"history": TMHistoryForDisplay(history, NSDate.date.timeIntervalSince1970),
         @"displays": [self.displayManager snapshot] ?: @[],
         @"costs": [self costPayload],
@@ -1618,6 +1658,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             @"metricsInterval": @([self metricsInterval]),
             @"monitorInBackground": @([NSUserDefaults.standardUserDefaults boolForKey:@"monitorInBackground"]),
             @"quotaRefreshIntervalSeconds": @([self quotaRefreshIntervalSeconds]),
+            @"apiRefreshIntervalSeconds": @([self apiRefreshIntervalSeconds]),
             @"providerMenuMetrics":@{@"openai":[self metricForProvider:@"openai"],@"claude":[self metricForProvider:@"claude"]},
             @"providerIconStyles":@{@"openai":[self iconStyleForProvider:@"openai"],@"claude":[self iconStyleForProvider:@"claude"]},
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
@@ -1852,7 +1893,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
 - (void)startSystemMonitor {
     BOOL systemWidgetEnabled = NO;
     for (NSString *widgetId in [self enabledWidgets])
-        if (!TMWidgetIsQuota(widgetId)) { systemWidgetEnabled = YES; break; }
+        if (!TMWidgetUsesAccounts(widgetId)) { systemWidgetEnabled = YES; break; }
     BOOL needed = [NSUserDefaults.standardUserDefaults boolForKey:@"monitorInBackground"]
         || (self.monitorViewActive && self.window.isVisible)
         || (self.macToolsVisible && self.statusPopover.isShown)
@@ -1883,7 +1924,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
 // `quotaReset` est un événement sans seuil — son 0 n'est qu'un remplissage de structure.
 // L'utilisateur règle ou coupe chaque alerte séparément (préférence `alerts`).
 static NSDictionary *TMAlertDefaults(void) {
-    return @{ @"temp": @90, @"disk": @90, @"memory": @4, @"quota": @80, @"quotaReset": @0 };
+    return @{ @"temp": @90, @"disk": @90, @"memory": @4, @"quota": @80, @"quotaReset": @0, @"apiCredit": @10 };
 }
 
 // Réglage d'une alerte : activée ? et à quel seuil ? Absent = activée au seuil par défaut, pour que
@@ -2864,6 +2905,7 @@ static NSDictionary *TMAlertDefaults(void) {
     }
 
     self.refreshing = YES;
+    if (manual) [self refreshApiAccountsForce:YES];
     [self pushData];
 
     dispatch_group_t group = dispatch_group_create();
@@ -2978,6 +3020,513 @@ static NSDictionary *TMAlertDefaults(void) {
                                    body:level >= 95 ? TMT(@"n.threshold.high") : TMT(@"n.threshold.mid")];
         }
     }
+}
+
+#pragma mark - Comptes API (Admin API Anthropic / OpenAI)
+
+// Ni Anthropic ni OpenAI n'exposent le solde de crédits : on relève le coût par jour UTC et on
+// estime le reste à partir d'un solde saisi (ou d'un budget mensuel). Voir StatusApiCredits.h.
+// La clé d'administration vit au Trousseau, une entrée par compte ; elle n'apparaît jamais dans
+// les préférences, le payload des pages web, les journaux ni les messages d'erreur.
+
+static NSString *TMApiCostsPath(void) {
+    return [TMSupportDirectory() stringByAppendingPathComponent:@"api-costs.json"];
+}
+
+- (void)loadApiAccounts {
+    self.apiRegistry = TMNormalizeApiRegistry([NSUserDefaults.standardUserDefaults arrayForKey:TMApiAccountsDefaultsKey]);
+    self.apiKeyCache = [NSMutableDictionary dictionary];
+    self.apiDaily = [NSMutableDictionary dictionary];
+    self.apiStatus = [NSMutableDictionary dictionary];
+    self.apiFetching = [NSMutableSet set];
+    self.apiNextAllowed = [NSMutableDictionary dictionary];
+    self.apiErrorCounts = [NSMutableDictionary dictionary];
+    // Derniers coûts connus : l'icône et le popover ont un chiffre dès le lancement, et le premier
+    // relevé peut se contenter des derniers jours. Rien de secret dans ce fichier.
+    NSData *data = [NSData dataWithContentsOfFile:TMApiCostsPath()];
+    NSDictionary *cache = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    if ([cache isKindOfClass:NSDictionary.class]) {
+        for (NSDictionary *account in self.apiRegistry) {
+            NSDictionary *entry = cache[account[@"accountId"]];
+            if (![entry isKindOfClass:NSDictionary.class] || ![entry[@"daily"] isKindOfClass:NSDictionary.class]) continue;
+            self.apiDaily[account[@"accountId"]] = TMApiDailyMerging(entry[@"daily"], nil, 0);
+            self.apiStatus[account[@"accountId"]] = @{ @"updatedAt": @([entry[@"updatedAt"] doubleValue]),
+                                                       @"coveredFrom": @([entry[@"coveredFrom"] doubleValue]) };
+        }
+    }
+    NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+    config.HTTPCookieStorage = nil;
+    config.HTTPShouldSetCookies = NO;
+    config.URLCache = nil;
+    config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    config.timeoutIntervalForRequest = 30;
+    self.apiSession = [NSURLSession sessionWithConfiguration:config delegate:[TMApiSessionDelegate new] delegateQueue:nil];
+}
+
+- (void)saveApiRegistry {
+    [NSUserDefaults.standardUserDefaults setObject:self.apiRegistry forKey:TMApiAccountsDefaultsKey];
+}
+
+- (void)saveApiCosts {
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    for (NSDictionary *account in self.apiRegistry) {
+        NSString *accountId = account[@"accountId"];
+        if (!self.apiDaily[accountId]) continue;
+        out[accountId] = @{ @"daily": self.apiDaily[accountId],
+                            @"updatedAt": self.apiStatus[accountId][@"updatedAt"] ?: @0,
+                            @"coveredFrom": self.apiStatus[accountId][@"coveredFrom"] ?: @0 };
+    }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
+    [data writeToFile:TMApiCostsPath() atomically:YES];
+}
+
+- (NSString *)apiKeyForAccount:(NSString *)accountId {
+    NSString *cached = self.apiKeyCache[accountId];
+    if (cached) return cached;
+    NSString *key = TMKeychainRead(TMApiKeychainAccount(accountId)) ?: @"";
+    self.apiKeyCache[accountId] = key;
+    return key;
+}
+
+- (NSInteger)apiRefreshIntervalSeconds {
+    NSInteger seconds = [NSUserDefaults.standardUserDefaults integerForKey:@"apiRefreshIntervalSeconds"];
+    return [@[@300, @600, @900] containsObject:@(seconds)] ? seconds : 300;
+}
+
+// Cadence propre, indépendante des quotas : les coûts arrivent avec environ 5 min de retard
+// (Anthropic), relever plus souvent ne montrerait rien de plus.
+- (void)scheduleApiRefresh {
+    [self.apiTimer invalidate];
+    self.apiTimer = nil;
+    if (!self.apiRegistry.count) return;
+    NSInteger seconds = [self apiRefreshIntervalSeconds];
+    __weak typeof(self) weakSelf = self;
+    self.apiTimer = [NSTimer scheduledTimerWithTimeInterval:seconds repeats:YES block:^(NSTimer *timer) {
+        [weakSelf refreshApiAccountsForce:NO];
+    }];
+    self.apiTimer.tolerance = seconds * 0.1;
+}
+
+- (void)refreshApiAccountsForce:(BOOL)force {
+    for (NSDictionary *account in self.apiRegistry) [self refreshApiAccount:account[@"accountId"] force:force];
+}
+
+- (void)setApiStatus:(NSDictionary *)changes forAccount:(NSString *)accountId {
+    NSMutableDictionary *status = [(self.apiStatus[accountId] ?: @{}) mutableCopy];
+    [status addEntriesFromDictionary:changes];
+    for (NSString *key in changes) if (changes[key] == NSNull.null) [status removeObjectForKey:key];
+    self.apiStatus[accountId] = status;
+}
+
+- (NSString *)apiUserAgent {
+    NSString *version = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"dev";
+    return [NSString stringWithFormat:@"Status/%@ (macOS)", version];
+}
+
+- (void)refreshApiAccount:(NSString *)accountId force:(BOOL)force {
+    NSDictionary *account = TMApiAccountWithID(self.apiRegistry, accountId);
+    if (!account || [self.apiFetching containsObject:accountId]) return;
+    // Anthropic recommande au plus une requête par minute en continu : même un clic manuel attend
+    // 15 s entre deux relevés du même compte, et la cadence automatique respecte le backoff.
+    NSDate *nextAllowed = self.apiNextAllowed[accountId];
+    NSTimeInterval lastAttempt = [self.apiStatus[accountId][@"attemptAt"] doubleValue];
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    if (!force && nextAllowed.timeIntervalSinceNow > 0) return;
+    if (force && now - lastAttempt < 15) return;
+
+    NSString *key = [self apiKeyForAccount:accountId];
+    if (!key.length) {
+        [self setApiStatus:@{ @"error": @"api.err.noKey" } forAccount:accountId];
+        [self scheduleApiPush];
+        return;
+    }
+    NSTimeInterval queryStart = TMApiQueryStart(account, now);
+    NSTimeInterval coveredFrom = [self.apiStatus[accountId][@"coveredFrom"] doubleValue];
+    // Relevé incrémental dès que tout l'intervalle est déjà en cache : les jours clos ne bougent
+    // plus, relire les deux derniers suffit (le jour d'hier se complète encore quelques minutes).
+    BOOL incremental = self.apiDaily[accountId] && coveredFrom > 0 && coveredFrom <= queryStart;
+    NSTimeInterval start = incremental ? MAX(queryStart, TMUTCDayStart(now) - 2 * 86400) : queryStart;
+    NSString *provider = account[@"provider"];
+
+    [self.apiFetching addObject:accountId];
+    [self setApiStatus:@{ @"attemptAt": @(now) } forAccount:accountId];
+    [self scheduleApiPush];
+    [self fetchApiCosts:provider key:key start:start page:nil days:@{} pages:0
+             completion:^(NSDictionary *days, NSString *errorKey) {
+        [self.apiFetching removeObject:accountId];
+        if (!TMApiAccountWithID(self.apiRegistry, accountId)) return;  // supprimé pendant le relevé
+        if (errorKey) {
+            NSInteger failures = MIN([self.apiErrorCounts[accountId] integerValue] + 1, 5);
+            self.apiErrorCounts[accountId] = @(failures);
+            // Doublé à chaque échec ; 5 s de marge pour ne pas manquer le tick qui tombe pile dessus.
+            NSTimeInterval delay = MIN([self apiRefreshIntervalSeconds] * pow(2, failures - 1), 3600) - 5;
+            self.apiNextAllowed[accountId] = [NSDate dateWithTimeIntervalSinceNow:delay];
+            [self setApiStatus:@{ @"error": errorKey } forAccount:accountId];
+        } else {
+            NSTimeInterval done = NSDate.date.timeIntervalSince1970;
+            [self.apiErrorCounts removeObjectForKey:accountId];
+            self.apiNextAllowed[accountId] = [NSDate dateWithTimeIntervalSinceNow:60];
+            self.apiDaily[accountId] = TMApiDailyMerging(self.apiDaily[accountId], days, queryStart);
+            [self setApiStatus:@{ @"error": NSNull.null, @"updatedAt": @(done),
+                                  @"coveredFrom": @(incremental ? coveredFrom : queryStart) } forAccount:accountId];
+            NSArray *resolved = TMApiRegistryResolvingBaseline(self.apiRegistry, accountId, self.apiDaily[accountId], done);
+            if (![resolved isEqual:self.apiRegistry]) { self.apiRegistry = resolved; [self saveApiRegistry]; }
+            [self saveApiCosts];
+        }
+        [self notifyApiCredit];
+        [self scheduleApiPush];
+    }];
+}
+
+// Pages successives du rapport de coûts. Tout revient sur le fil principal. Les erreurs ne portent
+// qu'un code (clé i18n) : ni le corps de la réponse ni la requête ne sont journalisés.
+- (void)fetchApiCosts:(NSString *)provider key:(NSString *)key start:(NSTimeInterval)start page:(NSString *)page
+                 days:(NSDictionary *)days pages:(NSInteger)pages
+           completion:(void (^)(NSDictionary *days, NSString *errorKey))completion {
+    NSMutableURLRequest *request = TMApiCostRequest(provider, key, start, page, [self apiUserAgent]);
+    if (!request) { completion(nil, @"api.err.http"); return; }
+    NSURLSessionDataTask *task = [self.apiSession dataTaskWithRequest:request
+                                                    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSHTTPURLResponse *http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
+            if (error || !http) { completion(nil, @"api.err.network"); return; }
+            if (!TMApiURLAllowed(http.URL)) { completion(nil, @"api.err.http"); return; }
+            if (http.statusCode != 200) {
+                NSLog(@"Status API %@ : HTTP %ld", provider, (long)http.statusCode);
+                completion(nil, TMApiErrorKey(http.statusCode));
+                return;
+            }
+            id json = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            NSDictionary *parsed = TMApiParseCostPage(provider, json);
+            if (!parsed) { completion(nil, @"api.err.malformed"); return; }
+            NSMutableDictionary *merged = [days mutableCopy];
+            [merged addEntriesFromDictionary:parsed[@"days"]];
+            NSString *next = parsed[@"nextPage"];
+            // 30 pages couvrent largement l'année de recul permise ; au-delà, une boucle serait un bug.
+            if (next.length && pages < 30)
+                [self fetchApiCosts:provider key:key start:start page:next days:merged pages:pages + 1 completion:completion];
+            else
+                completion(merged, nil);
+        });
+    }];
+    [task resume];
+}
+
+// Plusieurs comptes répondent souvent dans la même seconde : un seul pushData (coûteux) pour tous.
+- (void)scheduleApiPush {
+    if (self.apiPushPending) return;
+    self.apiPushPending = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        self.apiPushPending = NO;
+        [self pushData];
+    });
+}
+
+- (double)apiAlertThreshold {
+    double threshold = 10;
+    [self alertEnabled:@"apiCredit" threshold:&threshold];
+    return threshold;
+}
+
+// Synthèses dans l'ordre d'affichage (Anthropic puis OpenAI), avec ce que l'interface doit savoir.
+- (NSArray<NSDictionary *> *)apiAccountPayloadList {
+    NSMutableArray *out = [NSMutableArray array];
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    double threshold = [self apiAlertThreshold];
+    for (NSString *provider in @[TMApiProviderAnthropic, TMApiProviderOpenAI]) {
+        [TMApiAccountsForProvider(self.apiRegistry, provider) enumerateObjectsUsingBlock:^(NSDictionary *account, NSUInteger index, BOOL *stop) {
+            NSString *accountId = account[@"accountId"];
+            NSMutableDictionary *payload = [TMApiSummary(account, self.apiDaily[accountId], now, threshold) mutableCopy];
+            NSDictionary *status = self.apiStatus[accountId] ?: @{};
+            payload[@"label"] = TMApiAccountDisplayLabel(account, index);
+            payload[@"customLabel"] = account[@"label"] ?: @"";
+            payload[@"keyConfigured"] = @([self apiKeyForAccount:accountId].length > 0);
+            payload[@"hasData"] = @(self.apiDaily[accountId] != nil);
+            payload[@"updatedAt"] = @([status[@"updatedAt"] doubleValue] * 1000);
+            payload[@"refreshing"] = @([self.apiFetching containsObject:accountId]);
+            payload[@"error"] = status[@"error"] ?: @"";
+            if (account[@"balanceUSD"]) payload[@"balanceUSD"] = account[@"balanceUSD"];
+            if (account[@"balanceSetAt"]) payload[@"balanceSetAt"] = @([account[@"balanceSetAt"] doubleValue] * 1000);
+            if (account[@"budgetUSD"]) payload[@"budgetUSD"] = account[@"budgetUSD"];
+            [out addObject:payload];
+        }];
+    }
+    return out;
+}
+
+// Un widget par fournisseur, recalculé en même temps que les widgets de quota (pushData), jamais
+// au tick du moniteur.
+- (void)refreshApiWidgetFamilies {
+    NSArray *pairs = @[@[@"anthropicApi", TMApiProviderAnthropic], @[@"openaiApi", TMApiProviderOpenAI]];
+    NSMutableArray *wanted = [NSMutableArray array];
+    for (NSArray *pair in pairs) if (self.widgetItems[pair[0]]) [wanted addObject:pair];
+    if (!wanted.count) { self.apiWidgetFamilies = @[]; return; }
+    NSMutableArray *summaries = [NSMutableArray array];
+    for (NSDictionary *payload in [self apiAccountPayloadList]) if ([payload[@"hasData"] boolValue]) [summaries addObject:payload];
+    NSString *locale = TMLocaleIdentifier();
+    NSMutableArray *families = [NSMutableArray array];
+    for (NSArray *pair in wanted) {
+        id pinned = [self widgetStyleFor:pair[0]][@"accountId"];
+        NSDictionary *pick = TMApiWidgetPick(summaries, pair[1], [pinned isKindOfClass:NSString.class] ? pinned : nil);
+        if (!pick) continue;  // aucun solde ni budget saisi : tiret
+        [families addObject:@{ @"id": pair[0], @"series": @{},
+                               @"now": @{ @"fraction": pick[@"fraction"], @"severity": pick[@"severity"] ?: @0,
+                                          @"text": TMFormatUSD(MAX(0, [pick[@"remainingUSD"] doubleValue]), locale),
+                                          @"template": TMFormatUSD(9999, locale) } }];
+    }
+    self.apiWidgetFamilies = families;
+}
+
+- (void)notifyApiCredit {
+    double threshold = 10;
+    BOOL enabled = [self alertEnabled:@"apiCredit" threshold:&threshold];
+    NSMutableArray *summaries = [NSMutableArray array];
+    NSMutableDictionary *labels = [NSMutableDictionary dictionary];
+    for (NSDictionary *payload in [self apiAccountPayloadList]) {
+        if (![payload[@"hasData"] boolValue]) continue;
+        [summaries addObject:payload];
+        labels[payload[@"accountId"]] = payload;
+    }
+    NSDictionary *result = TMApiAlertDecisions([NSUserDefaults.standardUserDefaults dictionaryForKey:@"apiAlertState"],
+                                               summaries, threshold, enabled);
+    [NSUserDefaults.standardUserDefaults setObject:result[@"state"] forKey:@"apiAlertState"];
+    NSString *locale = TMLocaleIdentifier();
+    for (NSDictionary *fire in result[@"fire"]) {
+        NSDictionary *payload = labels[fire[@"accountId"]];
+        NSString *kind = fire[@"kind"];
+        NSDictionary *params = @{ @"label": payload[@"label"] ?: @"",
+                                  @"v": TMFormatUSD(MAX(0, [payload[@"remainingUSD"] doubleValue]), locale),
+                                  @"ref": TMFormatUSD([payload[@"referenceUSD"] doubleValue], locale) };
+        [self postNotificationTitle:TMTP([NSString stringWithFormat:@"n.api.%@.title", kind], params)
+                               body:TMTP([NSString stringWithFormat:@"n.api.%@.body", kind], params)];
+    }
+}
+
+#pragma mark Actions des comptes API
+
+- (BOOL)handleApiAction:(NSString *)action body:(NSDictionary *)body {
+    if (![action isKindOfClass:NSString.class]) return NO;
+    NSString *accountId = [body[@"accountId"] isKindOfClass:NSString.class] ? body[@"accountId"] : @"";
+    if ([action isEqualToString:@"addApiAccount"]) {
+        NSString *provider = [body[@"provider"] isKindOfClass:NSString.class] ? body[@"provider"] : @"";
+        [self addApiAccountForProvider:provider];
+        return YES;
+    }
+    if ([action isEqualToString:@"refreshApi"]) { [self refreshApiAccountsForce:YES]; return YES; }
+    if ([action isEqualToString:@"setApiRefreshInterval"]) {
+        NSInteger seconds = [body[@"seconds"] integerValue];
+        if ([@[@300, @600, @900] containsObject:@(seconds)]) {
+            [NSUserDefaults.standardUserDefaults setInteger:seconds forKey:@"apiRefreshIntervalSeconds"];
+            [self scheduleApiRefresh];
+            [self pushData];
+        }
+        return YES;
+    }
+    if ([action isEqualToString:@"setApiWidgetAccount"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : @"";
+        if (!TMWidgetIsApi(wid)) return YES;
+        NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{}) mutableCopy];
+        NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
+        if (TMApiAccountWithID(self.apiRegistry, accountId)) one[@"accountId"] = accountId;
+        else [one removeObjectForKey:@"accountId"];  // « le plus critique »
+        config[wid] = one;
+        [NSUserDefaults.standardUserDefaults setObject:config forKey:@"menuBarWidgetConfig"];
+        [self refreshQuotaWidgetFamilies];
+        [self updateMenuBarWidgetsFromMonitor];
+        [self pushData];
+        return YES;
+    }
+    NSArray *perAccount = @[@"configureApiKey", @"setApiBalance", @"addApiCredit", @"setApiBudget",
+                            @"clearApiMode", @"renameApiAccount", @"removeApiAccount"];
+    if (![perAccount containsObject:action]) return NO;
+    if (!TMApiAccountWithID(self.apiRegistry, accountId)) return YES;
+    if ([action isEqualToString:@"configureApiKey"]) [self configureApiKeyForAccount:accountId];
+    if ([action isEqualToString:@"setApiBalance"]) [self promptApiBalanceForAccount:accountId];
+    if ([action isEqualToString:@"addApiCredit"]) [self promptApiCreditForAccount:accountId];
+    if ([action isEqualToString:@"setApiBudget"]) [self promptApiBudgetForAccount:accountId];
+    if ([action isEqualToString:@"clearApiMode"]) {
+        self.apiRegistry = TMApiRegistryClearingMode(self.apiRegistry, accountId);
+        [self saveApiRegistry];
+        [self pushData];
+    }
+    if ([action isEqualToString:@"renameApiAccount"]) [self renameApiAccount:accountId];
+    if ([action isEqualToString:@"removeApiAccount"]) [self confirmRemoveApiAccount:accountId];
+    return YES;
+}
+
+- (void)addApiAccountForProvider:(NSString *)provider {
+    if (![provider isEqualToString:TMApiProviderAnthropic] && ![provider isEqualToString:TMApiProviderOpenAI]) return;
+    NSString *accountId = TMNewAccountID();
+    NSArray *next = TMApiRegistryAdding(self.apiRegistry, provider, accountId);
+    if (!next) {
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = TMT(@"a.limit.title");
+        alert.informativeText = TMTP(@"api.limit.body", @{@"n": @(TMMaxApiAccountsPerProvider)});
+        [alert beginSheetModalForWindow:self.window completionHandler:nil];
+        return;
+    }
+    self.apiRegistry = next;
+    self.apiKeyCache[accountId] = @"";  // compte neuf : rien à lire au Trousseau
+    [self saveApiRegistry];
+    [self scheduleApiRefresh];
+    [self pushData];
+    // Un compte sans clé n'affiche rien : enchaîner sur la saisie, comme pour les abonnements.
+    [self configureApiKeyForAccount:accountId];
+}
+
+// Saisie de la clé : champ masqué natif, jamais un champ de la page web. La clé passe directement
+// du champ au Trousseau ; seul « clé enregistrée » remonte ensuite vers l'interface.
+- (void)configureApiKeyForAccount:(NSString *)accountId {
+    NSDictionary *account = TMApiAccountWithID(self.apiRegistry, accountId);
+    if (!account) return;
+    NSString *provider = account[@"provider"];
+    BOOL configured = [self apiKeyForAccount:accountId].length > 0;
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = TMT([@"api.key.title." stringByAppendingString:provider]);
+    alert.informativeText = TMT([@"api.key.body." stringByAppendingString:provider]);
+    [alert addButtonWithTitle:TMT(@"a.save")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
+    if (configured) [alert addButtonWithTitle:TMT(@"a.erase")];
+    NSSecureTextField *field = [NSSecureTextField textFieldWithString:@""];
+    field.placeholderString = TMT([@"api.key.placeholder." stringByAppendingString:provider]);
+    field.frame = NSMakeRect(0, 0, 420, 24);
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response == NSAlertThirdButtonReturn) {
+            TMKeychainSave(TMApiKeychainAccount(accountId), @"");
+            self.apiKeyCache[accountId] = @"";
+            [self setApiStatus:@{ @"error": @"api.err.noKey" } forAccount:accountId];
+            [self pushData];
+            return;
+        }
+        if (response != NSAlertFirstButtonReturn) return;
+        NSString *key = TMApiKeyCleaned(field.stringValue);
+        field.stringValue = @"";
+        if (!TMApiKeyHasExpectedShape(provider, key)) {
+            [self showApiError:TMT([@"api.key.invalid." stringByAppendingString:provider])];
+            return;
+        }
+        if (!TMKeychainSave(TMApiKeychainAccount(accountId), key)) {
+            [self showApiError:TMT(@"api.key.saveFailed")];
+            return;
+        }
+        self.apiKeyCache[accountId] = key;
+        // Une clé neuve remet le compte à zéro côté erreurs : le relevé suivant la valide.
+        [self.apiErrorCounts removeObjectForKey:accountId];
+        [self.apiNextAllowed removeObjectForKey:accountId];
+        [self setApiStatus:@{ @"error": NSNull.null, @"attemptAt": @0 } forAccount:accountId];
+        [self refreshApiAccount:accountId force:YES];
+        [self pushData];
+    }];
+}
+
+- (void)showApiError:(NSString *)message {
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = message;
+    [alert beginSheetModalForWindow:self.window completionHandler:nil];
+}
+
+// Demande un montant en dollars. Le texte saisi n'est pas un secret, mais il est validé ici :
+// la page web ne fait qu'ouvrir la boîte de dialogue.
+- (void)promptApiAmountTitle:(NSString *)title body:(NSString *)body initial:(NSNumber *)initial
+                  completion:(void (^)(double amount))completion {
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = title;
+    alert.informativeText = body;
+    [alert addButtonWithTitle:TMT(@"a.save")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
+    NSString *start = initial ? [NSString stringWithFormat:@"%.2f", initial.doubleValue] : @"";
+    NSTextField *field = [NSTextField textFieldWithString:start];
+    field.placeholderString = TMT(@"api.amount.placeholder");
+    field.frame = NSMakeRect(0, 0, 200, 24);
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) return;
+        double amount = 0;
+        if (!TMParseUSDAmount(field.stringValue, &amount)) { [self showApiError:TMT(@"api.amount.invalid")]; return; }
+        completion(amount);
+    }];
+}
+
+- (void)promptApiBalanceForAccount:(NSString *)accountId {
+    [self promptApiAmountTitle:TMT(@"api.balance.title") body:TMT(@"api.balance.body") initial:nil
+                    completion:^(double amount) {
+        self.apiRegistry = TMApiRegistrySettingBalance(self.apiRegistry, accountId, amount, NSDate.date.timeIntervalSince1970);
+        [self saveApiRegistry];
+        // Relevé immédiat : il fixe la dépense déjà comptée aujourd'hui (ligne de base).
+        [self setApiStatus:@{ @"attemptAt": @0 } forAccount:accountId];
+        [self refreshApiAccount:accountId force:YES];
+        [self pushData];
+    }];
+}
+
+- (void)promptApiCreditForAccount:(NSString *)accountId {
+    [self promptApiAmountTitle:TMT(@"api.credit.title") body:TMT(@"api.credit.body") initial:nil
+                    completion:^(double amount) {
+        self.apiRegistry = TMApiRegistryAddingCredit(self.apiRegistry, accountId, amount);
+        [self saveApiRegistry];
+        [self notifyApiCredit];
+        [self pushData];
+    }];
+}
+
+- (void)promptApiBudgetForAccount:(NSString *)accountId {
+    NSNumber *current = TMApiAccountWithID(self.apiRegistry, accountId)[@"budgetUSD"];
+    [self promptApiAmountTitle:TMT(@"api.budget.title") body:TMT(@"api.budget.body") initial:current
+                    completion:^(double amount) {
+        if (amount <= 0) { [self showApiError:TMT(@"api.amount.invalid")]; return; }
+        self.apiRegistry = TMApiRegistrySettingBudget(self.apiRegistry, accountId, amount);
+        [self saveApiRegistry];
+        [self notifyApiCredit];
+        [self pushData];
+    }];
+}
+
+- (void)renameApiAccount:(NSString *)accountId {
+    NSDictionary *account = TMApiAccountWithID(self.apiRegistry, accountId);
+    if (!account) return;
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = TMT(@"a.rename.title");
+    alert.informativeText = TMT(@"a.rename.body");
+    [alert addButtonWithTitle:TMT(@"a.save")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
+    NSTextField *field = [NSTextField textFieldWithString:account[@"label"] ?: @""];
+    field.frame = NSMakeRect(0, 0, 320, 24);
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) return;
+        self.apiRegistry = TMApiRegistrySettingLabel(self.apiRegistry, accountId, field.stringValue ?: @"");
+        [self saveApiRegistry];
+        [self pushData];
+    }];
+}
+
+- (void)confirmRemoveApiAccount:(NSString *)accountId {
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = TMT(@"a.remove.title");
+    alert.informativeText = TMT(@"api.remove.body");
+    [alert addButtonWithTitle:TMT(@"a.delete")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) return;
+        TMKeychainSave(TMApiKeychainAccount(accountId), @"");  // supprime l'entrée du Trousseau
+        [self.apiKeyCache removeObjectForKey:accountId];
+        [self.apiDaily removeObjectForKey:accountId];
+        [self.apiStatus removeObjectForKey:accountId];
+        [self.apiNextAllowed removeObjectForKey:accountId];
+        [self.apiErrorCounts removeObjectForKey:accountId];
+        NSMutableDictionary *state = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"apiAlertState"] ?: @{}) mutableCopy];
+        for (NSString *key in state.allKeys) if ([key hasPrefix:[accountId stringByAppendingString:@":"]]) [state removeObjectForKey:key];
+        [NSUserDefaults.standardUserDefaults setObject:state forKey:@"apiAlertState"];
+        self.apiRegistry = TMApiRegistryRemoving(self.apiRegistry, accountId);
+        [self saveApiRegistry];
+        [self saveApiCosts];
+        [self scheduleApiRefresh];
+        [self pushData];
+    }];
 }
 
 - (void)postNotificationTitle:(NSString *)title body:(NSString *)body {

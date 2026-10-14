@@ -5,7 +5,7 @@
 
 NSArray<NSString *> *TMMenuBarWidgetIDs(void) {
     return @[@"cpu", @"memory", @"gpu", @"network", @"temperature", @"battery", @"disk",
-             @"claudeWeek", @"codexWeek"];
+             @"claudeWeek", @"codexWeek", @"anthropicApi", @"openaiApi"];
 }
 
 NSString *TMMenuBarWidgetLabel(NSString *widgetId) {
@@ -49,6 +49,16 @@ BOOL TMWidgetIsQuota(NSString *widgetId) {
     return [widgetId isEqual:@"claudeWeek"] || [widgetId isEqual:@"codexWeek"];
 }
 
+// Crédit des comptes API (un widget par fournisseur) : familles injectées par Status.m, déjà
+// calculées (texte en dollars, fraction restante, sévérité) — le moteur ne fait que dessiner.
+BOOL TMWidgetIsApi(NSString *widgetId) {
+    return [widgetId isEqual:@"anthropicApi"] || [widgetId isEqual:@"openaiApi"];
+}
+
+BOOL TMWidgetUsesAccounts(NSString *widgetId) {
+    return TMWidgetIsQuota(widgetId) || TMWidgetIsApi(widgetId);
+}
+
 static NSNumber *TMNum(id value) { return [value isKindOfClass:NSNumber.class] ? value : nil; }
 
 // Débit en octets/s → texte court (« 74 Ko/s »). Même échelle que les surfaces web.
@@ -90,6 +100,9 @@ static NSInteger TMWidgetSeverity(NSString *widgetId, NSDictionary *snapshot) {
         // dans toute la barre des menus, que le chiffre vienne de la jauge ou d'un widget.
         NSNumber *pct = TMNum(TMFamilyNow(snapshot, widgetId)[@"percent"]);
         if (pct) { if (pct.doubleValue >= 95) return 2; if (pct.doubleValue >= 80) return 1; }
+    } else if (TMWidgetIsApi(widgetId)) {
+        // Seuils propres au compte (solde sous le seuil d'alerte, budget à 80 %), calculés en amont.
+        return MIN(2, MAX(0, TMNum(TMFamilyNow(snapshot, widgetId)[@"severity"]).integerValue));
     }
     return 0;
 }
@@ -107,6 +120,7 @@ static NSDictionary *TMWidgetTemplates(NSString *widgetId) {
     if ([widgetId isEqual:@"network"])     return @{ @"template": @"↓ 999 Mo/s", @"valueTemplate": @"↓ 999 Mo/s" };
     if ([widgetId isEqual:@"temperature"]) return @{ @"template": @"100 W", @"valueTemplate": @"100°" };
     if ([widgetId isEqual:@"battery"])     return @{ @"template": @"10 h 00", @"valueTemplate": @"100 %" };
+    if (TMWidgetIsApi(widgetId))           return @{ @"template": @"$9,999", @"valueTemplate": @"$9,999" };  // remplacé par celui de la famille
     return @{ @"template": @"100 %", @"valueTemplate": @"100 %" };  // cpu, gpu, memory, disk
 }
 
@@ -143,6 +157,19 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
             for (NSNumber *used in TMFamilySeries(snapshot, widgetId, @"percent"))
                 [remainingSeries addObject:@(100 - MIN(100, MAX(0, used.doubleValue)))];
             r[@"series"] = remainingSeries;
+        }
+    } else if (TMWidgetIsApi(widgetId)) {
+        // Reste estimé (ou reste du budget) : texte en dollars, remplissage = part restante.
+        NSDictionary *now = TMFamilyNow(snapshot, widgetId);
+        NSNumber *fraction = TMNum(now[@"fraction"]);
+        NSString *text = [now[@"text"] isKindOfClass:NSString.class] ? now[@"text"] : @"";
+        NSString *widest = [now[@"template"] isKindOfClass:NSString.class] ? now[@"template"] : @"";
+        r[@"style"] = @"ring";
+        if (widest.length) r[@"template"] = r[@"valueTemplate"] = widest;
+        if (fraction && text.length) {
+            r[@"hasValue"] = @YES;
+            r[@"title"] = r[@"value"] = text;
+            r[@"fraction"] = @(MIN(MAX(fraction.doubleValue, 0), 1));
         }
     } else if ([widgetId isEqual:@"memory"] || [widgetId isEqual:@"disk"]) {
         NSString *fam = [widgetId isEqual:@"memory"] ? @"ram" : @"disk";
