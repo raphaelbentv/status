@@ -230,7 +230,8 @@ html[data-theme="bento"] .vital.boost .vital-value{color:#1F3FD9}
 html[data-theme="bento"] .monitor-section{margin-top:18px}
 html[data-theme="bento"] .monitor-section>h2{margin:0 0 8px 6px;font:600 13px/1.2 var(--disp);letter-spacing:0;text-transform:none;color:var(--muted)}
 html[data-theme="bento"] .metric-grid{gap:12px}
-html[data-theme="bento"] .monitor-section .metric-grid{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+html[data-theme="bento"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="bento"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}
 html[data-theme="bento"] .monitor-section .metric-card,html[data-theme="bento"] .metric-card{padding:18px 20px;border:0;border-radius:24px;background:var(--b-tile);min-width:0}
 html[data-theme="bento"] .metric-card[data-family="ram"],html[data-theme="bento"] .metric-card[data-family="battery"],html[data-theme="bento"] .metric-card[data-family="disk"]{background:var(--b-stone)}
 html[data-theme="bento"] .metric-head{align-items:center;gap:12px;margin-bottom:4px}
@@ -290,7 +291,7 @@ html[data-theme="bento"] .brightness-slider{height:22px;border:0;border-radius:9
 html[data-theme="bento"] .brightness-slider::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border:5px solid var(--btn-bg);border-radius:50%;background:var(--b-tile);box-shadow:-427px 0 0 416px var(--btn-bg)}
 html[data-theme="bento"] .display-card:first-child .brightness-slider::-webkit-slider-thumb{border-color:#2F55FF;background:#FFFFFF;box-shadow:-427px 0 0 416px #2F55FF}
 html[data-theme="bento"] .brightness-slider:disabled{opacity:.4}
-html[data-theme="bento"] .brightness-value{width:56px;font:700 24px/1 var(--disp);letter-spacing:-.04em}
+html[data-theme="bento"] .brightness-value{width:auto;min-width:64px;white-space:nowrap;font:700 24px/1 var(--disp);letter-spacing:-.04em}
 
 /* ═══ 6. Réglages ════════════════════════════════════════════════════════════ */
 html[data-theme="bento"] .settings-layout{grid-template-columns:minmax(0,1fr);gap:14px;margin-top:0}

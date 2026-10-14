@@ -612,3 +612,7 @@ html[data-theme="moderne"] .footer-row>button{min-height:30px;padding:0 12px;bor
 html[data-theme="moderne"] .footer-row>button.go{background:var(--text);color:#fff;box-shadow:0 0 0 1px var(--text),inset 0 1px 0 rgba(255,255,255,.18)}
 html[data-theme="moderne"] .footer-row>button.go:hover{background:#26262a;border-color:transparent}
 html[data-theme="moderne"] .footer-row>button[onclick*="quit"]{background:#fff;box-shadow:var(--ring2);color:var(--danger)!important}
+
+/* Moniteur : les groupes comptent deux cartes au plus ; deux colonnes fixes évitent une colonne fantôme quand la fenêtre est large. */
+html[data-theme="moderne"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="moderne"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}

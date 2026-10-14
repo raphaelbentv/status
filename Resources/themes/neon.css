@@ -207,7 +207,7 @@ html[data-theme="neon"] .vital.warn{--c:var(--amber)}
 html[data-theme="neon"] .vital.crit{--c:var(--danger)}
 html[data-theme="neon"] .vital:hover{background:rgba(255,255,255,.04)}
 html[data-theme="neon"] .vital-label{font-size:11px;font-weight:500;letter-spacing:.14em;color:var(--c);text-shadow:0 0 10px var(--c)}
-html[data-theme="neon"] .vital .vital-value{font-size:21px;font-weight:200;color:#fff;letter-spacing:-.01em;text-shadow:0 0 .05em #fff,0 0 .2em var(--c),0 0 .55em var(--c)}
+html[data-theme="neon"] .vital .vital-value{font-size:18px;font-weight:200;color:#fff;letter-spacing:-.01em;text-shadow:0 0 .05em #fff,0 0 .2em var(--c),0 0 .55em var(--c)}
 html[data-theme="neon"] .vital-value small{font-size:12px;color:var(--ink2);text-shadow:none}
 html[data-theme="neon"] .vital svg path{stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;filter:drop-shadow(0 0 3px var(--c))}
 html[data-theme="neon"] .vital.boost .vital-value{color:#fff}
@@ -490,3 +490,7 @@ html[data-theme="neon"] .footer-row > button[title^="Quitter"]{color:var(--dange
   html[data-theme="neon"] main{padding:0 22px 24px}
   html[data-theme="neon"] .vitals{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
+
+/* Moniteur : les groupes comptent deux cartes au plus ; deux colonnes fixes évitent une colonne fantôme quand la fenêtre est large. */
+html[data-theme="neon"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="neon"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}

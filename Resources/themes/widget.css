@@ -472,3 +472,7 @@ html[data-theme="widget"] .footer-row>button:last-child{background:rgba(255,255,
 
 /* ── 9. Panneaux de la barre des menus (widget.html, picker.html) ──────── */
 html[data-theme="widget"] .panel .head h1{color:var(--text)}
+
+/* Moniteur : les groupes comptent deux cartes au plus ; deux colonnes fixes évitent une colonne fantôme quand la fenêtre est large. */
+html[data-theme="widget"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="widget"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}

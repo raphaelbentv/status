@@ -365,3 +365,7 @@ html[data-theme="dark"] .footer-row>button[title="Quitter Status"]{color:var(--t
   html[data-theme="dark"] .display-card{grid-template-columns:30px 170px minmax(0,1fr);gap:14px}
   html[data-theme="dark"] .settings-nav button.on::before{left:12px;right:12px;top:auto;bottom:2px;width:auto;height:2px}
 }
+
+/* Moniteur : les groupes comptent deux cartes au plus ; deux colonnes fixes évitent une colonne fantôme quand la fenêtre est large. */
+html[data-theme="dark"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="dark"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}
