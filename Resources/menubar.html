@@ -136,7 +136,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><div id="fanControls"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><div id="fanControls"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 document.querySelector('.mac-tools').addEventListener('toggle',event=>
