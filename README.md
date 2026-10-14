@@ -190,8 +190,9 @@ Native/StatusCodexServer.{h,m}   app-server Codex, un par compte (CODEX_HOME dé
 Native/Status.m            shell AppKit + WebKit : fenêtres, popover, comptes, préférences
 Resources/dashboard.html   fenêtre principale (WKWebView)
 Resources/menubar.html     popover de la barre des menus (WKWebView)
-Resources/StatusIcon.icns  icône du Dock ; l'icône de la barre des menus est dessinée
-                           en template monochrome dans TMStatusIcon()
+Resources/StatusIcon.icns  icône du Dock (sablier), générée depuis StatusIcon.svg avec
+                           rsvg-convert + iconutil ; l'icône de la barre des menus est
+                           dessinée en template monochrome dans TMStatusIcon()
 scripts/package-app.sh     compilation + bundle + signature
 scripts/run-tests.sh       tests natifs + tests des surfaces web
 scripts/create-signing-identity.sh  identité de signature locale (voir plus bas)
