@@ -228,10 +228,6 @@ Developer ID Apple, hors sujet ici.
 
 ## Historique du projet
 
-`legacy-swiftui-prototype.tar.gz` archive un prototype SwiftUI antérieur (`Sources/`,
-`Package.swift`, ses tests), jamais compilé par le packaging et resté sur l'architecture par clés
-API supprimée depuis. Conservé faute de dépôt Git ; supprimable sans risque.
-
 ### Tarif Astra
 
 GPT-6 Astra est inclus dans l’équivalent API, y compris les logs déjà enregistrés : le cache
