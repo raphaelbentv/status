@@ -49,7 +49,7 @@
   const numMax = (v, max) => nf({maximumFractionDigits: max}).format(v);
   // Pourcentage : « 12,5 % » (fr, avec espace insécable fine), « 12.5% » (en), « 12,5% » (it, es).
   const pct = (v, digits = 0) => nf({style: 'percent', minimumFractionDigits: digits, maximumFractionDigits: digits}).format(v / 100);
-  const money = (v, currency, digits = 2) => nf({style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits}).format(v);
+  const money = (v, currency, digits = 2) => nf({style: 'currency', currency, currencyDisplay: 'narrowSymbol', minimumFractionDigits: digits, maximumFractionDigits: digits}).format(v);
   // Date/heure : options Intl.DateTimeFormat, toujours dans la langue de l'interface.
   const date = (v, opts) => new Intl.DateTimeFormat(state.locale, opts).format(v instanceof Date ? v : new Date(v));
 
