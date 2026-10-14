@@ -482,7 +482,7 @@ let appData=null,currentView='overview';
 
 // Rebuilds one window's series from the rolling history file and draws it as an inline sparkline.
 // The last point is emphasised so "where am I now" reads without hunting.
-function sparkline(history,key,color){
+function quotaSparkline(history,key,color){
   const pts=(history||[]).map(row=>({t:row.t,v:row.p?.[key]})).filter(p=>typeof p.v==='number');
   if(pts.length<2)return '';
   const recent=pts.slice(-60);
@@ -538,7 +538,7 @@ function resetExpiries(reset){
   }
   return reset.expiryText?`<span class="reset-expiry"> · ${esc(reset.expiryText)}</span>`:'';
 }
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card" data-level="${levelOf(value)}" data-kind="${isWeekly(w)?'weekly':'session'}" style="--pct:${value??0}"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${sparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card" data-level="${levelOf(value)}" data-kind="${isWeekly(w)?'weekly':'session'}" style="--pct:${value??0}"><div class="quota-top"><span>${esc(w.label)}</span><strong>${value===null?'—':(100-value)+' % restant'}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>reset ${countdown(w.resetsAt)} · ${resetFull(w.resetsAt)}</small>${quotaSparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?Math.round(m).toLocaleString('fr-FR'):m.toFixed(1)} M`;};
