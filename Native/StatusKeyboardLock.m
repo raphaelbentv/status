@@ -1,3 +1,4 @@
+#import "StatusI18n.h"
 #import "StatusKeyboardLock.h"
 // AXIsProcessTrusted / kAXTrustedCheckOptionPrompt vivent ici. AppKit les inclut peut-être de
 // façon transitive : ne pas parier là-dessus.
@@ -79,10 +80,10 @@ TMLockState TMLockStateAfterToggle(TMLockState current, BOOL permissionGranted) 
         NSSize size = [text sizeWithAttributes:attrs];
         [text drawAtPoint:NSMakePoint(center.x - size.width / 2, y) withAttributes:attrs];
     };
-    drawCentered(@"CLAVIER VERROUILLÉ", title, center.y + radius + 36);
-    drawCentered(@"Maintenez le clic 1 seconde pour déverrouiller", body, center.y - radius - 40);
+    drawCentered(TMT(@"kb.locked"), title, center.y + radius + 36);
+    drawCentered(TMT(@"kb.hold"), body, center.y - radius - 40);
     drawCentered(self.countdown ?: @"", body, center.y - radius - 66);
-    drawCentered(@"Bouton d'alimentation et Touch ID restent actifs · levée automatique garantie",
+    drawCentered(TMT(@"kb.power"),
                  faint, NSMinY(self.bounds) + 28);
 }
 
@@ -191,8 +192,7 @@ static CGEventRef TMLockTapCallback(CGEventTapProxy proxy, CGEventType type, CGE
 
 - (void)updateCountdown {
     NSTimeInterval remaining = MAX(0, TMLockBackstopSeconds - [[NSDate date] timeIntervalSinceDate:_lockedAt]);
-    NSString *countdown = [NSString stringWithFormat:@"levée automatique dans %d:%02d",
-                           (int)remaining / 60, (int)remaining % 60];
+    NSString *countdown = TMTP(@"kb.countdown", @{@"t": [NSString stringWithFormat:@"%d:%02d", (int)remaining / 60, (int)remaining % 60]});
     for (NSWindow *window in _overlays) {
         ((TMLockOverlayView *)window.contentView).countdown = countdown;
         window.contentView.needsDisplay = YES;

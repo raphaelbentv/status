@@ -650,7 +650,7 @@ static void TMInstallI18nScript(WKWebView *view) {
         item.button.image = TMProviderGauge(ids[i], @0.72, [self.iconPreviewProvider isEqual:@"openai"]);
         item.button.image.template = NO;
         item.button.identifier = ids[i];
-        item.button.toolTip = [NSString stringWithFormat:@"%02ld · %@ — %@. Cliquer pour choisir. Aperçu fictif.", (long)i + 1, names[i], self.iconPreviewProvider];
+        item.button.toolTip = TMTP(@"m.iconPreview", @{@"i": [NSString stringWithFormat:@"%02ld", (long)i + 1], @"name": TMTranslateFR(names[i]), @"provider": self.iconPreviewProvider});
         item.button.accessibilityLabel = item.button.toolTip;
         item.button.target = self;
         item.button.action = @selector(selectIconPreview:);
@@ -962,12 +962,14 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     NSMutableArray *selected=[NSMutableArray array];
     for (NSString *provider in @[@"openai",@"claude"]) {
         NSDictionary *quota=[provider isEqual:@"openai"] ? openAI : claude;
-        [selected addObject:quota ? [NSString stringWithFormat:@"%@ · %@ · %@ : %.0f %% restant",
-            [provider isEqual:@"openai"] ? @"OpenAI" : @"Claude",quota[@"label"],quota[@"shortLabel"],
-            100-MIN(100,MAX(0,TMNumber(quota[@"usedPercent"])))] :
-            [NSString stringWithFormat:@"%@ · quota indisponible",provider]];
+        [selected addObject:quota ? TMTP(@"m.tooltip.remaining", @{
+            @"provider": [provider isEqual:@"openai"] ? @"OpenAI" : @"Claude",
+            @"label": TMTranslateQuotaLabel(quota[@"label"]), @"short": TMTranslateFR(quota[@"shortLabel"]),
+            @"v": [NSString stringWithFormat:@"%.0f", 100-MIN(100,MAX(0,TMNumber(quota[@"usedPercent"])))]}) :
+            TMTP(@"m.tooltip.unavailable", @{@"provider": provider})];
     }
     self.statusItem.button.toolTip=[selected componentsJoinedByString:@"\n"];
+    self.statusItem.button.accessibilityLabel=[self.statusItem.button.toolTip stringByAppendingString:TMT(@"m.accessibility")];
     NSNumber *a=openAI ? @(1-TMNumber(openAI[@"usedPercent"])/100) : nil;
     NSNumber *c=claude ? @(1-TMNumber(claude[@"usedPercent"])/100) : nil;
     NSDictionary *signature=@{@"openai":openAIStyle,@"claude":claudeStyle,@"a":a ?: NSNull.null,@"c":c ?: NSNull.null,@"openAIAccount":openAI[@"accountId"] ?: @"",@"claudeAccount":claude[@"accountId"] ?: @""};
@@ -986,7 +988,6 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     self.statusItem.button.attributedTitle=[[NSAttributedString alloc] initWithString:@""];
     self.statusItem.button.title=@"";
     self.statusItem.length=56;
-    self.statusItem.button.accessibilityLabel=[self.statusItem.button.toolTip stringByAppendingString:@". OpenAI en bleu à gauche, Claude en orange à droite. Ouvrir les quotas."];
 }
 
 - (NSString *)iconStyleForProvider:(NSString *)provider {
@@ -1831,11 +1832,9 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         else [SMAppService.mainAppService registerAndReturnError:&error];
         if (error) {
             NSAlert *alert = [NSAlert new];
-            alert.messageText = enabled ? @"Impossible de désactiver le lancement au démarrage"
-                                        : @"Impossible d’activer le lancement au démarrage";
+            alert.messageText = enabled ? TMT(@"a.login.disableFail") : TMT(@"a.login.enableFail");
             // Unsigned/ad-hoc builds moved around the disk are frequently refused by SMAppService.
-            alert.informativeText = [NSString stringWithFormat:@"%@\n\nAstuce : placez Status dans /Applications, "
-                                     @"puis réessayez.", error.localizedDescription];
+            alert.informativeText = TMTP(@"a.login.hint", @{@"error": error.localizedDescription ?: @""});
             [alert beginSheetModalForWindow:self.window completionHandler:nil];
         }
         [self pushData];
@@ -2165,24 +2164,24 @@ static NSDictionary *TMAlertDefaults(void) {
     NSNumber *pressure = byId[@"ram"][@"pressureLevel"];
     if ([self alertEnabled:@"memory" threshold:&threshold] && pressure
         && TMThresholdShouldFire(&above, pressure.doubleValue, threshold, threshold - 2))
-        [self postNotificationTitle:@"Mémoire · pression critique"
-                               body:@"macOS compresse et purge agressivement. Fermez quelques applications."];
+        [self postNotificationTitle:TMT(@"n.mem.title")
+                               body:TMT(@"n.mem.body")];
     self.alertRAMAbove = above;
 
     above = self.alertTempAbove;
     NSNumber *temp = byId[@"sensors"][@"tempC"];
     if ([self alertEnabled:@"temp" threshold:&threshold] && temp
         && TMThresholdShouldFire(&above, temp.doubleValue, threshold, TMAlertRearmThreshold(threshold)))
-        [self postNotificationTitle:@"Température élevée"
-                               body:[NSString stringWithFormat:@"Point chaud du SoC à %.0f °C.", temp.doubleValue]];
+        [self postNotificationTitle:TMT(@"n.temp.title")
+                               body:TMTP(@"n.temp.body", @{@"v": [NSString stringWithFormat:@"%.0f", temp.doubleValue]})];
     self.alertTempAbove = above;
 
     above = self.alertDiskAbove;
     NSNumber *diskUsed = byId[@"disk"][@"usedPercent"];
     if ([self alertEnabled:@"disk" threshold:&threshold] && diskUsed
         && TMThresholdShouldFire(&above, diskUsed.doubleValue, threshold, TMAlertRearmThreshold(threshold)))
-        [self postNotificationTitle:@"Disque presque plein"
-                               body:[NSString stringWithFormat:@"Volume de démarrage à %.0f %%.", diskUsed.doubleValue]];
+        [self postNotificationTitle:TMT(@"n.disk.title")
+                               body:TMTP(@"n.disk.body", @{@"v": [NSString stringWithFormat:@"%.0f", diskUsed.doubleValue]})];
     self.alertDiskAbove = above;
 }
 
@@ -2461,11 +2460,8 @@ static NSDictionary *TMAlertDefaults(void) {
 - (void)addAccountForProvider:(NSString *)provider {
     if (TMProviderIsFull(self.accountRegistry, provider)) {
         NSAlert *alert = [NSAlert new];
-        alert.messageText = @"Nombre de comptes atteint";
-        alert.informativeText = [NSString stringWithFormat:
-            @"Status suit au plus %ld comptes par fournisseur. Chacun ouvre sa propre session : "
-            @"au-delà, le sondage deviendrait plus lourd que ce qu'il rapporte.",
-            (long)TMMaxAccountsPerProvider];
+        alert.messageText = TMT(@"a.limit.title");
+        alert.informativeText = TMTP(@"a.limit.body", @{@"n": @(TMMaxAccountsPerProvider)});
         [alert beginSheetModalForWindow:self.window completionHandler:nil];
         return;
     }
@@ -2485,14 +2481,12 @@ static NSDictionary *TMAlertDefaults(void) {
     if (!account) return;
     NSString *provider = account[@"provider"];
     NSAlert *alert = [NSAlert new];
-    alert.messageText = @"Supprimer ce compte de Status ?";
+    alert.messageText = TMT(@"a.remove.title");
     alert.informativeText = [provider isEqualToString:TMProviderOpenAI]
-        ? @"La session Codex propre à ce compte est effacée, ainsi que son historique de quotas. "
-          @"Vos autres comptes et la session Codex du Mac ne sont pas touchés."
-        : @"Fermez les sessions Claude Code de ce compte avant de le retirer. Son suivi et son historique de quotas seront retirés ; son profil local reste disponible sur ce Mac. "
-          @"Vos autres comptes ne sont pas touchés.";
-    [alert addButtonWithTitle:@"Supprimer"];
-    [alert addButtonWithTitle:@"Annuler"];
+        ? TMT(@"a.remove.openai")
+        : TMT(@"a.remove.claude");
+    [alert addButtonWithTitle:TMT(@"a.delete")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
         if (response != NSAlertFirstButtonReturn) return;
         [self removeAccount:accountId];
@@ -2548,11 +2542,10 @@ static NSDictionary *TMAlertDefaults(void) {
     NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
     if (!account) return;
     NSAlert *alert = [NSAlert new];
-    alert.messageText = @"Nom du compte";
-    alert.informativeText = @"Ce nom n'apparaît que dans Status. Laissez vide pour revenir au nom "
-                            @"fourni par le fournisseur.";
-    [alert addButtonWithTitle:@"Enregistrer"];
-    [alert addButtonWithTitle:@"Annuler"];
+    alert.messageText = TMT(@"a.rename.title");
+    alert.informativeText = TMT(@"a.rename.body");
+    [alert addButtonWithTitle:TMT(@"a.save")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
     NSTextField *field = [NSTextField textFieldWithString:account[@"label"] ?: @""];
     field.frame = NSMakeRect(0, 0, 320, 24);
     alert.accessoryView = field;
@@ -2609,7 +2602,7 @@ static NSDictionary *TMAlertDefaults(void) {
     [server request:@"account/read" params:@{ @"refreshToken": @NO } completion:^(id result, NSError *error) {
         if (error) {
             [self mergePayload:@{ @"connecting": @NO,
-                                  @"error": error.localizedDescription ?: @"Connexion à Codex impossible." }
+                                  @"error": error.localizedDescription ?: TMT(@"e.codex.failed") }
                     forAccount:accountId];
             [self pushData];
             [self releaseCodexServer:server forAccount:accountId];
@@ -2620,7 +2613,7 @@ static NSDictionary *TMAlertDefaults(void) {
         NSDictionary *account = [response[@"account"] isKindOfClass:NSDictionary.class] ? response[@"account"] : nil;
         if (![account[@"type"] isEqualToString:@"chatgpt"]) {
             NSString *notice = [account[@"type"] isEqualToString:@"apiKey"]
-                ? @"Ce compte utilise une clé API. Connectez un compte ChatGPT pour lire les quotas."
+                ? TMT(@"a.openai.apiKey")
                 : @"";
             [self setPayload:TMOpenAIAccountPayload(account, nil, NO, notice) forAccount:accountId];
             [self pushData];
@@ -2667,7 +2660,7 @@ static NSDictionary *TMAlertDefaults(void) {
         }
         NSURL *url = [NSURL URLWithString:authURL];
         if (![url.scheme.lowercaseString isEqualToString:@"https"]) {
-            [self mergePayload:@{ @"connecting": @NO, @"error": @"Le lien de connexion reçu n’est pas sécurisé." }
+            [self mergePayload:@{ @"connecting": @NO, @"error": TMT(@"e.openai.insecure") }
                     forAccount:accountId];
             [self pushData];
             [self releaseCodexServer:server forAccount:accountId];
@@ -2680,13 +2673,12 @@ static NSDictionary *TMAlertDefaults(void) {
 
 - (void)confirmLogoutOpenAIAccount:(NSString *)accountId {
     NSAlert *alert = [NSAlert new];
-    alert.messageText = @"Déconnecter ce compte OpenAI ?";
+    alert.messageText = TMT(@"a.openaiOut.title");
     // Chaque compte a son propre CODEX_HOME : contrairement aux versions précédentes, la session
     // Codex du Mac et les autres comptes ne sont pas touchés.
-    alert.informativeText = @"Seule la session que Status détient pour ce compte est effacée. "
-                            @"Codex et l’app ChatGPT gardent la leur.";
-    [alert addButtonWithTitle:@"Déconnecter"];
-    [alert addButtonWithTitle:@"Annuler"];
+    alert.informativeText = TMT(@"a.openaiOut.body");
+    [alert addButtonWithTitle:TMT(@"a.disconnect")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
         if (response != NSAlertFirstButtonReturn) return;
         TMCodexAppServer *server = [self codexServerForAccount:accountId];
@@ -2710,7 +2702,7 @@ static NSDictionary *TMAlertDefaults(void) {
         [self.openAILoginIDs removeObjectForKey:accountId];
         if (![params[@"success"] boolValue]) {
             [self mergePayload:@{ @"connecting": @NO,
-                                  @"error": [params[@"error"] isKindOfClass:NSString.class] ? params[@"error"] : @"Connexion OpenAI annulée." }
+                                  @"error": [params[@"error"] isKindOfClass:NSString.class] ? params[@"error"] : TMT(@"e.openai.cancelled") }
                     forAccount:accountId];
             [self pushData];
             [self releaseCodexServer:self.codexServers[accountId] forAccount:accountId];
@@ -2730,14 +2722,14 @@ static NSDictionary *TMAlertDefaults(void) {
     NSDictionary *account = TMAccountWithID(self.accountRegistry, accountId);
     if (![account[@"provider"] isEqual:TMProviderClaude]) return;
     if (!TMClaudeExecutable()) {
-        [self mergePayload:@{@"error":@"Installez Claude Code, puis cliquez à nouveau sur Se connecter."} forAccount:accountId];
+        [self mergePayload:@{@"error":TMT(@"e.claude.install")} forAccount:accountId];
         [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://code.claude.com/docs/en/setup"]];
         [self pushData]; return;
     }
     NSString *helper = [NSBundle.mainBundle pathForResource:@"status-claude-collector" ofType:nil];
     NSString *commandPath = nil; NSError *error = nil;
     if (!TMPrepareClaudeProfile(accountId, helper, &commandPath, &error)) {
-        [self mergePayload:@{@"error":error.localizedDescription ?: @"Le profil Claude Code n’a pas pu être préparé. Sa configuration a été conservée."} forAccount:accountId];
+        [self mergePayload:@{@"error":error.localizedDescription ?: TMT(@"e.claude.profile")} forAccount:accountId];
         [self pushData]; return;
     }
     self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"code");
@@ -2765,7 +2757,7 @@ static NSDictionary *TMAlertDefaults(void) {
     if (![account[@"provider"] isEqual:TMProviderClaude] || ![account[@"claudeSource"] isEqual:@"code"]) return;
     NSString *path = [TMClaudeProfilePath(accountId) stringByAppendingPathComponent:@"Ouvrir Claude.command"];
     if (![NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]]) {
-        [self mergePayload:@{@"error":@"Impossible d’ouvrir ce profil. Reconnectez ce compte."} forAccount:accountId];
+        [self mergePayload:@{@"error":TMT(@"e.claude.openProfile")} forAccount:accountId];
         [self pushData];
     }
 }
@@ -2778,7 +2770,7 @@ static NSDictionary *TMAlertDefaults(void) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!TMAccountWithID(self.accountRegistry, accountId)) return;
             [self setPayload:@{@"source":@"claude_code_statusline", @"connected":@NO, @"windows":@[], @"liveSource":@NO,
-                @"error":ok ? @"" : @"Suivi arrêté. La déconnexion Claude Code a échoué ; réessayez avant de retirer le compte."} forAccount:accountId];
+                @"error":ok ? @"" : TMT(@"e.claude.logoutFail")} forAccount:accountId];
             [self pushData];
         });
     });
@@ -2798,18 +2790,18 @@ static NSDictionary *TMAlertDefaults(void) {
         NSDictionary *organization = TMClaudeWebOrganization(organizations, expected);
         if (organization) { [self validateClaudeWebOrganization:organization account:accountId source:source session:session]; return; }
         if (expected.length) {
-            [session showLoginMessage:@"Ce compte Claude ne correspond pas au profil suivi. Connectez le bon compte, puis validez."]; return;
+            [session showLoginMessage:TMT(@"e.claude.mismatch")]; return;
         }
         NSAlert *alert = [NSAlert new];
-        alert.messageText = @"Quelle organisation suivre pour ce compte ?";
+        alert.messageText = TMT(@"a.org.titleAccount");
         NSPopUpButton *picker = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,360,28) pullsDown:NO];
         for (NSDictionary *org in organizations) [picker addItemWithTitle:org[@"name"] ?: org[@"uuid"]];
         alert.accessoryView = picker;
-        [alert addButtonWithTitle:@"Choisir"]; [alert addButtonWithTitle:@"Annuler"];
+        [alert addButtonWithTitle:TMT(@"a.choose")]; [alert addButtonWithTitle:TMT(@"a.cancel")];
         // La fenêtre de connexion reste visible pendant ce choix explicite.
         [alert beginSheetModalForWindow:NSApp.keyWindow completionHandler:^(NSModalResponse response) {
             if (response != NSAlertFirstButtonReturn || picker.indexOfSelectedItem < 0) {
-                [session showLoginMessage:@"Choix annulé. Le suivi précédent est conservé."]; return;
+                [session showLoginMessage:TMT(@"e.claude.pickCancelled")]; return;
             }
             [self validateClaudeWebOrganization:organizations[picker.indexOfSelectedItem] account:accountId source:source session:session];
         }];
@@ -2825,7 +2817,7 @@ static NSDictionary *TMAlertDefaults(void) {
         NSArray *windows = json ? TMClaudeWindowsFromUsagePayload(json) : @[];
         double weeklyUsed = -1;
         for (NSDictionary *window in windows) if (TMWindowIsPrimaryWeekly(window)) weeklyUsed = TMNumber(window[@"usedPercent"]);
-        if (error || weeklyUsed < 0) { [session showLoginMessage:error.localizedDescription ?: @"Quota hebdomadaire indisponible. Le suivi précédent est conservé."]; return; }
+        if (error || weeklyUsed < 0) { [session showLoginMessage:error.localizedDescription ?: TMT(@"e.claude.weeklyUnavailable")]; return; }
         self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"orgId", orgId);
         self.accountRegistry = TMRegistrySetting(self.accountRegistry, accountId, @"claudeSource", @"web");
         [self saveAccountRegistry];
@@ -2899,7 +2891,7 @@ static NSDictionary *TMAlertDefaults(void) {
         return;
     }
     if (!orgId.length && web) {
-        [self mergePayload:@{@"connected":@NO, @"liveSource":@NO, @"error":@"Reconnectez ce compte Claude dans la fenêtre web."} forAccount:accountId];
+        [self mergePayload:@{@"connected":@NO, @"liveSource":@NO, @"error":TMT(@"e.claude.reconnect")} forAccount:accountId];
         if (completion) completion(); return;
     }
     if (!orgId.length) {
@@ -2986,8 +2978,8 @@ static NSDictionary *TMAlertDefaults(void) {
     NSString *label = TMAccountDisplayLabel(entry, index == NSNotFound ? 0 : index);
 
     if (TMStaleAlertShouldFire(&wasStale, !live)) {
-        [self postNotificationTitle:[NSString stringWithFormat:@"Jauges Claude figées · %@", label]
-                               body:[entry[@"claudeSource"] isEqual:@"web"] ? @"La session web de ce compte ne répond plus. Ouvrez sa connexion web dans Status si cela persiste." : @"La session claude.ai de ce compte ne répond plus. Recollez son cookie si cela persiste."];
+        [self postNotificationTitle:TMTP(@"n.stale.title", @{@"label": label})
+                               body:[entry[@"claudeSource"] isEqual:@"web"] ? TMT(@"n.stale.web") : TMT(@"n.stale.cookie")];
     }
     if (TMWatchdogShouldReload(&failures, live, 3)) {
         if (![entry[@"claudeSource"] isEqual:@"web"])
@@ -3018,14 +3010,13 @@ static NSDictionary *TMAlertDefaults(void) {
             return;
         }
         NSAlert *alert = [NSAlert new];
-        alert.messageText = @"Quelle organisation suivre ?";
-        alert.informativeText = @"Ce cookie donne accès à plusieurs organisations Claude. Les quotas "
-                                @"affichés seront ceux de celle que vous choisissez.";
+        alert.messageText = TMT(@"a.org.title");
+        alert.informativeText = TMT(@"a.org.cookieBody");
         NSPopUpButton *picker = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 320, 26) pullsDown:NO];
         for (NSDictionary *organization in organizations) [picker addItemWithTitle:organization[@"name"]];
         alert.accessoryView = picker;
-        [alert addButtonWithTitle:@"Choisir"];
-        [alert addButtonWithTitle:@"Annuler"];
+        [alert addButtonWithTitle:TMT(@"a.choose")];
+        [alert addButtonWithTitle:TMT(@"a.cancel")];
         [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
             if (response != NSAlertFirstButtonReturn) { if (completion) completion(NO); return; }
             NSInteger index = MAX(0, MIN((NSInteger)organizations.count - 1, picker.indexOfSelectedItem));
@@ -3048,23 +3039,14 @@ static NSDictionary *TMAlertDefaults(void) {
 - (void)configureClaudeCookieForAccount:(NSString *)accountId {
     BOOL configured = [self cookieForAccount:accountId].length > 0;
     NSAlert *alert = [NSAlert new];
-    alert.messageText = @"Cookie de session claude.ai (non officiel)";
-    alert.informativeText =
-        @"Les quotas Claude sont lus sur claude.ai avec votre session. Chaque compte a son propre "
-        @"cookie et sa propre session isolée.\n\n"
-        @"1. Ouvrez claude.ai/settings/usage dans votre navigateur, connecté à CE compte.\n"
-        @"2. Outils de développement (⌥⌘I) → onglet Réseau, puis rechargez (⌘R).\n"
-        @"3. Filtrez sur « usage » et cliquez la requête du même nom.\n"
-        @"4. Clic droit dessus → Copier → Copier comme cURL.\n"
-        @"5. Collez tel quel ci-dessous : Status en extraira le cookie seul.\n\n"
-        @"⚠️ Ce cookie vaut un accès complet au compte. Il est conservé dans le Trousseau de ce Mac, "
-        @"n’est envoyé qu’à claude.ai, et se périme à votre prochaine déconnexion.";
-    [alert addButtonWithTitle:@"Enregistrer"];
-    [alert addButtonWithTitle:@"Annuler"];
-    if (configured) [alert addButtonWithTitle:@"Effacer"];
+    alert.messageText = TMT(@"a.cookie.title");
+    alert.informativeText = TMT(@"a.cookie.body");
+    [alert addButtonWithTitle:TMT(@"a.save")];
+    [alert addButtonWithTitle:TMT(@"a.cancel")];
+    if (configured) [alert addButtonWithTitle:TMT(@"a.erase")];
 
     NSSecureTextField *field = [NSSecureTextField textFieldWithString:@""];
-    field.placeholderString = @"Collez le cURL (ou le cookie brut)";
+    field.placeholderString = TMT(@"a.cookie.placeholder");
     field.frame = NSMakeRect(0, 0, 420, 24);
     alert.accessoryView = field;
     alert.window.initialFirstResponder = field;
@@ -3082,7 +3064,7 @@ static NSDictionary *TMAlertDefaults(void) {
         if (response != NSAlertFirstButtonReturn) return;
         NSString *cookie = TMExtractCookieHeader(field.stringValue);
         if (!cookie.length) {
-            [self mergePayload:@{ @"error": @"Aucun cookie n’a pu être extrait de ce collage." }
+            [self mergePayload:@{ @"error": TMT(@"e.cookie.none") }
                     forAccount:accountId];
             [self pushData];
             return;
@@ -3227,16 +3209,17 @@ static NSDictionary *TMAlertDefaults(void) {
     for (NSDictionary *event in result[@"events"]) {
         if ([event[@"kind"] isEqualToString:@"reset"]) {
             NSDateFormatter *fmt = [NSDateFormatter new];
+            fmt.locale = [NSLocale localeWithLocaleIdentifier:TMLocaleIdentifier()];
             fmt.dateStyle = NSDateFormatterMediumStyle;
             fmt.timeStyle = NSDateFormatterShortStyle;
             fmt.doesRelativeDateFormatting = YES;
             NSString *until = [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:TMNumber(event[@"resetsAt"])]];
-            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · quota hebdomadaire réinitialisé", labels[event[@"provider"]] ?: event[@"provider"]]
-                                   body:[NSString stringWithFormat:@"Compteur reparti de zéro — nouvelle fenêtre jusqu'au %@.", until]];
+            [self postNotificationTitle:TMTP(@"n.reset.title", @{@"provider": labels[event[@"provider"]] ?: event[@"provider"]})
+                                   body:TMTP(@"n.reset.body", @{@"until": until})];
         } else {
             NSInteger level = [event[@"level"] integerValue];
-            [self postNotificationTitle:[NSString stringWithFormat:@"%@ · %@ à %ld %%", labels[event[@"provider"]] ?: event[@"provider"], event[@"label"], (long)level]
-                                   body:level >= 95 ? @"Limite presque atteinte." : @"Quota bien entamé."];
+            [self postNotificationTitle:TMTP(@"n.threshold.title", @{@"provider": labels[event[@"provider"]] ?: event[@"provider"], @"label": TMTranslateQuotaLabel(event[@"label"]), @"level": @(level)})
+                                   body:level >= 95 ? TMT(@"n.threshold.high") : TMT(@"n.threshold.mid")];
         }
     }
 }

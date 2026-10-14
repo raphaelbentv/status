@@ -22,3 +22,6 @@ extern void TMI18nReload(void);
 
 // Charge utile envoyée aux pages web : {lang, locale, dict, reverse}.
 extern NSDictionary *TMI18nPayload(void);
+
+// Libellé de fenêtre de quota (canonique en français : « Semaine », « 3 j », « 7 j · Opus »).
+extern NSString *TMTranslateQuotaLabel(NSString *label);

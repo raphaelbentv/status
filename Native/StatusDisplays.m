@@ -1,3 +1,4 @@
+#import "StatusI18n.h"
 #import "StatusDisplays.h"
 #import <AppKit/AppKit.h>
 #import <IOKit/IOKitLib.h>
@@ -127,7 +128,7 @@ static NSString *TMDisplayName(CGDirectDisplayID displayID, BOOL builtin) {
         NSNumber *number = screen.deviceDescription[@"NSScreenNumber"];
         if (number.unsignedIntValue == displayID) return screen.localizedName;
     }
-    return builtin ? @"Écran interne" : @"Écran externe";
+    return builtin ? TMT(@"disp.internal") : TMT(@"disp.external");
 }
 
 static NSString *TMDisplayIdentifier(CGDirectDisplayID displayID, BOOL builtin) {

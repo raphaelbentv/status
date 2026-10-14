@@ -3,6 +3,9 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
+# Les tests natifs et web comparent des textes français : on fige la langue, quelle que soit celle du Mac.
+export STATUS_LANGUAGE=fr
+export STATUS_I18N_DIR="$ROOT/Resources/i18n"
 BUILD="${ROOT}/work"
 mkdir -p "$BUILD"
 
@@ -13,6 +16,7 @@ clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit -frame
   "$ROOT/Native/StatusKeyboardLock.m" "$ROOT/Native/StatusSystemMonitor.m" \
   "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" "$ROOT/Native/StatusFx.m" \
   "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusCodexServer.m" \
+  "$ROOT/Native/StatusI18n.m" \
   -o "$BUILD/native-tests"
 "$BUILD/native-tests"
 native_status=$?

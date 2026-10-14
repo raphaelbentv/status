@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="themes.css">
+<script src="i18n.js"></script>
 <style>
   /* Le thème actif est posé sur <html> par le natif, comme pour le tableau de bord : le
      sélecteur suit donc Synthwave ou Phosphore sans une ligne de CSS en double. */
@@ -39,10 +40,10 @@
 <body>
 <div class="panel">
   <div class="preview" id="preview"></div>
-  <input id="filtre" placeholder="Filtrer par application ou titre…" autofocus>
+  <input id="filtre" data-i18n-placeholder="picker.filter" autofocus>
   <div class="list" id="list"></div>
   <div class="footer">
-    <span><kbd>↑↓</kbd>naviguer</span><span><kbd>↩</kbd>placer</span><span><kbd>esc</kbd>annuler</span>
+    <span><kbd>↑↓</kbd><span data-i18n="picker.navigate"></span></span><span><kbd>↩</kbd><span data-i18n="picker.place"></span></span><span><kbd>esc</kbd><span data-i18n="picker.cancel"></span></span>
   </div>
 </div>
 <script>
@@ -64,12 +65,12 @@ function rendre(){
   const choisie=liste[index];
   const [a,b]=PARTS[split]||[50,50];
   document.querySelector('#preview').innerHTML=
-    `<div class="slot active" style="flex:${a}"><span class="role">active</span><span class="who">${esc(activeApp||'—')}</span></div>`+
-    `<div class="slot partner" style="flex:${b}"><span class="role">partenaire</span><span class="who">${esc(choisie?choisie.appName:'—')}</span></div>`;
+    `<div class="slot active" style="flex:${a}"><span class="role">${t('picker.roleActive')}</span><span class="who">${esc(activeApp||'—')}</span></div>`+
+    `<div class="slot partner" style="flex:${b}"><span class="role">${t('picker.rolePartner')}</span><span class="who">${esc(choisie?choisie.appName:'—')}</span></div>`;
 
   document.querySelector('#list').innerHTML=liste.length
     ? liste.map((w,i)=>`<div class="row ${i===index?'on':''}" data-i="${i}"><span class="app">${esc(w.appName)}</span><span class="title">${esc(w.title)}</span></div>`).join('')
-    : `<div class="empty">${fenetres.length?'Aucune fenêtre ne correspond à ce filtre.':'Aucune autre fenêtre déplaçable n’est ouverte.'}</div>`;
+    : `<div class="empty">${t(fenetres.length?'picker.noMatch':'picker.noWindows')}</div>`;
 
   document.querySelectorAll('.row').forEach(r=>r.onclick=()=>{index=+r.dataset.i;valider()});
   const on=document.querySelector('.row.on');
@@ -102,6 +103,8 @@ window.StatusPicker={open(data){
   champ.value=''; champ.focus();
   rendre();
 }};
+StatusI18n.onChange(()=>{StatusI18n.apply();rendre()});
+StatusI18n.apply();
 rendre();
 </script>
 </body>

@@ -15,7 +15,7 @@ clang -fobjc-arc -O2 -I "$ROOT/Native" \
   "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusClaudeBridge.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
-  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" -o "$BUILD"
+  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusI18n.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/icons"
@@ -27,6 +27,9 @@ cp "$ROOT/Resources/menubar.html" "$OUTPUT/Contents/Resources/menubar.html"
 cp "$ROOT/Resources/widget.html" "$OUTPUT/Contents/Resources/widget.html"
 cp "$ROOT/Resources/picker.html" "$OUTPUT/Contents/Resources/picker.html"
 cp "$ROOT/Resources/themes.css" "$OUTPUT/Contents/Resources/themes.css"
+cp "$ROOT/Resources/i18n.js" "$OUTPUT/Contents/Resources/i18n.js"
+mkdir -p "$OUTPUT/Contents/Resources/i18n"
+cp "$ROOT/Resources/i18n/"*.json "$OUTPUT/Contents/Resources/i18n/"
 cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"
 
 clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation \

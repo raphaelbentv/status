@@ -77,6 +77,33 @@ NSString *TMTranslateFR(NSString *text) {
     return key ? TMT(key) : text;
 }
 
+NSString *TMTranslateQuotaLabel(NSString *label) {
+    TMEnsureLoaded();
+    if (![label isKindOfClass:NSString.class]) return label;
+    if (gReverse[label]) return TMT(gReverse[label]);
+    static NSRegularExpression *weeks, *days, *hours, *model;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        weeks = [NSRegularExpression regularExpressionWithPattern:@"^(\\d+) sem\\.$" options:0 error:nil];
+        days = [NSRegularExpression regularExpressionWithPattern:@"^(\\d+) j$" options:0 error:nil];
+        hours = [NSRegularExpression regularExpressionWithPattern:@"^(\\d+) h$" options:0 error:nil];
+        model = [NSRegularExpression regularExpressionWithPattern:@"^7 j · (.+)$" options:0 error:nil];
+    });
+    NSRange all = NSMakeRange(0, label.length);
+    NSTextCheckingResult *m;
+    if ((m = [weeks firstMatchInString:label options:0 range:all]))
+        return TMTP(@"q.weeksN", @{@"n": @([[label substringWithRange:[m rangeAtIndex:1]] integerValue])});
+    if ((m = [days firstMatchInString:label options:0 range:all]))
+        return [NSString stringWithFormat:@"%@ %@", [label substringWithRange:[m rangeAtIndex:1]], TMT(@"unit.day")];
+    if ((m = [hours firstMatchInString:label options:0 range:all]))
+        return [NSString stringWithFormat:@"%@ %@", [label substringWithRange:[m rangeAtIndex:1]], TMT(@"unit.hour")];
+    if ((m = [model firstMatchInString:label options:0 range:all])) {
+        NSString *name = [label substringWithRange:[m rangeAtIndex:1]];
+        return TMTP(@"q.sevenDaysModel", @{@"model": [name isEqualToString:@"modèle"] ? TMT(@"q.model") : name});
+    }
+    return label;
+}
+
 NSDictionary *TMI18nPayload(void) {
     TMEnsureLoaded();
     return @{@"lang": gLang, @"locale": TMLocaleIdentifier(), @"dict": gDict, @"reverse": gReverse};

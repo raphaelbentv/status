@@ -25,6 +25,20 @@
   // s'il est référencé dans le dictionnaire, sinon rendu tel quel.
   const tm = s => (s != null && state.reverse[s]) ? t(state.reverse[s]) : s;
 
+  // Libellés de fenêtres de quota produits par le natif en français canonique (« Semaine »,
+  // « 3 j », « 7 j · Opus »…). L'identifiant reste français pour les clés d'historique ; seul
+  // l'affichage est traduit.
+  function label(l) {
+    if (l == null) return l;
+    let m;
+    if (state.reverse[l]) return tm(l);
+    if ((m = /^(\d+) sem\.$/.exec(l))) return t('q.weeksN', {n: +m[1]});
+    if ((m = /^(\d+) j$/.exec(l))) return m[1] + ' ' + t('unit.day');
+    if ((m = /^(\d+) h$/.exec(l))) return m[1] + ' ' + t('unit.hour');
+    if ((m = /^7 j · (.+)$/.exec(l))) return t('q.sevenDaysModel', {model: m[1] === 'modèle' ? t('q.model') : m[1]});
+    return l;
+  }
+
   const nf = (opts) => {
     const k = JSON.stringify(opts);
     if (!formatters.has(k)) formatters.set(k, new Intl.NumberFormat(state.locale, opts));
@@ -32,6 +46,7 @@
   };
   // Nombre localisé : 12,5 (fr, it, es) / 12.5 (en). `digits` fixe le nombre de décimales.
   const num = (v, digits) => nf(digits == null ? {maximumFractionDigits: 20} : {minimumFractionDigits: digits, maximumFractionDigits: digits}).format(v);
+  const numMax = (v, max) => nf({maximumFractionDigits: max}).format(v);
   // Pourcentage : « 12,5 % » (fr, avec espace insécable fine), « 12.5% » (en), « 12,5% » (it, es).
   const pct = (v, digits = 0) => nf({style: 'percent', minimumFractionDigits: digits, maximumFractionDigits: digits}).format(v / 100);
   const money = (v, currency, digits = 2) => nf({style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits}).format(v);
@@ -56,6 +71,6 @@
   }
   load(root.__STATUS_I18N__);
   root.t = t;
-  root.StatusI18n = {t, tm, num, pct, money, date, apply, set, onChange: f => listeners.push(f),
+  root.StatusI18n = {t, tm, label, num, numMax, pct, money, date, apply, set, onChange: f => listeners.push(f),
     get lang() { return state.lang; }, get locale() { return state.locale; }, get dict() { return state.dict; }};
 })(typeof window !== 'undefined' ? window : globalThis);

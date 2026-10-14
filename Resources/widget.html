@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <link rel="stylesheet" href="themes.css">
+<script src="i18n.js"></script>
 <style>
   /* Hauteur libre, pas 100 % : c'est le contenu qui décide, et sa mesure est poussée au natif
      qui redimensionne le popover (voir syncPanelHeight). `overflow-y:auto` ne sert que de filet
@@ -73,16 +74,18 @@ const sysNow=()=>famGet('system')?.now||{};
 const procs=()=>metrics?.processes||[];
 // Sections activables par panneau (prefs.panels[widgetId][section]). Absent = affiché (défaut on).
 const on=section=>(metrics?.prefs?.panels?.[widgetId]||{})[section]!==false;
-const num=v=>typeof v==='number'?v:null;
-const fr=v=>String(v).replace('.',',');
+const I=StatusI18n;
+// Unités et nombres suivent la langue : « Ko » / « KB », « 12,5 » / « 12.5 », « j » / « d ».
 const pctN=v=>v==null?'—':Math.round(v);
-const pct=v=>v==null?'—':Math.round(v)+' %';
-const fmtRate=v=>{if(v==null||isNaN(v))return '—';const u=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<3){v/=1024;i++}return fr((i&&v<10?v.toFixed(1):Math.round(v))+'')+' '+u[i]};
-const fmtSize=v=>{if(v==null||isNaN(v))return '—';const u=['o','Ko','Mo','Go','To'];let i=0;while(v>=1024&&i<4){v/=1024;i++}return fr((i&&v<10?v.toFixed(1):Math.round(v))+'')+' '+u[i]};
-const fmtGo=v=>{if(v==null||isNaN(v))return '—';return fr((v/1073741824).toFixed(1))+' Go'};
-const fmtMin=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${String(mm).padStart(2,'0')}`:`${mm} min`};
+const pct=v=>v==null?'—':I.pct(Math.round(v));
+const sizeUnits=()=>['b','kb','mb','gb','tb'].map(k=>t('unit.'+k));
+const scale=(v,max)=>{let i=0;while(v>=1024&&i<max){v/=1024;i++}return [v,i]};
+const fmtRate=v=>{if(v==null||isNaN(v))return '—';const [x,i]=scale(v,3);return I.num(i&&x<10?x:Math.round(x),i&&x<10?1:0)+' '+sizeUnits()[i]+'/s'};
+const fmtSize=v=>{if(v==null||isNaN(v))return '—';const [x,i]=scale(v,4);return I.num(i&&x<10?x:Math.round(x),i&&x<10?1:0)+' '+sizeUnits()[i]};
+const fmtGo=v=>{if(v==null||isNaN(v))return '—';return I.num(v/1073741824,1)+' '+t('unit.gb')};
+const fmtMin=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} ${t('unit.hour')} ${String(mm).padStart(2,'0')}`:`${mm} ${t('unit.min')}`};
 const fmtDur=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
-  if(d)return `${d} j ${h} h`;if(h)return `${h} h ${String(m).padStart(2,'0')}`;return `${m} min`};
+  if(d)return `${d} ${t('unit.day')} ${h} ${t('unit.hour')}`;if(h)return `${h} ${t('unit.hour')} ${String(m).padStart(2,'0')}`;return `${m} ${t('unit.min')}`};
 
 // Mini-courbe SVG, une ou deux séries, échelle % fixe (percent) ou auto (débits).
 // L'aire est toujours remplie : elle donne le niveau d'un coup d'œil et occupe le cadre. Sans
@@ -110,7 +113,7 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 
 // Barre empilée + légende. segs=[{label,value,color,fmt}]. total borne l'échelle ; le reste (libre)
 // est laissé vide dans la barre. showFree ajoute une entrée « libre » à la légende.
-function splitBar(segs,total,{free=null,freeLabel='libre'}={}){
+function splitBar(segs,total,{free=null,freeLabel=''}={}){
   if(!total)return '';
   const bar=segs.map(s=>`<i style="width:${(100*s.value/total).toFixed(2)}%;background:${s.color}"></i>`).join('');
   const legend=segs.map(s=>`<span class="lg"><span class="dot" style="background:${s.color}"></span>${s.label} <b>${s.fmt(s.value)}</b></span>`).join('')
@@ -120,20 +123,20 @@ function splitBar(segs,total,{free=null,freeLabel='libre'}={}){
 // Liste de processus : top `n` triés par `key`, valeur formatée par `fmt`, barre normalisée au max.
 function procList(key,fmt,n=5){
   const list=procs().filter(p=>p[key]!=null).sort((a,b)=>b[key]-a[key]).slice(0,n);
-  if(!list.length)return `<div class="empty">Mesure en cours…</div>`;
+  if(!list.length)return `<div class="empty">${t('w.measuring')}</div>`;
   const max=Math.max(1,...list.map(p=>p[key]));
   return `<div class="plist">${list.map(p=>`<div class="p"><span class="nm">${esc(p.name||'—')}</span><span class="vv">${fmt(p[key])}</span><div class="pbar"><i style="width:${(100*p[key]/max).toFixed(1)}%"></i></div></div>`).join('')}</div>`;
 }
 
 function renderCPU(){
-  const f=famGet('cpu');if(!f)return empty('CPU');const n=f.now,s=sysNow();
+  const f=famGet('cpu');if(!f)return empty(t('w.cpu'));const n=f.now,s=sysNow();
   const cores=Object.keys(n).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
   const types=n.coreTypes;
   const bar=i=>`<i style="height:${Math.max(4,n['core'+i]??0)}%"></i>`;
   let coresHTML='';
   if(types){const P=[],E=[];for(let i=0;i<types.length;i++)(types[i]==='E'?E:P).push(i);
     const grp=(l,idx)=>idx.length?`<div class="grp"><div class="lbl">${l} · ${idx.length}</div><div class="bars">${idx.map(bar).join('')}</div></div>`:'';
-    coresHTML=`<div class="cores">${grp('Performance',P)}${grp('Efficience',E)}</div>`;
+    coresHTML=`<div class="cores">${grp(t('w.cores.performance'),P)}${grp(t('w.cores.efficiency'),E)}</div>`;
   }else coresHTML=`<div class="bars" style="margin:8px 0">${cores.map(c=>bar(+c.slice(4))).join('')}</div>`;
   // Découpe utilisateur/système : barre proportionnelle + deux lignes ordinaires. En légende
   // compacte, « Utilisateur 10 % » dépassait la demi-largeur et se faisait rogner ; en lignes, le
@@ -142,62 +145,62 @@ function renderCPU(){
   if(n.userPercent!=null){
     const u=n.userPercent,s=n.systemPercent||0;
     splitHTML=`<div class="split"><i style="width:${u}%;background:var(--chart-a)"></i><i style="width:${s}%;background:var(--amber)"></i></div>`
-      +`<div class="rows">${row('<span class="dot" style="background:var(--chart-a)"></span> utilisateur',Math.round(u)+' %')}`
-      +`${row('<span class="dot" style="background:var(--amber)"></span> système',Math.round(s)+' %')}</div>`;
+      +`<div class="rows">${row('<span class="dot" style="background:var(--chart-a)"></span> '+t('w.cpu.user'),I.pct(Math.round(u)))}`
+      +`${row('<span class="dot" style="background:var(--amber)"></span> '+t('w.cpu.system'),I.pct(Math.round(s)))}</div>`;
   }
-  const loads=(s.load1!=null)?row('charge',`${fr(s.load1)} · ${fr(s.load5)} · ${fr(s.load15)}`):'';
-  const procN=(s.processCount!=null)?row('processus',s.processCount):'';
-  const up=(s.uptimeSec!=null)?row('actif depuis',fmtDur(s.uptimeSec)):'';
+  const loads=(s.load1!=null)?row(t('w.cpu.load'),`${I.numMax(s.load1,2)} · ${I.numMax(s.load5,2)} · ${I.numMax(s.load15,2)}`):'';
+  const procN=(s.processCount!=null)?row(t('w.cpu.processes'),s.processCount):'';
+  const up=(s.uptimeSec!=null)?row(t('w.cpu.uptime'),fmtDur(s.uptimeSec)):'';
   const loadRows=(loads||procN||up)?`<div class="rows" style="margin-top:8px">${loads}${procN}${up}</div>`:'';
-  return head('CPU',bigVal(pctN(n.total),'%'))
+  return head(t('w.cpu'),bigVal(pctN(n.total),'%'))
     +chart([series(f,'total','var(--chart-a)')])
     +(on('cores')?coresHTML:'')
     +(on('split')?(splitHTML||''):'')
     +(on('load')?loadRows:'')
-    +(on('processes')?section('Processus · CPU')+procList('cpuPercent',v=>fr(v.toFixed(0))+' %'):'');
+    +(on('processes')?section(t('w.cpu.processSection'))+procList('cpuPercent',v=>I.pct(Math.round(v))):'');
 }
 function renderMemory(){
-  const f=famGet('ram');if(!f)return empty('Mémoire');const n=f.now;
-  const P={1:['normale',''],2:['élevée','warn'],4:['critique','crit']}[n.pressureLevel]||['',''];
+  const f=famGet('ram');if(!f)return empty(t('w.memory'));const n=f.now;
+  const P={1:[t('w.mem.pressure.normal'),''],2:[t('w.mem.pressure.high'),'warn'],4:[t('w.mem.pressure.critical'),'crit']}[n.pressureLevel]||['',''];
   let breakdown='';
   if(n.totalBytes){
     // Libellés abrégés : en toutes lettres, « Compressée 7,8 Go » dépassait la demi-largeur de la
     // légende et le « Go » sortait du panneau.
     const segs=[
-      {label:'App',value:n.appBytes||0,color:'var(--blue)',fmt:fmtGo},
-      {label:'Résid.',value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
-      {label:'Compr.',value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
-      {label:'Cache',value:n.cachedBytes||0,color:'rgba(127,140,160,.55)',fmt:fmtGo},
+      {label:t('w.mem.app'),value:n.appBytes||0,color:'var(--blue)',fmt:fmtGo},
+      {label:t('w.mem.wired'),value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
+      {label:t('w.mem.compressed'),value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
+      {label:t('w.mem.cache'),value:n.cachedBytes||0,color:'rgba(127,140,160,.55)',fmt:fmtGo},
     ];
-    breakdown=splitBar(segs,n.totalBytes,{free:n.freeBytes,freeLabel:'Libre'});
+    breakdown=splitBar(segs,n.totalBytes,{free:n.freeBytes,freeLabel:t('w.mem.free')});
   }
   const stats=[];
   const cell=(v,l,cls)=>`<div class="stat${cls?' '+cls:''}"><b>${v}</b><span>${l}</span></div>`;
-  if(n.usedBytes!=null)stats.push(cell(fmtGo(n.usedBytes),'utilisée'));
-  if(n.freeBytes!=null)stats.push(cell(fmtGo(n.freeBytes),'libre'));
-  if(n.cachedBytes!=null)stats.push(cell(fmtGo(n.cachedBytes),'cache'));
-  if(n.swapUsedBytes!=null)stats.push(cell(fmtSize(n.swapUsedBytes),'swap',n.swapUsedBytes>2147483648?'warn':''));
-  return head('Mémoire',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtGo(n.totalBytes)+' au total':''))
-    +(P[0]?`<div class="row"><span class="k">pression mémoire</span><span class="badge ${P[1]}">${P[0]}</span></div>`:'')
+  if(n.usedBytes!=null)stats.push(cell(fmtGo(n.usedBytes),t('w.mem.used')));
+  if(n.freeBytes!=null)stats.push(cell(fmtGo(n.freeBytes),t('w.mem.freeLower')));
+  if(n.cachedBytes!=null)stats.push(cell(fmtGo(n.cachedBytes),t('w.mem.cacheLower')));
+  if(n.swapUsedBytes!=null)stats.push(cell(fmtSize(n.swapUsedBytes),t('w.mem.swap'),n.swapUsedBytes>2147483648?'warn':''));
+  return head(t('w.memory'),bigVal(pctN(n.usedPercent),'%',n.totalBytes?t('w.total',{v:fmtGo(n.totalBytes)}):''))
+    +(P[0]?`<div class="row"><span class="k">${t('w.mem.pressure')}</span><span class="badge ${P[1]}">${P[0]}</span></div>`:'')
     +chart([series(f,'usedPercent','var(--chart-a)')])
     +(on('breakdown')?breakdown:'')
     +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
-    +(on('processes')?section('Processus · mémoire')+procList('rssBytes',fmtSize):'');
+    +(on('processes')?section(t('w.mem.processSection'))+procList('rssBytes',fmtSize):'');
 }
 function renderGPU(){
-  const f=famGet('gpu');if(!f)return empty('GPU');const n=f.now;
+  const f=famGet('gpu');if(!f)return empty(t('w.gpu'));const n=f.now;
   // Pas de liste de processus ici : aucune API n'expose la charge GPU par processus sur Apple
   // Silicon. On s'en tient à ce qui est mesurable — charge globale, étages, mémoire.
-  return head('GPU',bigVal(pctN(n.usage),'%'))
+  return head(t('w.gpu'),bigVal(pctN(n.usage),'%'))
     +chart([series(f,'usage','var(--chart-a)')])
     +(on('stages')?`<div class="rows">
-      ${n.renderer!=null?row('rendu',pct(n.renderer)):''}
-      ${n.tiler!=null?row('tuilage',pct(n.tiler)):''}
-      ${n.memInUse!=null?row('mémoire GPU',fmtSize(n.memInUse)):''}
+      ${n.renderer!=null?row(t('w.gpu.renderer'),pct(n.renderer)):''}
+      ${n.tiler!=null?row(t('w.gpu.tiler'),pct(n.tiler)):''}
+      ${n.memInUse!=null?row(t('w.gpu.memory'),fmtSize(n.memInUse)):''}
     </div>`:'');
 }
 function renderNetwork(){
-  const f=famGet('network');if(!f)return empty('Réseau');const n=f.now;
+  const f=famGet('network');if(!f)return empty(t('w.network'));const n=f.now;
   // Seules les interfaces qui transmettent réellement. Sans ce filtre, six tunnels VPN (utun*) à
   // 0 o/s noyaient la seule interface active — la liste ne disait plus rien.
   const ifaces=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))]
@@ -207,75 +210,75 @@ function renderNetwork(){
   // Deux débits de même importance : deux lignes de même poids, plutôt qu'un chiffre géant et un
   // second relégué en sous-titre.
   const dual=`<span class="dual"><b>↓ ${fmtRate(n.rxBytesPerSec)}</b><b>↑ ${fmtRate(n.txBytesPerSec)}</b></span>`;
-  return head('Réseau',dual)
+  return head(t('w.network'),dual)
     +chart([series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')],{percent:false})
     +(on('interfaces')?`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')
-      ||'<div class="row"><span class="k">aucun trafic</span></div>'}${hidden>0&&ifaces.length?`<div class="row"><span class="k">+ ${hidden} inactive${hidden>1?'s':''}</span></div>`:''}</div>`:'')
-    +(on('session')&&n.rxSessionBytes!=null?section('Session')
-      +`<div class="rows">${row('reçu',fmtSize(n.rxSessionBytes))}${row('envoyé',fmtSize(n.txSessionBytes))}</div>`:'');
+      ||`<div class="row"><span class="k">${t('w.net.noTraffic')}</span></div>`}${hidden>0&&ifaces.length?`<div class="row"><span class="k">${t('w.net.inactive',{n:hidden})}</span></div>`:''}</div>`:'')
+    +(on('session')&&n.rxSessionBytes!=null?section(t('w.net.session'))
+      +`<div class="rows">${row(t('w.net.received'),fmtSize(n.rxSessionBytes))}${row(t('w.net.sent'),fmtSize(n.txSessionBytes))}</div>`:'');
 }
 function renderTemperature(){
-  const f=famGet('sensors');if(!f)return empty('Capteurs');const n=f.now;
-  const T=[['normal',''],['élevé','warn'],['sérieux','warn'],['bridage','crit']][n.thermalState]||['normal',''];
+  const f=famGet('sensors');if(!f)return empty(t('w.sensors'));const n=f.now;
+  const T=[[t('w.temp.normal'),''],[t('w.temp.high'),'warn'],[t('w.temp.serious'),'warn'],[t('w.temp.throttled'),'crit']][n.thermalState]||[t('w.temp.normal'),''];
   const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
   // Détail par famille. Les noms de capteurs Apple Silicon sont opaques (« PMU tdie3 ») : on ne
   // peut pas honnêtement étiqueter « CPU » ou « GPU », d'où « SoC » / « périphériques ».
   // Libellés courts et valeurs compactes « max / moy. » : la forme longue débordait et cassait
   // la ligne en deux, libellé comme valeur.
   const det=[];
-  if(n.dieMaxC!=null)det.push(row('SoC',`${Math.round(n.dieMaxC)}° max · ${Math.round(n.dieAvgC)}° moy.`));
-  if(n.deviceMaxC!=null)det.push(row('périph.',`${Math.round(n.deviceMaxC)}° max · ${Math.round(n.deviceAvgC)}° moy.`));
+  if(n.dieMaxC!=null)det.push(row(t('w.temp.soc'),t('w.temp.maxAvg',{max:Math.round(n.dieMaxC),avg:Math.round(n.dieAvgC)})));
+  if(n.deviceMaxC!=null)det.push(row(t('w.temp.devices'),t('w.temp.maxAvg',{max:Math.round(n.deviceMaxC),avg:Math.round(n.deviceAvgC)})));
   const batt=famGet('battery')?.now;
-  if(batt?.temperatureC!=null)det.push(row('batterie',Math.round(batt.temperatureC)+' °C'));
-  return head('Capteurs',bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?'point chaud du SoC':''))
+  if(batt?.temperatureC!=null)det.push(row(t('w.battery').toLowerCase(),Math.round(batt.temperatureC)+' °C'));
+  return head(t('w.sensors'),bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?t('w.temp.hotspot'):''))
     +(on('chart')?chart([series(f,'tempC','var(--amber)')],{percent:false}):'')
     +(on('detail')&&det.length?`<div class="rows">${det.join('')}</div>`:'')
     +`<div class="rows"${det.length?' style="margin-top:8px"':''}>
-      <div class="row"><span class="k">état thermique</span><span class="badge ${T[1]}">${T[0]}</span></div>
-      ${on('fans')?(fans.length?fans.map((k,i)=>row(fans.length>1?`ventilateur ${i+1}`:'ventilateur',Math.round(n[k]).toLocaleString('fr-FR')+' tr/min')).join(''):row('ventilateurs','aucun (refroidissement passif)')):''}
+      <div class="row"><span class="k">${t('w.temp.state')}</span><span class="badge ${T[1]}">${T[0]}</span></div>
+      ${on('fans')?(fans.length?fans.map((k,i)=>row(fans.length>1?t('w.temp.fanN',{n:i+1}):t('w.temp.fan'),I.num(Math.round(n[k]),0)+' '+t('unit.rpm'))).join(''):row(t('w.temp.fans'),t('w.temp.noFans'))):''}
     </div>`;
 }
 function renderBattery(){
-  const f=famGet('battery');if(!f)return empty('Batterie');const n=f.now;
-  const state=n.charging?'en charge':n.externalConnected?(n.fullyCharged?'branché · plein':'branché'):'sur batterie';
+  const f=famGet('battery');if(!f)return empty(t('w.battery'));const n=f.now;
+  const state=n.charging?t('w.bat.charging'):n.externalConnected?(n.fullyCharged?t('w.bat.pluggedFull'):t('w.bat.plugged')):t('w.bat.onBattery');
   const cell=(v,l,warn)=>`<div class="stat${warn?' warn':''}"><b>${v}</b><span>${l}</span></div>`;
   const stats=[];
-  if(n.healthPercent!=null)stats.push(cell(Math.round(n.healthPercent)+' %','santé',n.healthPercent<80));
-  if(n.cycleCount!=null)stats.push(cell(n.cycleCount,'cycles'));
-  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${fr(Math.abs(n.powerWatts))} W`,n.powerWatts<0?'décharge':'charge'));
-  if(n.minutesRemaining!=null)stats.push(cell(fmtMin(n.minutesRemaining),n.charging?'avant plein':'autonomie'));
+  if(n.healthPercent!=null)stats.push(cell(I.pct(Math.round(n.healthPercent)),t('w.bat.health'),n.healthPercent<80));
+  if(n.cycleCount!=null)stats.push(cell(n.cycleCount,t('w.bat.cycles')));
+  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${I.numMax(Math.abs(n.powerWatts),1)} W`,n.powerWatts<0?t('w.bat.discharge'):t('w.bat.charge')));
+  if(n.minutesRemaining!=null)stats.push(cell(fmtMin(n.minutesRemaining),n.charging?t('w.bat.untilFull'):t('w.bat.runtime')));
   const rows=[];
-  if(n.temperatureC!=null)rows.push(row('température',Math.round(n.temperatureC)+' °C'));
-  if(n.voltageV!=null)rows.push(row('tension',fr(n.voltageV.toFixed(2))+' V'));
-  if(n.fullCapacity!=null&&n.designCapacity!=null)rows.push(row('capacité',`${n.fullCapacity.toLocaleString('fr-FR')} / ${n.designCapacity.toLocaleString('fr-FR')} mAh`));
-  if(n.adapterWatts!=null&&n.adapterWatts>0)rows.push(row('chargeur',n.adapterWatts+' W'));
-  if(n.conditionOK!=null)rows.push(row('état','<span class="badge'+(n.conditionOK?'':' warn')+'">'+(n.conditionOK?'normal':'à vérifier')+'</span>'));
+  if(n.temperatureC!=null)rows.push(row(t('w.bat.temperature'),Math.round(n.temperatureC)+' °C'));
+  if(n.voltageV!=null)rows.push(row(t('w.bat.voltage'),I.num(n.voltageV,2)+' V'));
+  if(n.fullCapacity!=null&&n.designCapacity!=null)rows.push(row(t('w.bat.capacity'),`${I.num(n.fullCapacity,0)} / ${I.num(n.designCapacity,0)} mAh`));
+  if(n.adapterWatts!=null&&n.adapterWatts>0)rows.push(row(t('w.bat.charger'),n.adapterWatts+' W'));
+  if(n.conditionOK!=null)rows.push(row(t('w.bat.condition'),'<span class="badge'+(n.conditionOK?'':' warn')+'">'+(n.conditionOK?t('w.bat.conditionOK'):t('w.bat.conditionCheck'))+'</span>'));
   // Pas de barre de niveau ici : le grand pourcentage la double déjà, et la courbe en donne
   // l'historique. Trois représentations de la même valeur encombraient le panneau.
-  return head('Batterie',bigVal(n.percent==null?'—':Math.round(n.percent),'%',state))
+  return head(t('w.battery'),bigVal(n.percent==null?'—':Math.round(n.percent),'%',state))
     +(on('chart')?chart([series(f,'percent','var(--green)')]):`<div class="track"><i style="width:${n.percent??0}%"></i></div>`)
     +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
     +(on('details')&&rows.length?`<div class="rows" style="margin-top:8px">${rows.join('')}</div>`:'');
 }
 function renderDisk(){
-  const f=famGet('disk');if(!f)return empty('Disque');const n=f.now;
+  const f=famGet('disk');if(!f)return empty(t('w.disk'));const n=f.now;
   const vols=Object.keys(n).filter(k=>k.startsWith('vol:')).sort();
   const volHTML=vols.map(k=>{const mnt=k.slice(4);const p=Math.round(n[k]);
     const tot=n['volTotal:'+mnt],free=n['volFree:'+mnt];
-    const label=mnt==='/'?'Macintosh HD':mnt.replace('/Volumes/','');
+    const label=mnt==='/'?t('w.disk.systemVolume'):mnt.replace('/Volumes/','');
     // Forme courte « 88 / 926 Go » : en toutes lettres, le pied poussait le nom du volume à
     // l'ellipse (« Macintosh… »). L'unité de l'espace libre n'est omise que si elle est identique
     // à celle du total — sinon « 800 / 1,2 To » ferait lire 800 To au lieu de 800 Mo.
     const [freeNum,freeUnit]=fmtSize(free).split(' '),totalUnit=fmtSize(tot).split(' ')[1];
-    const foot=tot!=null?`${freeUnit===totalUnit?freeNum:fmtSize(free)} / ${fmtSize(tot)}`:`${p} %`;
+    const foot=tot!=null?`${freeUnit===totalUnit?freeNum:fmtSize(free)} / ${fmtSize(tot)}`:I.pct(p);
     return `<div class="vol"><div class="vh"><span class="vn">${esc(label)}</span><span class="vf">${foot}</span></div><div class="track"><i style="width:${p}%;background:${p>=90?'var(--danger)':'var(--chart-a)'}"></i></div></div>`;
   }).join('');
-  return head('Disque',bigVal(pctN(n.usedPercent),'%',n.totalBytes?fmtSize(n.totalBytes)+' au total':''))
+  return head(t('w.disk'),bigVal(pctN(n.usedPercent),'%',n.totalBytes?t('w.total',{v:fmtSize(n.totalBytes)}):''))
     +(on('chart')?chart([series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')],{percent:false})
-      +`<div class="rows">${row('lecture',fmtRate(n.readBytesPerSec))}${row('écriture',fmtRate(n.writeBytesPerSec))}</div>`:'')
-    +(on('volumes')?section('Volumes')+volHTML:'');
+      +`<div class="rows">${row(t('w.disk.read'),fmtRate(n.readBytesPerSec))}${row(t('w.disk.write'),fmtRate(n.writeBytesPerSec))}</div>`:'')
+    +(on('volumes')?section(t('w.disk.volumes'))+volHTML:'');
 }
-function empty(title){return head(title,'')+`<div class="empty">Mesure en cours…</div>`}
+function empty(title){return head(title,'')+`<div class="empty">${t('w.measuring')}</div>`}
 const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};
 // Le panneau se dimensionne sur son contenu : sections activables, nombre d'interfaces réseau ou
 // de volumes, liste de processus… d'un widget à l'autre la hauteur va du simple au triple. Une
@@ -317,6 +320,7 @@ function mergeMetricsDelta(state,payload){
   delete merged.delta;
   return merged;
 }
+StatusI18n.onChange(()=>{pushedHeight=0;if(metrics)render()});
 window.StatusWidget={
   // Changement de widget : la hauteur précédente n'a plus de sens, on force une remesure.
   show(id,data){if(id!==widgetId)pushedHeight=0;widgetId=id;metrics=mergeMetricsDelta(metrics,data)||metrics;render()},

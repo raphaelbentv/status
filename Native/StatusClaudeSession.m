@@ -1,4 +1,5 @@
 #import "StatusClaudeSession.h"
+#import "StatusI18n.h"
 #import "StatusQuota.h"
 
 static NSError *TMSessionError(NSString *message) {
@@ -70,16 +71,16 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
         backing:NSBackingStoreBuffered defer:NO];
     self.loginWindow.releasedWhenClosed = NO;
     self.loginWindow.delegate = self;
-    self.loginWindow.title = [NSString stringWithFormat:@"Connexion Claude · %@", label];
+    self.loginWindow.title = TMTP(@"cs.title", @{@"label": label});
     self.loginWindow.minSize = NSMakeSize(720, 560);
     NSView *content = self.loginWindow.contentView;
     NSView *bar = [[NSView alloc] initWithFrame:NSMakeRect(0, 706, 1000, 54)];
     bar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
-    self.loginMessage = [NSTextField labelWithString:@"Connectez ce compte à Claude, puis cliquez sur Valider la connexion."];
+    self.loginMessage = [NSTextField labelWithString:TMT(@"cs.prompt")];
     self.loginMessage.frame = NSMakeRect(16, 10, 750, 34);
     self.loginMessage.autoresizingMask = NSViewWidthSizable;
     self.loginMessage.maximumNumberOfLines = 2;
-    self.loginButton = [NSButton buttonWithTitle:@"Valider la connexion" target:self action:@selector(validateWebLogin:)];
+    self.loginButton = [NSButton buttonWithTitle:TMT(@"cs.validate") target:self action:@selector(validateWebLogin:)];
     self.loginButton.frame = NSMakeRect(788, 12, 196, 30);
     self.loginButton.autoresizingMask = NSViewMinXMargin;
     [bar addSubview:self.loginMessage]; [bar addSubview:self.loginButton];
@@ -95,10 +96,10 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
 
 - (void)validateWebLogin:(id)sender {
     self.loginButton.enabled = NO;
-    self.loginMessage.stringValue = @"Vérification de la session et de ses quotas…";
+    self.loginMessage.stringValue = TMT(@"cs.checking");
     [self fetchOrganizations:^(NSArray *organizations, NSError *error) {
         if (!self.loginWindow) return;
-        if (error || !organizations.count) { [self showLoginMessage:error.localizedDescription ?: @"Terminez la connexion à Claude."]; return; }
+        if (error || !organizations.count) { [self showLoginMessage:error.localizedDescription ?: TMT(@"cs.finish")]; return; }
         if (self.loginCompletion) self.loginCompletion(organizations);
     }];
 }
@@ -204,11 +205,11 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
 - (void)fetchJSON:(NSString *)path optional:(BOOL)optional completion:(void (^)(id json, NSError *error))completion {
     [self ensureLoaded:^(BOOL ok) {
         if (!ok) {
-            completion(nil, TMSessionError(@"Impossible de charger Claude. Ouvrez la connexion web du compte."));
+            completion(nil, TMSessionError(TMT(@"cs.loadFail")));
             return;
         }
         if (![self.webView.URL.scheme isEqual:@"https"] || ![self.webView.URL.host isEqual:@"claude.ai"]) {
-            completion(nil, TMSessionError(@"Terminez la connexion sur claude.ai avant de valider.")); return;
+            completion(nil, TMSessionError(TMT(@"cs.finishOnSite"))); return;
         }
         NSString *script = @"const ctl = new AbortController(); const timer = setTimeout(()=>ctl.abort(),15000); "
             "try { const r = await fetch(path, {credentials:'include',cache:'no-store',signal:ctl.signal, "
@@ -229,14 +230,14 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
                 }
                 // Une session périmée nous renvoie à la page de connexion, où le fetch part en 401.
                 if (!optional) self.loaded = NO;
-                completion(nil, TMSessionError(@"Session Claude indisponible. Vérifiez votre connexion web et réessayez."));
+                completion(nil, TMSessionError(TMT(@"cs.unavailable")));
                 return;
             }
             NSData *data = [(NSString *)result dataUsingEncoding:NSUTF8StringEncoding];
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
             if (!json) {
                 if (!optional) self.loaded = NO;
-                completion(nil, TMSessionError(@"Réponse claude.ai illisible (challenge Cloudflare ?)."));
+                completion(nil, TMSessionError(TMT(@"cs.unreadable")));
                 return;
             }
             completion(json, nil);
@@ -373,7 +374,7 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
     [self fetchJSON:@"/api/organizations" completion:^(id json, NSError *error) {
         if (error) { completion(nil, error); return; }
         if (![json isKindOfClass:NSArray.class]) {
-            completion(nil, TMSessionError(@"claude.ai n’a pas renvoyé la liste des organisations."));
+            completion(nil, TMSessionError(TMT(@"cs.noOrgList")));
             return;
         }
         NSMutableArray *organizations = [NSMutableArray array];
@@ -385,7 +386,7 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
                                         @"name": [name isKindOfClass:NSString.class] ? name : uuid }];
         }
         if (!organizations.count) {
-            completion(nil, TMSessionError(@"Cette session ne donne accès à aucune organisation Claude."));
+            completion(nil, TMSessionError(TMT(@"cs.noOrg")));
             return;
         }
         completion(organizations, nil);

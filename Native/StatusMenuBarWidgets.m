@@ -1,3 +1,4 @@
+#import "StatusI18n.h"
 #import "StatusMenuBarWidgets.h"
 
 #pragma mark - Catalogue
@@ -8,12 +9,8 @@ NSArray<NSString *> *TMMenuBarWidgetIDs(void) {
 }
 
 NSString *TMMenuBarWidgetLabel(NSString *widgetId) {
-    NSDictionary *labels = @{
-        @"cpu": @"CPU", @"memory": @"Mémoire", @"gpu": @"GPU", @"network": @"Réseau",
-        @"temperature": @"Température", @"battery": @"Batterie", @"disk": @"Disque",
-        @"claudeWeek": @"Claude · semaine", @"codexWeek": @"Codex · semaine",
-    };
-    return labels[widgetId] ?: widgetId;
+    if (![TMMenuBarWidgetIDs() containsObject:widgetId]) return widgetId;
+    return TMT([@"mw." stringByAppendingString:widgetId]);
 }
 
 NSArray<NSString *> *TMArrayByMovingItem(NSArray<NSString *> *list, NSString *item, NSInteger delta) {
