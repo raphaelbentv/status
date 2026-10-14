@@ -10,7 +10,15 @@
 (function (root) {
   const listeners = [];
   const state = { lang: 'fr', locale: 'fr-FR', dict: {}, reverse: {} };
-  const load = p => { if (p && p.dict) { state.lang = p.lang || 'fr'; state.locale = p.locale || 'fr-FR'; state.dict = p.dict; state.reverse = p.reverse || {}; formatters.clear(); } };
+  const load = p => { if (p && p.dict) { state.lang = p.lang || 'fr'; state.locale = p.locale || 'fr-FR'; state.dict = p.dict; state.reverse = p.reverse || {}; formatters.clear(); cssStrings(); } };
+  // Textes posés par les thèmes en CSS (`content:`) : les clés `css.a.b` deviennent des variables
+  // `--i18n-a-b` sur <html>, lues par `content:var(--i18n-a-b,"repli")`.
+  function cssStrings() {
+    const html = root.document && root.document.documentElement;
+    if (!html || !html.style) return;
+    for (const key in state.dict)
+      if (key.startsWith('css.')) html.style.setProperty('--i18n-' + key.slice(4).replace(/\./g, '-'), JSON.stringify(state.dict[key]));
+  }
   const formatters = new Map();
   // Clés demandées mais absentes du dictionnaire : relevées pour les tests plutôt que perdues.
   const missing = new Set();

@@ -95,6 +95,14 @@ const deadPrefixes = [...used.prefix].filter(p => !frKeys.some(k => k.startsWith
 check(!deadPrefixes.length, `${used.prefix.size} préfixes de clés construites ont des entrées`, deadPrefixes.join(', '));
 const nativeWidgetIds = ['cpu', 'memory', 'gpu', 'network', 'temperature', 'battery', 'disk', 'claudeWeek', 'codexWeek'];
 check(nativeWidgetIds.every(id => defined('mw.' + id)), 'un libellé mw.* pour chaque widget de la barre des menus');
+// Les thèmes écrivent aussi du texte en CSS : il passe par var(--i18n-…), alimentée par les clés css.*.
+const themeCSS = ['themes.css', ...readdirSync(join(root, 'Resources', 'themes')).map(f => 'themes/' + f)]
+  .map(f => readFileSync(join(root, 'Resources', f), 'utf8')).join('\n');
+const cssVars = [...themeCSS.matchAll(/var\(--i18n-([\w-]+)/g)].map(m => 'css.' + m[1].replace(/-/g, '.'));
+check(cssVars.length && cssVars.every(defined), `${cssVars.length} textes CSS des thèmes ont leur clé css.*`,
+  cssVars.filter(k => !defined(k)).join(', '));
+const literalCSS = [...themeCSS.matchAll(/content:\s*"([^"]*)"/g)].map(m => m[1]).filter(s => /\p{L}{3,}/u.test(s) && s !== 'Status  /');
+check(!literalCSS.length, 'aucun mot écrit en dur dans un content: CSS', literalCSS.join(' | '));
 
 // ── Bac à sable web ─────────────────────────────────────────────────────────
 function sandboxFor(htmlFile) {

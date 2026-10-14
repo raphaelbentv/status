@@ -69,12 +69,12 @@ html[data-theme="moderne"] .product::before{
   background:radial-gradient(circle at center,#0b0b0c 0 2px,#fff 2px 4px,#0b0b0c 4px);
 }
 html[data-theme="moderne"] .product::after{
-  content:"Ce Mac";font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--muted);
+  content:var(--i18n-thisMac,"Ce Mac");font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--muted);
 }
 
 /* Navigation : icône au trait, pastille grise pour l'onglet actif. */
 html[data-theme="moderne"] .nav::before{
-  content:"Espace de travail";display:block;padding:10px 8px 6px;
+  content:var(--i18n-workspace,"Espace de travail");display:block;padding:10px 8px 6px;
   font-size:11px;font-weight:500;letter-spacing:.01em;color:var(--muted);
 }
 html[data-theme="moderne"] .nav button{

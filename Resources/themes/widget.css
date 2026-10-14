@@ -205,9 +205,9 @@ html[data-theme="widget"] .quota-card[data-level="ok"]::after,
 html[data-theme="widget"] .quota-card[data-level="warn"]::after,
 html[data-theme="widget"] .quota-card[data-level="crit"]::after{
   position:absolute;top:11px;right:12px;padding:3px 10px;border-radius:99px;font-size:11.5px;font-weight:700;line-height:1.35;white-space:nowrap}
-html[data-theme="widget"] .quota-card[data-level="ok"]::after{content:"Confortable";background:rgba(0,0,0,.26);color:#fff}
-html[data-theme="widget"] .quota-card[data-level="warn"]::after{content:"Tendu";background:#ffd479;color:#5c3a00}
-html[data-theme="widget"] .quota-card[data-level="crit"]::after{content:"Critique";background:#ffe1e4;color:#8c1226}
+html[data-theme="widget"] .quota-card[data-level="ok"]::after{content:var(--i18n-level-ok,"Confortable");background:rgba(0,0,0,.26);color:#fff}
+html[data-theme="widget"] .quota-card[data-level="warn"]::after{content:var(--i18n-level-warn,"Tendu");background:#ffd479;color:#5c3a00}
+html[data-theme="widget"] .quota-card[data-level="crit"]::after{content:var(--i18n-level-crit,"Critique");background:#ffe1e4;color:#8c1226}
 html[data-theme="widget"] .provider-block .quota-card[data-level="warn"] .quota-track i{background:#ffd479}
 html[data-theme="widget"] .provider-block .quota-card[data-level="crit"] .quota-track i{background:#ff9aa6}
 html[data-theme="widget"] .quota-empty{padding:13px 14px;border:1px dashed var(--hair-strong);border-radius:16px;line-height:1.5}

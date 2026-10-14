@@ -164,7 +164,7 @@ html[data-theme="bento"] .quota-top strong{font:700 26px/1 var(--disp);letter-sp
 /* Chiffre en grand : le restant est recomposé depuis --pct (consommé) par un compteur CSS.
    Sous @supports seulement ; sinon on garde le texte « 62 % restant » du DOM. */
 @supports (counter-reset:rem calc(100 - 1)){
-  html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top span::after{content:" · restant"}
+  html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top span::after{content:var(--i18n-remaining," · restant")}
   html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top strong{counter-reset:rem calc(100 - var(--pct,0));font-size:0;margin-top:4px}
   html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top strong::before{content:counter(rem);font:700 62px/.88 var(--disp);letter-spacing:-.045em}
   html[data-theme="bento"] .quota-card:is([data-level="ok"],[data-level="warn"],[data-level="crit"]) .quota-top strong::after{content:"%";font:600 22px/1 var(--disp);letter-spacing:-.01em;margin-left:3px}
@@ -173,9 +173,9 @@ html[data-theme="bento"] .quota-card[data-level="warn"] .quota-top strong{color:
 html[data-theme="bento"] .quota-card[data-level="crit"] .quota-top strong{color:var(--crit)}
 /* Pastille d'état, redite textuelle du niveau (pas seulement la couleur). */
 html[data-theme="bento"] .provider-block .quota-card::after{position:absolute;top:12px;right:14px;padding:3px 11px;border-radius:99px;background:var(--chip-bg);color:var(--chip-fg);font:600 12px/1.3 var(--font);white-space:nowrap}
-html[data-theme="bento"] .provider-block .quota-card[data-level="ok"]::after{content:"Confortable"}
-html[data-theme="bento"] .provider-block .quota-card[data-level="warn"]::after{content:"Tendu";background:var(--warn);color:var(--on-warn)}
-html[data-theme="bento"] .provider-block .quota-card[data-level="crit"]::after{content:"Critique";background:var(--crit);color:var(--on-crit)}
+html[data-theme="bento"] .provider-block .quota-card[data-level="ok"]::after{content:var(--i18n-level-ok,"Confortable")}
+html[data-theme="bento"] .provider-block .quota-card[data-level="warn"]::after{content:var(--i18n-level-warn,"Tendu");background:var(--warn);color:var(--on-warn)}
+html[data-theme="bento"] .provider-block .quota-card[data-level="crit"]::after{content:var(--i18n-level-crit,"Critique");background:var(--crit);color:var(--on-crit)}
 html[data-theme="bento"] .quota-track{height:14px;margin:14px 0 10px;border:0;border-radius:99px;background:var(--trk)}
 html[data-theme="bento"] .quota-track i{border-radius:99px;background:var(--provider);box-shadow:none}
 html[data-theme="bento"] .quota-card[data-level="warn"] .quota-track i{background:var(--warn)}
