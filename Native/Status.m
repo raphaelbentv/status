@@ -21,6 +21,7 @@
 #import "StatusDisplays.h"
 #import "StatusMenuBarWidgets.h"
 #import "StatusIconDesigns.h"
+#import "StatusI18n.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 #import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
 #import <IOKit/hidsystem/IOLLEvent.h>  // NX_SYSDEFINED
@@ -264,6 +265,21 @@ static const CGFloat TMTitleBarHeight = 28;
 // n'offre de prise pour déplacer la fenêtre. `-webkit-app-region: drag` ne comble pas ce manque :
 // malgré son préfixe, c'est une extension Chromium que WebKit n'implémente pas. Cette bande
 // transparente, posée par-dessus la webview, rend la prise à AppKit.
+
+// Dictionnaire de la langue effective, injecté avant tout script de la page : t() est utilisable
+// dès le premier rendu. Remplacé à chaque changement de langue (voir applyLanguageChange), pour
+// qu'un rechargement de la page retombe sur la bonne langue.
+static void TMInstallI18nScript(WKWebView *view) {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:TMI18nPayload() options:0 error:nil];
+    NSString *source = [NSString stringWithFormat:@"window.__STATUS_I18N__ = %@;",
+                        [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]];
+    WKUserContentController *controller = view.configuration.userContentController;
+    [controller removeAllUserScripts];
+    [controller addUserScript:[[WKUserScript alloc] initWithSource:source
+                                                     injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                  forMainFrameOnly:YES]];
+}
+
 @interface TMTitleBarDragView : NSView
 @end
 
@@ -565,6 +581,7 @@ static const CGFloat TMTitleBarHeight = 28;
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.webView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+    TMInstallI18nScript(self.webView);
     self.webView.navigationDelegate = self;
     self.webView.underPageBackgroundColor = NSColor.clearColor;
     self.webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -598,6 +615,7 @@ static const CGFloat TMTitleBarHeight = 28;
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.menuWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+    TMInstallI18nScript(self.menuWebView);
     self.menuWebView.navigationDelegate = self;
     self.menuWebView.underPageBackgroundColor = NSColor.clearColor;
     self.menuWebView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -720,6 +738,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     WKWebViewConfiguration *config = [WKWebViewConfiguration new];
     [config.userContentController addScriptMessageHandler:self name:@"native"];
     self.widgetWebView = [[WKWebView alloc] initWithFrame:frame configuration:config];
+    TMInstallI18nScript(self.widgetWebView);
     self.widgetWebView.navigationDelegate = self;
     self.widgetWebView.underPageBackgroundColor = NSColor.clearColor;
     NSURL *url = [NSBundle.mainBundle URLForResource:@"widget" withExtension:@"html"];
@@ -1395,6 +1414,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.pickerWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+    TMInstallI18nScript(self.pickerWebView);
     self.pickerWebView.navigationDelegate = self;
     self.pickerWebView.underPageBackgroundColor = NSColor.clearColor;
     self.pickerPanel.contentView = self.pickerWebView;
@@ -1552,6 +1572,14 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         if ([validThemes containsObject:value]) {
             [NSUserDefaults.standardUserDefaults setObject:value forKey:@"theme"];
             [self pushData];
+        }
+    }
+    if ([action isEqualToString:@"setLanguage"]) {
+        // Entrée non fiable (vient de la webview) : « auto » ou l'une des langues livrées.
+        NSString *value = [body[@"value"] isKindOfClass:NSString.class] ? body[@"value"] : @"";
+        if ([value isEqualToString:@"auto"] || [TMSupportedLanguages() containsObject:value]) {
+            [NSUserDefaults.standardUserDefaults setObject:value forKey:@"language"];
+            [self applyLanguageChange];
         }
     }
     if ([action isEqualToString:@"toggleKeyboardLock"]) {
@@ -1846,7 +1874,8 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
             @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),
             @"notificationsAuthorized": @(self.notificationsAuthorized),
-            @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint"
+            @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
+            @"language": [NSUserDefaults.standardUserDefaults stringForKey:@"language"] ?: @"auto"
         },
         @"tools": [self toolsPayload],
         @"backoffCount": @([self pausedAccountCount]),
@@ -1997,6 +2026,24 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
                                     : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
     };
+}
+
+// Recharge le dictionnaire et le pousse à toutes les surfaces web déjà créées, sans rechargement
+// de page : elles se redessinent via StatusI18n.onChange. Le natif (tooltips, icônes de barre)
+// repasse par pushData.
+- (void)applyLanguageChange {
+    TMI18nReload();
+    NSData *data = [NSJSONSerialization dataWithJSONObject:TMI18nPayload() options:0 error:nil];
+    NSString *script = [NSString stringWithFormat:@"window.StatusI18n && window.StatusI18n.set(%@);",
+                        [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]];
+    for (WKWebView *view in @[self.webView ?: NSNull.null, self.menuWebView ?: NSNull.null,
+                              self.widgetWebView ?: NSNull.null, self.pickerWebView ?: NSNull.null]) {
+        if (![view isKindOfClass:WKWebView.class]) continue;
+        TMInstallI18nScript(view);
+        [view evaluateJavaScript:script completionHandler:nil];
+    }
+    [self pushData];
+    [self pushWidgetMetrics];
 }
 
 - (void)pushTools {
