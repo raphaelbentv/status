@@ -12,7 +12,6 @@
 #import "StatusAwake.h"
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
-#import "StatusWindowManager.h"
 #import "StatusDisplays.h"
 #import "StatusMenuBarWidgets.h"
 #import "StatusIconDesigns.h"
@@ -1803,174 +1802,6 @@ static void TestDisplayManagerLive(void) {
     Check(onMain != nil, @"écran sous la souris trouvé");
 }
 
-#pragma mark - Gestionnaire de fenêtres
-
-static BOOL TMRectClose(CGRect a, CGRect b) {
-    return fabs(a.origin.x - b.origin.x) < 0.51 && fabs(a.origin.y - b.origin.y) < 0.51
-        && fabs(a.size.width - b.size.width) < 0.51 && fabs(a.size.height - b.size.height) < 0.51;
-}
-
-static void CheckRect(CGRect actual, CGRect expected, NSString *what) {
-    gChecks++;
-    if (TMRectClose(actual, expected)) {
-        printf("  \033[32m✓\033[0m %s\n", what.UTF8String);
-    } else {
-        gFailures++;
-        printf("  \033[31m✗ %s\033[0m\n     attendu: %s\n     obtenu : %s\n", what.UTF8String,
-               NSStringFromRect(expected).UTF8String, NSStringFromRect(actual).UTF8String);
-    }
-}
-
-static void TestWindowLayoutsNoGaps(void) {
-    Section(@"TMWindowFrameForLayout — dispositions sans marge");
-    CGRect zone = CGRectMake(0, 0, 1200, 800);
-    TMWindowGaps none = { 0, 0 };
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutLeftHalf, none), CGRectMake(0, 0, 600, 800), @"moitié gauche");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutRightHalf, none), CGRectMake(600, 0, 600, 800), @"moitié droite");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutLeftTwoThirds, none), CGRectMake(0, 0, 800, 800), @"2/3 gauche");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutRightTwoThirds, none), CGRectMake(400, 0, 800, 800), @"2/3 droite");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutLeftThird, none), CGRectMake(0, 0, 400, 800), @"tiers gauche");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutCenterThird, none), CGRectMake(400, 0, 400, 800), @"tiers centre");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutRightThird, none), CGRectMake(800, 0, 400, 800), @"tiers droite");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutLeftThreeQuarters, none), CGRectMake(0, 0, 900, 800), @"3/4 gauche");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutRightThreeQuarters, none), CGRectMake(300, 0, 900, 800), @"3/4 droite");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutMaximize, none), zone, @"plein écran occupe toute la zone");
-}
-
-static void TestWindowLayoutsOrigin(void) {
-    Section(@"TMWindowFrameForLayout — la zone n'est pas toujours à l'origine");
-    // Écran secondaire à gauche du principal, et barre des menus retranchée : origine non nulle,
-    // y compris négative. Les cadres doivent suivre la zone, pas l'écran.
-    CGRect zone = CGRectMake(-1800, 25, 1800, 1100);
-    TMWindowGaps none = { 0, 0 };
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutLeftHalf, none), CGRectMake(-1800, 25, 900, 1100), @"origine négative respectée");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutRightHalf, none), CGRectMake(-900, 25, 900, 1100), @"moitié droite décalée de l'origine");
-    CheckRect(TMWindowFrameForLayout(zone, TMLayoutMaximize, none), zone, @"plein écran = la zone exacte");
-}
-
-static void TestWindowLayoutsAdjacency(void) {
-    Section(@"TMWindowFrameForLayout — pas de bande résiduelle entre voisines");
-    // Le piège classique : 1/3 + 2/3 ne fait pas 100 % après arrondis, et il reste une bande d'un
-    // point. On vérifie que les paires complémentaires se touchent exactement.
-    CGRect zone = CGRectMake(0, 0, 1001, 799);  // largeur volontairement indivisible par 3
-    TMWindowGaps none = { 0, 0 };
-    CGRect tiers = TMWindowFrameForLayout(zone, TMLayoutLeftThird, none);
-    CGRect deuxTiers = TMWindowFrameForLayout(zone, TMLayoutRightTwoThirds, none);
-    CheckEqual(@(CGRectGetMaxX(tiers)), @(CGRectGetMinX(deuxTiers)), @"1/3 et 2/3 se touchent exactement");
-    CheckEqual(@(CGRectGetMaxX(deuxTiers)), @(CGRectGetMaxX(zone)), @"2/3 droite atteint le bord droit");
-
-    CGRect gauche = TMWindowFrameForLayout(zone, TMLayoutLeftHalf, none);
-    CGRect droite = TMWindowFrameForLayout(zone, TMLayoutRightHalf, none);
-    CheckEqual(@(CGRectGetMaxX(gauche)), @(CGRectGetMinX(droite)), @"les deux moitiés se touchent malgré la largeur impaire");
-    CheckEqual(@(CGRectGetMaxX(droite)), @(CGRectGetMaxX(zone)), @"la moitié droite atteint le bord");
-
-    CGRect quart = TMWindowFrameForLayout(zone, TMLayoutLeftThreeQuarters, none);
-    CheckEqual(@(CGRectGetMinX(quart)), @(CGRectGetMinX(zone)), @"3/4 gauche part du bord gauche");
-}
-
-static void TestWindowLayoutsGaps(void) {
-    Section(@"TMWindowFrameForLayout — marges");
-    CGRect zone = CGRectMake(0, 0, 1200, 800);
-    TMWindowGaps gaps = { 20, 10 };  // 20 entre fenêtres, 10 aux bords
-
-    CGRect gauche = TMWindowFrameForLayout(zone, TMLayoutLeftHalf, gaps);
-    CGRect droite = TMWindowFrameForLayout(zone, TMLayoutRightHalf, gaps);
-    CheckEqual(@(CGRectGetMinX(gauche)), @10.0, @"marge de bord appliquée à gauche");
-    CheckEqual(@(CGRectGetMinY(gauche)), @10.0, @"marge de bord appliquée en bas");
-    CheckEqual(@(CGRectGetMaxX(droite)), @1190.0, @"marge de bord appliquée à droite");
-    CheckEqual(@(CGRectGetMinX(droite) - CGRectGetMaxX(gauche)), @20.0,
-               @"exactement une marge entre les deux, pas deux demi-marges cumulées en double");
-
-    // Le bord d'écran ne reçoit jamais la marge inter-fenêtres en plus de la sienne.
-    CGRect plein = TMWindowFrameForLayout(zone, TMLayoutMaximize, gaps);
-    CheckRect(plein, CGRectMake(10, 10, 1180, 780), @"plein écran : marge de bord seule, sur les quatre côtés");
-
-    TMWindowGaps sansBord = { 20, 0 };
-    CGRect collee = TMWindowFrameForLayout(zone, TMLayoutLeftHalf, sansBord);
-    CheckEqual(@(CGRectGetMinX(collee)), @0.0, @"marge de bord nulle : la fenêtre touche le bord");
-    CheckEqual(@(CGRectGetMaxX(collee)), @590.0, @"la demi-marge intérieure s'applique quand même");
-}
-
-static void TestWindowLayoutCenter(void) {
-    Section(@"TMWindowFrameForLayout — centrer");
-    CGRect zone = CGRectMake(100, 50, 1000, 600);
-    CGRect centre = TMWindowFrameForLayout(zone, TMLayoutCenter, (TMWindowGaps){0, 0});
-    CheckEqual(@(CGRectGetMidX(centre)), @(CGRectGetMidX(zone)), @"centré horizontalement");
-    CheckEqual(@(CGRectGetMidY(centre)), @(CGRectGetMidY(zone)), @"centré verticalement");
-    Check(CGRectGetWidth(centre) < CGRectGetWidth(zone), @"plus étroit que la zone");
-    Check(CGRectContainsRect(zone, centre), @"reste entièrement dans la zone");
-}
-
-static void TestWindowLayoutIdentifiers(void) {
-    Section(@"TMWindowLayoutFromIdentifier — entrée venue de la webview");
-    TMWindowLayout layout;
-    Check(TMWindowLayoutFromIdentifier(@"left-half", &layout) && layout == TMLayoutLeftHalf, @"left-half");
-    Check(TMWindowLayoutFromIdentifier(@"right-two-thirds", &layout) && layout == TMLayoutRightTwoThirds, @"right-two-thirds");
-    Check(TMWindowLayoutFromIdentifier(@"center", &layout) && layout == TMLayoutCenter, @"center");
-    Check(!TMWindowLayoutFromIdentifier(@"left-halfff", &layout), @"identifiant inconnu : refusé, pas de déplacement au hasard");
-    Check(!TMWindowLayoutFromIdentifier(@"", &layout), @"chaîne vide refusée");
-    Check(!TMWindowLayoutFromIdentifier(nil, &layout), @"nil refusé");
-}
-
-static void TestWindowMoveToScreen(void) {
-    Section(@"TMWindowFrameMovedToScreen — proportions conservées");
-    CGRect ecranA = CGRectMake(0, 0, 1000, 800);
-    CGRect ecranB = CGRectMake(1000, 0, 2000, 1200);  // plus grand, à droite
-
-    CGRect moitieGauche = CGRectMake(0, 0, 500, 800);
-    CGRect deplacee = TMWindowFrameMovedToScreen(moitieGauche, ecranA, ecranB);
-    CheckRect(deplacee, CGRectMake(1000, 0, 1000, 1200), @"la moitié gauche reste la moitié gauche");
-
-    CGRect quart = CGRectMake(500, 400, 500, 400);
-    CheckRect(TMWindowFrameMovedToScreen(quart, ecranA, ecranB), CGRectMake(2000, 600, 1000, 600),
-              @"un quart haut-droite reste un quart haut-droite");
-
-    // Une fenêtre plus grande que l'écran d'arrivée doit y tenir, pas déborder.
-    CGRect ecranPetit = CGRectMake(0, 0, 400, 300);
-    CGRect bornee = TMWindowFrameMovedToScreen(CGRectMake(0, 0, 1000, 800), ecranA, ecranPetit);
-    Check(CGRectContainsRect(ecranPetit, bornee), @"bornée à l'écran d'arrivée, jamais hors champ");
-}
-
-static void TestDuoLayouts(void) {
-    Section(@"TMDuoLayoutsForSplit — les deux moitiés d'un duo");
-    CGRect zone = CGRectMake(0, 0, 1001, 799);  // largeur indivisible : le pire cas d'arrondi
-    TMWindowGaps none = { 0, 0 };
-    struct { TMDuoSplit split; NSString *nom; double partActive; } cas[] = {
-        { TMDuoHalf,            @"50/50",  0.5      },
-        { TMDuoActiveTwoThirds, @"2/3",    2.0 / 3  },
-        { TMDuoActiveThird,     @"1/3",    1.0 / 3  },
-    };
-    for (int i = 0; i < 3; i++) {
-        TMWindowLayout active, partner;
-        TMDuoLayoutsForSplit(cas[i].split, &active, &partner);
-        CGRect a = TMWindowFrameForLayout(zone, active, none);
-        CGRect b = TMWindowFrameForLayout(zone, partner, none);
-
-        CheckEqual(@(CGRectGetMinX(a)), @(CGRectGetMinX(zone)),
-                   ([NSString stringWithFormat:@"%@ : l'active part du bord gauche", cas[i].nom]));
-        CheckEqual(@(CGRectGetMaxX(a)), @(CGRectGetMinX(b)),
-                   ([NSString stringWithFormat:@"%@ : les deux se touchent exactement", cas[i].nom]));
-        CheckEqual(@(CGRectGetMaxX(b)), @(CGRectGetMaxX(zone)),
-                   ([NSString stringWithFormat:@"%@ : la partenaire atteint le bord droit", cas[i].nom]));
-        Check(fabs(CGRectGetWidth(a) / CGRectGetWidth(zone) - cas[i].partActive) < 0.01,
-              ([NSString stringWithFormat:@"%@ : l'active occupe la bonne part", cas[i].nom]));
-    }
-
-    TMWindowLayout active, partner;
-    TMDuoLayoutsForSplit(TMDuoActiveTwoThirds, &active, &partner);
-    Check(active != partner, @"les deux dispositions d'un duo sont distinctes");
-}
-
-static void TestDuoIdentifiers(void) {
-    Section(@"TMDuoSplitFromIdentifier — entrée venue de la webview");
-    TMDuoSplit split;
-    Check(TMDuoSplitFromIdentifier(@"duo-half", &split) && split == TMDuoHalf, @"duo-half");
-    Check(TMDuoSplitFromIdentifier(@"duo-two-thirds", &split) && split == TMDuoActiveTwoThirds, @"duo-two-thirds");
-    Check(TMDuoSplitFromIdentifier(@"duo-third", &split) && split == TMDuoActiveThird, @"duo-third");
-    Check(!TMDuoSplitFromIdentifier(@"duo-quart", &split), @"partage inconnu refusé");
-    Check(!TMDuoSplitFromIdentifier(nil, &split), @"nil refusé");
-}
-
 static void TestStaleAlert(void) {
     Section(@"TMStaleAlertShouldFire — une alerte par épisode de péremption");
     BOOL was = NO;
@@ -2197,15 +2028,6 @@ int main(void) {
         TestRatePerSecond();
         TestCPUPercent();
         TestSystemMonitorSnapshot();
-        TestWindowLayoutsNoGaps();
-        TestWindowLayoutsOrigin();
-        TestWindowLayoutsAdjacency();
-        TestWindowLayoutsGaps();
-        TestWindowLayoutCenter();
-        TestWindowLayoutIdentifiers();
-        TestWindowMoveToScreen();
-        TestDuoLayouts();
-        TestDuoIdentifiers();
         TestCostSince();
         TestModelBreakdown();
         TestFxRefresh();

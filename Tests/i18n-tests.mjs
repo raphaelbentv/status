@@ -179,7 +179,7 @@ section('Rendu complet de chaque surface : aucune clé orpheline, aucune valeur 
     displays: [{ id: 'd1', name: 'Écran interne', kind: 'builtin', available: true, brightness: 60 }, { id: 'd2', name: 'DELL', kind: 'external', available: false }],
     metricsLog: Array.from({ length: 40 }, (_, i) => ({ t: now - (40 - i) * 60, cpu: 10 + i, temp: 50 + i / 4, ram: 40, gpu: 5, batt: 80 })),
     tools: { awake: { active: false }, keyboardLock: { state: 'unlocked' }, lidMode: { authorized: true, fanBoost: fans, message: 'Désactivé.' } },
-    prefs: { theme: 'blueprint', language: 'auto', menuBarMetric: 'claude:weekly', windowManager: true, accessibilityTrusted: false, brightnessKeys: true, globalShortcut: true,
+    prefs: { theme: 'blueprint', language: 'auto', menuBarMetric: 'claude:weekly', accessibilityTrusted: false, brightnessKeys: true, globalShortcut: true,
       menuBarWidgets: ['cpu', 'battery', 'claudeWeek'], notificationsAuthorized: false, providerIconStyles: { openai: 'tube', claude: 'grid' }, alerts: {}, quotaRefreshIntervalSeconds: 120, launchAtLogin: true },
   };
   const metrics = { families: [

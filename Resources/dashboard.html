@@ -390,17 +390,6 @@ const accountById=(data,id)=>(data?.accounts||[]).find(a=>a.accountId===id);
 const historyKey=(account,w)=>`${account.provider}:${account.accountId}:${w.windowId||w.label}`;
 // Gardez ces couleurs synchronisées avec Resources/themes.css : le JS ne peut pas lire les
 // jetons d'un thème non actif, donc l'aperçu de chaque pastille est dupliqué ici à la main.
-// Doit rester synchronisée avec windowActionForEvent: dans Status.m — c'est la seule source
-// de vérité des raccourcis, et l'affichage ne doit pas mentir sur ce qui est réellement câblé.
-const WINDOW_SHORTCUTS=[
-  ['⌃⌥⇧←','halfLeft'],['⌃⌥⇧→','halfRight'],
-  ['⌃⌥⇧U','twoThirdsLeft'],['⌃⌥⇧I','twoThirdsRight'],
-  ['⌃⌥⇧J','thirdLeft'],['⌃⌥⇧K','thirdCenter'],['⌃⌥⇧L','thirdRight'],
-  ['⌃⌥⇧Y','threeQuartersLeft'],['⌃⌥⇧O','threeQuartersRight'],
-  ['⌃⌥⇧↑','fullscreen'],['⌃⌥⇧↓','center'],
-  ['⌃⌥⌘→','nextScreen'],['⌃⌥⌘←','prevScreen'],
-  ['⌃⌥⌘U','duoHalf'],['⌃⌥⌘I','duoTwoThirds'],['⌃⌥⌘O','duoThird'],
-];
 const THEMES=[
   {id:'blueprint',label:'Blueprint',blue:'#67E8F9',purple:'#A78BFA'},
   {id:'phosphore',label:'Phosphore',blue:'#59FFB0',purple:'#2E8F5E'},
@@ -839,13 +828,6 @@ function settingsAll(data){const p=data.prefs||{},
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>${t('set.theme.title')}</strong><small>${t('set.theme.desc')}</small></div><div class="theme-swatch-grid">${themeSwatches}</div></section>
   <section class="setting" data-group="appearance"><div class="setting-copy"><strong>${t('set.language.title')}</strong><small>${t('set.language.desc')}</small></div><div class="segmented" style="flex-wrap:wrap">${[['auto',t('set.language.auto')],['fr','Français'],['en','English'],['it','Italiano'],['es','Español']].map(([v,l])=>`<button class="seg ${(p.language||'auto')===v?'on':''}" onclick="send('setLanguage',{value:'${v}'})">${l}</button>`).join('')}</div></section>
   <section class="setting" data-group="system"><div class="setting-copy"><strong>${t('set.login.title')}</strong><small>${t('set.login.desc')}</small></div><button class="button ${p.launchAtLogin?'on':''}" onclick="send('toggleLaunchAtLogin')">${onOff(p.launchAtLogin)}</button></section>
-  <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.wm.title')}</strong><small>${t('set.wm.desc')}${p.windowManager&&!p.accessibilityTrusted?` <strong style="color:var(--amber)">${t('set.wm.missing')}</strong>`:''}</small></div><button class="button ${p.windowManager?'on':''}" onclick="send('toggleWindowManager')">${onOff(p.windowManager)}</button></section>
-  ${p.windowManager?`
-  <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.gap.title')}</strong><small>${t('set.gap.desc')}</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapBetween||0)===v?'on':''}" onclick="send('setWindowGap',{which:'between',value:${v}})">${v}</button>`).join('')}</div></section>
-  <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.edge.title')}</strong><small>${t('set.edge.desc')}</small></div><div class="segmented">${[0,4,8,12].map(v=>`<button class="seg ${(p.windowGapEdge||0)===v?'on':''}" onclick="send('setWindowGap',{which:'edge',value:${v}})">${v}</button>`).join('')}</div></section>
-  <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.reserved.title')}</strong><small>${t('set.reserved.desc')}</small></div><button class="button ${p.windowReservedAreas?'on':''}" onclick="send('toggleWindowReservedAreas')">${onOff(p.windowReservedAreas)}</button></section>
-  <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.shortcuts.title')}</strong><small>${t('set.shortcuts.desc')}</small></div><div class="shortcut-table">${WINDOW_SHORTCUTS.map(([k,l])=>`<div class="shortcut-row"><kbd>${k}</kbd><span>${t('ws.'+l)}</span></div>`).join('')}</div></section>
-  `:''}
   <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.brightness.title')}</strong><small>${t('set.brightness.desc')}${p.brightnessKeys&&!p.accessibilityTrusted?` <strong style="color:var(--amber)">${t('set.brightness.missing')}</strong>`:''}</small></div><button class="button ${p.brightnessKeys?'on':''}" onclick="send('toggleBrightnessKeys')">${onOff(p.brightnessKeys)}</button></section>
   <section class="setting" data-group="shortcuts"><div class="setting-copy"><strong>${t('set.global.title')}</strong><small>${t('set.global.desc')}${p.globalShortcut&&!p.accessibilityTrusted?` <strong style="color:var(--amber)">${t('set.global.missing')}</strong>`:''}</small></div><button class="button ${p.globalShortcut?'on':''}" onclick="send('toggleGlobalShortcut')">${onOff(p.globalShortcut)}</button></section>
   <section class="setting" data-group="system"><div class="setting-copy"><strong>${t('set.bgmon.title')}</strong><small>${t('set.bgmon.desc')}</small></div><button class="button ${p.monitorInBackground?'on':''}" onclick="send('toggleMonitorInBackground')">${onOff(p.monitorInBackground)}</button></section>

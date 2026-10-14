@@ -1,4 +1,4 @@
-// Traduction partagée par les quatre surfaces web (dashboard, menubar, widget, picker).
+// Traduction partagée par les trois surfaces web (dashboard, menubar, widget).
 //
 // Le natif injecte `window.__STATUS_I18N__ = {lang, locale, dict, reverse}` avant le chargement
 // de la page (WKUserScript), à partir de Resources/i18n/<langue>.json — la même source que le

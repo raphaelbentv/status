@@ -15,7 +15,6 @@
 #import "StatusAccounts.h"
 #import "StatusClaudeSession.h"
 #import "StatusClaudeBridge.h"
-#import "StatusWindowManager.h"
 #import "StatusCost.h"
 #import "StatusFx.h"
 #import "StatusDisplays.h"
@@ -330,7 +329,6 @@ static void TMInstallI18nScript(WKWebView *view) {
 @property BOOL costScanning;
 @property NSTimeInterval costScanCompletedAt;
 @property id globalShortcutMonitor, localShortcutMonitor;
-@property TMWindowManager *windowManager;
 @property TMDisplayManager *displayManager;
 @property id brightnessGlobalMonitor, brightnessLocalMonitor;
 @property CFMachPortRef brightnessTap;          // chemin privilégié : consomme la touche
@@ -351,13 +349,6 @@ static void TMInstallI18nScript(WKWebView *view) {
 @property BOOL widgetWebReady;
 @property (copy) NSString *currentWidgetId;
 @property NSMutableDictionary<NSString *, NSNumber *> *widgetPanelHeights;  // widgetId → hauteur mesurée
-@property NSPanel *pickerPanel;
-@property WKWebView *pickerWebView;
-@property NSArray<TMWindowCandidate *> *pickerCandidates;
-@property TMDuoSplit pickerSplit;
-@property id pickerDismissObserver;
-@property pid_t duoOriginPid;
-@property id windowGlobalMonitor, windowLocalMonitor;
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
 // Un serveur applicatif Codex par compte OpenAI, chacun sur son propre CODEX_HOME.
@@ -384,15 +375,6 @@ static void TMInstallI18nScript(WKWebView *view) {
 @property TMAwake *awake;
 @property TMLidClient *lidMode;
 @property NSTimer *lidTimer;
-@end
-
-// Sans bordure, une fenêtre refuse d'être clé — canBecomeKeyWindow vaut NO par défaut. Le
-// sélecteur vit du clavier : il doit donc le redéclarer explicitement.
-@interface TMPickerPanel : NSPanel
-@end
-@implementation TMPickerPanel
-- (BOOL)canBecomeKeyWindow { return YES; }
-- (BOOL)canBecomeMainWindow { return NO; }  // il ne remplace pas la fenêtre principale de l'app
 @end
 
 @implementation TMAppDelegate
@@ -468,7 +450,6 @@ static void TMInstallI18nScript(WKWebView *view) {
     __weak typeof(self) weakLockSelf = self;
     self.keyboardLock.stateChanged = ^(TMLockState state) { [weakLockSelf pushData]; };
     [self installGlobalShortcut];
-    [self installWindowShortcuts];
     [self installBrightnessKeyMonitor];
     [self observeDisplayChanges];
     [self requestNotificationAuthorization];
@@ -495,7 +476,6 @@ static void TMInstallI18nScript(WKWebView *view) {
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.keyboardLock forceUnlock];
     [self removeGlobalShortcut];
-    [self removeWindowShortcuts];  // même logique : le tap mourrait aussi, mais soyons explicites
     [self removeBrightnessKeyMonitor];
     [self.metricsTimer invalidate];
     // Dernier vidage synchrone : sans lui, jusqu'à 5 min d'historique disparaîtraient à la fermeture.
@@ -1298,205 +1278,6 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
     }
 }
 
-#pragma mark - Gestionnaire de fenêtres
-
-// Table des raccourcis : modificateurs exacts + touche, vers une action. Les modificateurs sont
-// comparés à l'identique et non par masquage — ⌃⌥← et ⌃⌥⇧← doivent rester distincts.
-static const NSEventModifierFlags TMModCtrlAltShift = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift;
-static const NSEventModifierFlags TMModCtrlAltCmd = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand;
-
-// Codes de touches virtuels : les flèches et Entrée n'ont pas de caractère exploitable dans
-// charactersIgnoringModifiers une fois les modificateurs appliqués.
-enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMKeyUp = 126,
-       TMKeyY = 16, TMKeyO = 31, TMKeyU = 32, TMKeyI = 34, TMKeyL = 37, TMKeyJ = 38, TMKeyK = 40 };
-
-- (BOOL)windowManagerEnabled {
-    return [NSUserDefaults.standardUserDefaults boolForKey:@"windowManagerEnabled"];
-}
-
-// Retourne l'identifiant de disposition pour un événement, ou nil si aucun raccourci ne
-// correspond. Séparé de l'exécution pour rester lisible et pour que les deux moniteurs
-// (global et local) partagent exactement la même table.
-- (NSString *)windowActionForEvent:(NSEvent *)event {
-    // Masquer sur les seuls modificateurs d'intention. Les touches fléchées activent aussi
-    // Function et NumericPad — vérifié : flags=0xae0000 sur ⌃⌥⇧→ — et une comparaison stricte
-    // avec DeviceIndependentFlagsMask ne correspondait donc jamais. CapsLock est écarté pour la
-    // même raison.
-    const NSEventModifierFlags intent = NSEventModifierFlagControl | NSEventModifierFlagOption
-                                      | NSEventModifierFlagShift | NSEventModifierFlagCommand;
-    NSEventModifierFlags flags = event.modifierFlags & intent;
-    unsigned short key = event.keyCode;
-
-    // Base ⌃⌥⇧ et non ⌃⌥ : macOS 15+ s'est approprié ⌃⌥ + flèches pour son propre pavage.
-    // Vérifié empiriquement, Status éteint — ⌃⌥← déplaçait la fenêtre sans nous. Toute la série
-    // ⌃⌥⇧ a été testée libre, de même que ⌃⌥⌘ réservé aux changements d'écran.
-    if (flags == TMModCtrlAltShift) {
-        if (key == TMKeyLeft)   return @"left-half";
-        if (key == TMKeyRight)  return @"right-half";
-        if (key == TMKeyUp)     return @"maximize";
-        if (key == TMKeyDown)   return @"center";
-        if (key == TMKeyU)      return @"left-two-thirds";
-        if (key == TMKeyI)      return @"right-two-thirds";
-        if (key == TMKeyJ)      return @"left-third";
-        if (key == TMKeyK)      return @"center-third";
-        if (key == TMKeyL)      return @"right-third";
-        if (key == TMKeyY)      return @"left-three-quarters";
-        if (key == TMKeyO)      return @"right-three-quarters";
-    } else if (flags == TMModCtrlAltCmd) {
-        if (key == TMKeyRight) return @"screen-next";
-        if (key == TMKeyLeft)  return @"screen-prev";
-        if (key == TMKeyU)     return @"duo-half";
-        if (key == TMKeyI)     return @"duo-two-thirds";
-        if (key == TMKeyO)     return @"duo-third";
-    }
-    return nil;
-}
-
-- (void)performWindowAction:(NSString *)action {
-    TMDuoSplit split;
-    if (TMDuoSplitFromIdentifier(action, &split)) {
-        // Mémoriser d'où l'on vient : ouvrir le panneau donne le focus à Status, et « la fenêtre
-        // active » ne doit pas devenir la nôtre.
-        // Même garde-fou que pour le placement simple : si c'est Status qui a le focus, il n'y a
-        // pas de « fenêtre active » à apparier — mieux vaut ne rien faire que de se paver soi-même.
-        pid_t origin = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
-        if (origin == NSRunningApplication.currentApplication.processIdentifier) return;
-        self.duoOriginPid = origin;
-        [self openPickerForSplit:split];
-        return;
-    }
-    if ([action isEqualToString:@"screen-next"]) { [self.windowManager moveToAdjacentScreen:YES]; return; }
-    if ([action isEqualToString:@"screen-prev"]) { [self.windowManager moveToAdjacentScreen:NO]; return; }
-    TMWindowLayout layout;
-    if (TMWindowLayoutFromIdentifier(action, &layout)) [self.windowManager applyLayout:layout];
-}
-
-// Même mécanique que le raccourci du popover, et pour les mêmes raisons : le moniteur global ne
-// reçoit rien quand Status est l'app active, le local ne reçoit que ces cas-là.
-- (void)installWindowShortcuts {
-    [self removeWindowShortcuts];
-    if (!self.windowManager) self.windowManager = [TMWindowManager new];
-    if (![self windowManagerEnabled]) return;
-
-    __weak typeof(self) weakSelf = self;
-    self.windowGlobalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskKeyDown
-                                                                      handler:^(NSEvent *event) {
-        NSString *action = [weakSelf windowActionForEvent:event];
-        if (action) dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf performWindowAction:action]; });
-    }];
-    self.windowLocalMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
-                                                                    handler:^NSEvent *(NSEvent *event) {
-        NSString *action = [weakSelf windowActionForEvent:event];
-        if (!action) return event;
-        [weakSelf performWindowAction:action];
-        return nil;  // consommé : ne pas le laisser filer vers la webview
-    }];
-}
-
-- (void)removeWindowShortcuts {
-    if (self.windowGlobalMonitor) { [NSEvent removeMonitor:self.windowGlobalMonitor]; self.windowGlobalMonitor = nil; }
-    if (self.windowLocalMonitor) { [NSEvent removeMonitor:self.windowLocalMonitor]; self.windowLocalMonitor = nil; }
-}
-
-#pragma mark - Sélecteur de duo
-
-// Panneau flottant portant une WKWebView : le sélecteur hérite ainsi de themes.css et suit le
-// thème choisi sans une ligne de CSS dupliquée.
-- (void)buildPickerIfNeeded {
-    if (self.pickerPanel) return;
-    NSRect frame = NSMakeRect(0, 0, 520, 400);
-    // Pas de NonactivatingPanel : ce style empêche justement la prise de focus clavier, et le
-    // sélecteur ne vit que du clavier. Vérifié — avec lui, isKeyWindow restait à 0.
-    self.pickerPanel = [[TMPickerPanel alloc] initWithContentRect:frame
-                                                        styleMask:NSWindowStyleMaskBorderless
-                                                          backing:NSBackingStoreBuffered defer:NO];
-    self.pickerPanel.releasedWhenClosed = NO;  // même piège que la fenêtre principale
-    self.pickerPanel.level = NSFloatingWindowLevel;
-    self.pickerPanel.opaque = NO;
-    self.pickerPanel.backgroundColor = NSColor.clearColor;
-    self.pickerPanel.hidesOnDeactivate = NO;
-
-    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
-    [configuration.userContentController addScriptMessageHandler:self name:@"native"];
-    self.pickerWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
-    TMInstallI18nScript(self.pickerWebView);
-    self.pickerWebView.navigationDelegate = self;
-    self.pickerWebView.underPageBackgroundColor = NSColor.clearColor;
-    self.pickerPanel.contentView = self.pickerWebView;
-    NSURL *url = [NSBundle.mainBundle URLForResource:@"picker" withExtension:@"html"];
-    [self.pickerWebView loadFileURL:url allowingReadAccessToURL:url.URLByDeletingLastPathComponent];
-}
-
-- (void)openPickerForSplit:(TMDuoSplit)split {
-    NSArray<TMWindowCandidate *> *candidates = [self.windowManager candidatesForDuo];
-    if (!candidates.count) return;  // rien à choisir : ne pas ouvrir un panneau vide
-
-    [self buildPickerIfNeeded];
-    self.pickerCandidates = candidates;
-    self.pickerSplit = split;
-
-    NSMutableArray *payload = [NSMutableArray array];
-    for (TMWindowCandidate *candidate in candidates) {
-        [payload addObject:@{ @"appName": candidate.appName ?: @"", @"title": candidate.title ?: @"" }];
-    }
-    NSString *splitId = split == TMDuoActiveTwoThirds ? @"duo-two-thirds"
-                      : split == TMDuoActiveThird ? @"duo-third" : @"duo-half";
-    NSDictionary *data = @{ @"windows": payload, @"split": splitId,
-                            @"activeApp": NSWorkspace.sharedWorkspace.frontmostApplication.localizedName ?: @"" };
-    NSData *json = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
-    NSString *script = [NSString stringWithFormat:@"window.StatusPicker && window.StatusPicker.open(%@);",
-                        [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]];
-
-    // Le thème suit celui du tableau de bord.
-    NSString *theme = [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint";
-    [self.pickerWebView evaluateJavaScript:
-        [NSString stringWithFormat:@"document.documentElement.setAttribute('data-theme','%@');", theme]
-                         completionHandler:nil];
-    [self.pickerWebView evaluateJavaScript:script completionHandler:nil];
-
-    NSScreen *screen = NSScreen.mainScreen;
-    NSRect visible = screen.visibleFrame;
-    [self.pickerPanel setFrameOrigin:NSMakePoint(NSMidX(visible) - 260, NSMidY(visible) - 200)];
-    // Activer l'app AVANT de demander la fenêtre clé : tant que l'application n'est pas active,
-    // makeKeyAndOrderFront: ordonne devant sans jamais donner le focus clavier.
-    [NSApp activateIgnoringOtherApps:YES];
-    [self.pickerPanel makeKeyAndOrderFront:nil];
-    [self.pickerPanel makeFirstResponder:self.pickerWebView];
-
-    // Le panneau ne survit pas à un changement d'application — mais on écoute la désactivation
-    // de l'app, pas la perte de fenêtre clé : cette dernière se produit pendant la séquence
-    // d'activation elle-même et refermait le panneau 0,4 s après l'avoir ouvert.
-    __weak typeof(self) weakSelf = self;
-    if (!self.pickerDismissObserver) {
-        self.pickerDismissObserver = [NSNotificationCenter.defaultCenter
-            addObserverForName:NSApplicationDidResignActiveNotification object:nil queue:nil
-                    usingBlock:^(NSNotification *note) { [weakSelf closePicker]; }];
-    }
-}
-
-- (void)closePicker {
-    [self.pickerPanel orderOut:nil];
-    self.pickerCandidates = nil;
-}
-
-// La fenêtre active est celle d'avant l'ouverture du panneau : il faut donc rendre le focus à
-// l'application précédente avant de placer quoi que ce soit, sinon « l'active » serait Status.
-- (void)completeDuoWithIndex:(NSInteger)index {
-    if (index < 0 || index >= (NSInteger)self.pickerCandidates.count) { [self closePicker]; return; }
-    TMWindowCandidate *partner = self.pickerCandidates[index];
-    TMDuoSplit split = self.pickerSplit;
-    [self closePicker];
-
-    for (NSRunningApplication *app in NSWorkspace.sharedWorkspace.runningApplications) {
-        if (app.processIdentifier == self.duoOriginPid) { [app activateWithOptions:0]; break; }
-    }
-    // Laisser l'activation aboutir avant de lire la fenêtre focalisée.
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [weakSelf.windowManager applyDuo:split withPartner:partner];
-    });
-}
-
 - (void)toggleStatusPopover:(id)sender {
     (void)sender;
     [self.hoverOpenTimer invalidate];
@@ -1598,8 +1379,6 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         [self installGlobalShortcut];
         [self pushData];
     }
-    if ([action isEqualToString:@"duoPick"]) [self completeDuoWithIndex:[body[@"index"] integerValue]];
-    if ([action isEqualToString:@"duoCancel"]) [self closePicker];
     if ([action isEqualToString:@"exportHistoryCSV"]) [self exportHistoryCSV];
     if ([action isEqualToString:@"setMenuBarIconColor"]) {
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconColor"];
@@ -1719,23 +1498,6 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"brightnessKeysEnabled"] forKey:@"brightnessKeysEnabled"];
         [self installBrightnessKeyMonitor];
-        [self pushData];
-    }
-    if ([action isEqualToString:@"toggleWindowManager"]) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        [defaults setBool:![defaults boolForKey:@"windowManagerEnabled"] forKey:@"windowManagerEnabled"];
-        [self installWindowShortcuts];
-        [self pushData];
-    }
-    if ([action isEqualToString:@"setWindowGap"]) {
-        NSString *which = [body[@"which"] isKindOfClass:NSString.class] ? body[@"which"] : @"between";
-        NSString *key = [which isEqualToString:@"edge"] ? @"windowGapEdge" : @"windowGapBetween";
-        [NSUserDefaults.standardUserDefaults setInteger:[body[@"value"] integerValue] forKey:key];
-        [self pushData];
-    }
-    if ([action isEqualToString:@"toggleWindowReservedAreas"]) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        [defaults setBool:![defaults boolForKey:@"windowIgnoreReservedAreas"] forKey:@"windowIgnoreReservedAreas"];
         [self pushData];
     }
     if ([action isEqualToString:@"setMetricsInterval"]) {
@@ -1861,15 +1623,11 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
-            @"windowManager": @([self windowManagerEnabled]),
             @"brightnessKeys": @([self brightnessKeysEnabled]),
             @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
             @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},
             @"widgetPanelConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
             @"alerts": [self alertsPayload],
-            @"windowGapBetween": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapBetween"]),
-            @"windowGapEdge": @([NSUserDefaults.standardUserDefaults integerForKey:@"windowGapEdge"]),
-            @"windowReservedAreas": @(![NSUserDefaults.standardUserDefaults boolForKey:@"windowIgnoreReservedAreas"]),
             @"notificationsAuthorized": @(self.notificationsAuthorized),
             @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
             @"language": [NSUserDefaults.standardUserDefaults stringForKey:@"language"] ?: @"auto"
@@ -2034,7 +1792,7 @@ enum { TMKeyReturn = 36, TMKeyLeft = 123, TMKeyRight = 124, TMKeyDown = 125, TMK
     NSString *script = [NSString stringWithFormat:@"window.StatusI18n && window.StatusI18n.set(%@);",
                         [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]];
     for (WKWebView *view in @[self.webView ?: NSNull.null, self.menuWebView ?: NSNull.null,
-                              self.widgetWebView ?: NSNull.null, self.pickerWebView ?: NSNull.null]) {
+                              self.widgetWebView ?: NSNull.null]) {
         if (![view isKindOfClass:WKWebView.class]) continue;
         TMInstallI18nScript(view);
         [view evaluateJavaScript:script completionHandler:nil];
