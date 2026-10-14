@@ -650,7 +650,7 @@
  "w.mem.processSection": "Processi · memoria",
  "w.mem.swap": "swap",
  "w.mem.used": "usata",
- "w.mem.wired": "Cablata",
+ "w.mem.wired": "Wired",
  "w.memory": "Memoria",
  "w.net.inactive.one": "+ {n} inattiva",
  "w.net.inactive.other": "+ {n} inattive",
