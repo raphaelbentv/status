@@ -47,14 +47,20 @@ xattr -cr "$OUTPUT"
 # (demandes d’accès Trousseau répétées). À défaut, on
 # retombe sur l'ad-hoc, qui fonctionne mais change d'empreinte à chaque compilation.
 # Voir ./scripts/create-signing-identity.sh
-SIGN_IDENTITY="${STATUS_SIGN_IDENTITY:-Status Local Signing}"
+# Developer ID en priorité quand il existe : signature reconnue par Gatekeeper, autorisations
+# (Accessibilité) rattachées au certificat et non à l'empreinte du build, et SMAppService utilisable.
+DEVELOPER_ID=$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+SIGN_IDENTITY="${STATUS_SIGN_IDENTITY:-${DEVELOPER_ID:-Status Local Signing}}"
+# Horodatage Apple exigé par la notarisation ; inutile (et hors ligne impossible) en signature locale.
+TIMESTAMP=()
+[[ "$SIGN_IDENTITY" == "Developer ID Application:"* ]] && TIMESTAMP=(--timestamp)
 # Sans -v, délibérément : « -v » ne liste que les identités approuvées comme racine de confiance.
 # Une identité auto-signée locale ne l'est pas, et n'a pas à l'être — on ne cherche pas une chaîne
 # vérifiable par des tiers (ce serait un Developer ID Apple), seulement une empreinte stable d'un
 # build à l'autre, pour que macOS reconnaisse la même app et conserve ses autorisations.
 # Les builds locaux utilisent un paquet approuvé par l’administrateur pour le service.
 if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-  codesign --force --options runtime --identifier com.raphael.status.lid-helper --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --identifier com.raphael.status.lid-helper --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
   echo "signé avec : $SIGN_IDENTITY"
 else
   codesign --force --sign - "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
@@ -83,7 +89,9 @@ pkgbuild --root "$LID_PAYLOAD" --ownership recommended --install-location / \
   --version "$VERSION" "$OUTPUT/Contents/Resources/StatusLidService.pkg"
 
 if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-  codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$OUTPUT"
+  # Du plus profond au bundle : --deep ne pose pas l'horodatage ni le runtime de façon fiable.
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Resources/status-claude-collector"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$OUTPUT"
 else
   codesign --force --deep --sign - "$OUTPUT"
 fi

@@ -727,7 +727,12 @@ function parseMetric(metric){
 const onOff=v=>v?t('set.on'):t('set.off');
 let lidMinutes=30;
 function startLidMode(){
-  if(!Number.isInteger(lidMinutes)||lidMinutes<1||lidMinutes>240)return;
+  // Refus visible : un retour silencieux laissait croire que le bouton ne marchait pas.
+  if(!Number.isInteger(lidMinutes)||lidMinutes<1||lidMinutes>240){
+    const note=document.querySelector('.lid-controls')?.closest('.setting')?.querySelector('.connection-note');
+    if(note)note.textContent=t('msg.lid.9');
+    return;
+  }
   send('startLidMode',{minutes:lidMinutes});
 }
 function lidModeSettings(data){
