@@ -14,6 +14,10 @@ static NSError *TMSessionError(NSString *message) {
 @property NSWindow *loginWindow;
 @property NSTextField *loginMessage;
 @property NSButton *loginButton;
+// Popup OAuth (Google, Apple) : Google Identity Services rend le code par
+// window.opener.postMessage, il faut donc une vraie fenêtre fille qui garde son opener.
+@property (nullable) NSWindow *popupWindow;
+@property (nullable) WKWebView *popupWebView;
 @property (copy) void (^loginCompletion)(NSArray *organizations);
 // File d'attente plutôt qu'un seul bloc : deux lectures peuvent partir en même temps (les
 // quotas et le nom d'organisation, par exemple). Rejeter la seconde parce qu'un chargement est
@@ -109,6 +113,8 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
 }
 - (void)finishLogin { [self.loginWindow close]; }
 - (void)windowWillClose:(NSNotification *)notification {
+    if (notification.object == self.popupWindow) { [self discardPopup]; return; }
+    [self.popupWindow close];
     [self.webView removeFromSuperview];
     self.loginWindow.delegate = nil;
     self.loginWindow = nil; self.loginMessage = nil; self.loginButton = nil;
@@ -116,8 +122,40 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
 }
 - (WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
     forNavigationAction:(WKNavigationAction *)action windowFeatures:(WKWindowFeatures *)features {
-    if (!action.targetFrame && self.loginVisible) [webView loadRequest:action.request];
-    return nil;
+    if (action.targetFrame || !self.loginVisible) return nil;
+    // Une popup qui en ouvre une autre reste dans sa propre fenêtre.
+    if (webView != self.webView || self.popupWebView) { [webView loadRequest:action.request]; return nil; }
+    CGFloat width = features.width ? features.width.doubleValue : 600;
+    CGFloat height = features.height ? features.height.doubleValue : 760;
+    // La configuration reçue est imposée par WebKit : c'est elle qui relie la popup à son opener.
+    WKWebView *popup = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, width, height) configuration:configuration];
+    popup.UIDelegate = self;
+    popup.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, width, height)
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+        backing:NSBackingStoreBuffered defer:NO];
+    window.releasedWhenClosed = NO;
+    window.delegate = self;
+    window.title = self.loginWindow.title;
+    [window.contentView addSubview:popup];
+    popup.frame = window.contentView.bounds;
+    [self.loginWindow addChildWindow:window ordered:NSWindowAbove];
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+    self.popupWindow = window;
+    self.popupWebView = popup;
+    return popup;
+}
+- (void)webViewDidClose:(WKWebView *)webView {
+    if (webView == self.popupWebView) [self.popupWindow close];
+}
+- (void)discardPopup {
+    self.popupWebView.UIDelegate = nil;
+    [self.popupWebView removeFromSuperview];
+    [self.loginWindow removeChildWindow:self.popupWindow];
+    self.popupWindow.delegate = nil;
+    self.popupWindow = nil;
+    self.popupWebView = nil;
 }
 
 - (void)seedCookieHeader:(NSString *)header completion:(void (^)(void))completion {
