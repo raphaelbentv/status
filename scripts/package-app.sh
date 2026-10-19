@@ -69,6 +69,9 @@ fi
 
 # Installation classique approuvée par l'administrateur, pour les builds locaux.
 # Le payload contient uniquement le helper signé et sa déclaration launchd.
+# Absent des builds Developer ID : le service y passe par SMAppService (TMLidSigningReady), et un
+# paquet non signé embarqué fait refuser la notarisation.
+if [[ "$SIGN_IDENTITY" != "Developer ID Application:"* ]]; then
 LID_PAYLOAD="$ROOT/work/lid-package"
 rm -rf "$LID_PAYLOAD"
 mkdir -p "$LID_PAYLOAD/Library/PrivilegedHelperTools" "$LID_PAYLOAD/Library/LaunchDaemons"
@@ -87,6 +90,7 @@ VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/
 pkgbuild --root "$LID_PAYLOAD" --ownership recommended --install-location / \
   --scripts "$ROOT/scripts/lid-installer" --identifier com.raphael.status.lid-service \
   --version "$VERSION" "$OUTPUT/Contents/Resources/StatusLidService.pkg"
+fi
 
 if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
   # Du plus profond au bundle : --deep ne pose pas l'horodatage ni le runtime de façon fiable.
