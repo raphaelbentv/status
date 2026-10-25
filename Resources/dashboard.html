@@ -135,6 +135,11 @@
   .wc-sublabel{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none}
   .wc-sub .seg{font-size:12px;padding:4px 8px}
   .wc-sub .segmented{flex-wrap:wrap}
+  /* Taille et espacement des icônes : deux rangées titre + description à gauche, segments à droite. */
+  .layout-rows{display:flex;flex-direction:column;gap:14px}
+  .layout-row{display:flex;align-items:center;justify-content:space-between;gap:12px 20px;flex-wrap:wrap}
+  .layout-row .setting-copy{flex:1 1 200px;min-width:0}
+  .layout-row .segmented{flex:0 1 auto}
   .seg{border:0;background:transparent;color:var(--muted);padding:7px 11px;cursor:pointer;font:inherit;font-size:12px}
   .seg+.seg{border-left:1px solid var(--hair-strong)}.seg:hover{background:var(--soft);color:var(--text)}
   .seg.on{background:var(--soft-hover);color:var(--blue);font-weight:700}
@@ -855,10 +860,23 @@ function quotaIconRow(data,p,provider){
   const styles=ICON_DESIGNS.map(v=>`<button class="icon-style ${style===v?'on':''}" title="${t('icon.'+v)}" aria-label="${t('icon.'+v)}" aria-pressed="${style===v}" onclick="send('setProviderMenuIconStyle',{provider:'${provider}',value:'${v}'})">${iconSvg(v,.62,ICON_COLORS[provider],22)}</button>`).join('');
   return `<div class="quota-icon-row" style="--provider:${ICON_COLORS[provider]}"><div class="quota-icon-head"><i class="dot"></i><strong>${PROVIDER_NAME[provider]}</strong>${windows}${account}</div><div class="icon-style-grid" role="group" aria-label="${t('bar.styleOf',{name:PROVIDER_NAME[provider]})}">${styles}</div></div>`;
 }
+// Taille et espacement des icônes de Status dans la barre des menus. Les valeurs sont celles que le
+// natif accepte (StatusMenuBarWidgets.m) : toute autre valeur y serait ignorée.
+const ICON_SCALES=[[0.85,'small'],[1,'normal'],[1.15,'large'],[1.25,'xlarge']];
+const ICON_SPACINGS=[[0,'normal'],[4,'airy'],[8,'wide'],[14,'xwide']];
+function iconLayoutRow(kind,options,current,field){
+  const buttons=options.map(([v,key])=>`<button class="seg ${Math.abs(current-v)<1e-6?'on':''}" aria-pressed="${Math.abs(current-v)<1e-6}" onclick="send('setMenuBarIconLayout',{${field}:${v}})">${t('bar.layout.'+kind+'.'+key)}</button>`).join('');
+  return `<div class="layout-row" data-layout="${field}"><div class="setting-copy"><strong>${t('bar.layout.'+(field==='scale'?'size':'spacing'))}</strong><small>${t('bar.layout.'+(field==='scale'?'sizeDesc':'spacingDesc'))}</small></div><span class="segmented">${buttons}</span></div>`;
+}
+function iconLayoutSettings(p){
+  const scale=Number.isFinite(p.menuBarIconScale)?p.menuBarIconScale:1,spacing=Number.isFinite(p.menuBarIconSpacing)?p.menuBarIconSpacing:0;
+  return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.layout.title')}</strong><small>${t('bar.layout.desc')}</small></div><div class="layout-rows">${iconLayoutRow('size',ICON_SCALES,scale,'scale')}${iconLayoutRow('space',ICON_SPACINGS,spacing,'spacing')}</div></section>`;
+}
 function menuBarSettings(data,p){
   return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.title')}</strong><small>${t('bar.desc')}</small></div>${barPreview(data,p)}</section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('sg.quotas')}</strong><small>${t('bar.quotasDesc')}</small></div><div class="quota-icon-rows">${['openai','claude'].map(pr=>quotaIconRow(data,p,pr)).join('')}</div><div class="quota-icon-actions"><button class="button" onclick="send('previewMenuIcons',{provider:'openai'})">${t('bar.compare',{name:'OpenAI'})}</button><button class="button" onclick="send('previewMenuIcons',{provider:'claude'})">${t('bar.compare',{name:'Claude'})}</button><button class="button" onclick="send('closeMenuIconPreviews')">${t('set.icons.close')}</button></div></section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>`;
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>
+  ${iconLayoutSettings(p)}`;
 }
 // Mises à jour (Sparkle). Sans flux ni clé (build de développement), la section n'a rien à proposer :
 // on ne montre alors que la version, sans boutons qui ne feraient rien.

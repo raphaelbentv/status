@@ -769,6 +769,33 @@ section('Réglages : mises à jour automatiques');
   check(on.includes("send('checkForUpdates')")&&on.includes("send('toggleAutoUpdates')"),'build avec Sparkle : recherche et interrupteur');
   check(/button class="button on"[^>]*toggleAutoUpdates/.test(on),'interrupteur affiché actif quand les mises à jour sont automatiques');
 }
+section('Réglages › Affichage — taille et espacement des icônes');
+{
+  const rowOf=(html,field)=>html.split('<div class="layout-row"').find(r=>r.startsWith(` data-layout="${field}"`))?.split('</section>')[0]||'';
+  const activeLabels=(html,field)=>[...rowOf(html,field).matchAll(/<button class="seg on"[^>]*>([^<]+)<\/button>/g)].map(m=>m[1]);
+  const allLabels=(html,field)=>[...rowOf(html,field).matchAll(/<button class="seg [^"]*"[^>]*>([^<]+)<\/button>/g)].map(m=>m[1]);
+  const render=prefs=>dashboard('settingsView')({prefs,accounts:[]},'appearance');
+  const def=render({});
+  check(def.includes('Taille et espacement des icônes'),'section présente dans Affichage');
+  check(def.includes('Ne change que les icônes de Status ; l’espacement général des icônes de la barre des menus est un réglage de macOS.'),'description : l’espacement général est un réglage macOS');
+  checkEqual(allLabels(def,'scale'),['Petite','Normale','Grande','Très grande'],'taille : quatre libellés');
+  checkEqual(allLabels(def,'spacing'),['Normal','Aéré','Large','Très large'],'espacement : quatre libellés');
+  checkEqual(activeLabels(def,'scale'),['Normale'],'sans préférence : taille Normale active');
+  checkEqual(activeLabels(def,'spacing'),['Normal'],'sans préférence : espacement Normal actif');
+  const set=render({menuBarIconScale:1.25,menuBarIconSpacing:8});
+  checkEqual(activeLabels(set,'scale'),['Très grande'],'segment actif : taille 1,25');
+  checkEqual(activeLabels(set,'spacing'),['Large'],'segment actif : espacement 8');
+  checkEqual(activeLabels(render({menuBarIconScale:0.85,menuBarIconSpacing:14}),'scale'),['Petite'],'segment actif : taille 0,85');
+  checkEqual(activeLabels(render({menuBarIconScale:1.15,menuBarIconSpacing:4}),'spacing'),['Aéré'],'segment actif : espacement 4');
+  checkEqual(activeLabels(render({menuBarIconScale:'x',menuBarIconSpacing:null}),'scale'),['Normale'],'préférence illisible : repli sur Normale');
+  for(const v of [0.85,1,1.15,1.25]) check(def.includes(`send('setMenuBarIconLayout',{scale:${v}})`),`bouton de taille ${v} → setMenuBarIconLayout`);
+  for(const v of [0,4,8,14]) check(def.includes(`send('setMenuBarIconLayout',{spacing:${v}})`),`bouton d’espacement ${v} → setMenuBarIconLayout`);
+  const source=readFileSync(join(root,'Resources','dashboard.html'),'utf8');
+  const css=source.slice(source.indexOf('.layout-rows{'),source.indexOf('.theme-swatch-grid{'));
+  check(css.length>0&&!/#[0-9a-fA-F]{3,8}\b/.test(css),'CSS de la section : aucun hexadécimal en dur');
+  const en=sandboxFor('dashboard.html','en')('settingsView')({prefs:{menuBarIconScale:1.15},accounts:[]},'appearance');
+  check(en.includes('Icon size and spacing')&&/<button class="seg on"[^>]*>Large<\/button>/.test(en),'anglais : section et segment actif');
+}
 section('Réglages regroupés, connexions compactes et données conditionnelles');
 {
   const fable={...claudeAccount('a','Perso',[]),windows:[{windowId:'seven_day_scoped_fable',label:'Fable',usedPercent:10,resetsAt:9999999999}]};
