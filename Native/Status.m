@@ -403,6 +403,12 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property BOOL apiPushPending;
 @property NSArray<NSDictionary *> *apiWidgetFamilies;
 @property NSMutableDictionary<NSString *, NSStatusItem *> *widgetItems;  // widgetId → icône dédiée
+// Espacement négatif : toutes les icônes de widgets dans UN seul item (voir TMWidgetBarImage).
+@property NSStatusItem *widgetBarItem;
+@property (copy) NSArray<NSString *> *widgetBarIds;       // widgets montrés, de gauche à droite
+@property (copy) NSArray<NSNumber *> *widgetBarWidths;    // largeur de chaque segment (pour attribuer les clics)
+@property CGFloat widgetBarGap;
+@property (copy) NSDictionary *widgetBarSignature;
 // widgetId → signature du dernier rendu poussé (TMWidgetRenderSignature). Réassigner l'image d'un
 // NSStatusItem redéclenche un dessin WindowServer : à 1 Hz, on ne le fait que si les pixels changent.
 @property NSMutableDictionary<NSString *, NSDictionary *> *widgetSignatures;
@@ -758,6 +764,9 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
 - (void)rebuildMenuBarWidgets {
     if (!self.widgetItems) self.widgetItems = [NSMutableDictionary dictionary];
     NSArray<NSString *> *enabled = [self enabledWidgets];
+    // Espacement négatif : un seul item les regroupe tous. Sinon, un item par widget (et plus d'item groupé).
+    if ([self widgetsGrouped]) { [self rebuildGroupedWidgetBar:enabled]; return; }
+    [self removeGroupedWidgetBar];
 
     // Retirer les widgets désactivés.
     for (NSString *wid in self.widgetItems.allKeys)
@@ -787,11 +796,94 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
     [self updateMenuBarWidgetsFromMonitor];
 }
 
+#pragma mark - Barre regroupée (espacement serré)
+
+- (BOOL)widgetsGrouped { return TMWidgetBarGrouped([self menuBarIconSpacing]); }
+
+- (BOOL)widgetEnabled:(NSString *)wid {
+    return self.widgetItems[wid] != nil || [self.widgetBarIds containsObject:wid];
+}
+
+- (BOOL)hasMenuBarWidgets { return self.widgetItems.count > 0 || self.widgetBarItem != nil; }
+
+- (void)removeGroupedWidgetBar {
+    if (self.widgetBarItem) [NSStatusBar.systemStatusBar removeStatusItem:self.widgetBarItem];
+    self.widgetBarItem = nil;
+    self.widgetBarIds = nil;
+    self.widgetBarWidths = nil;
+    self.widgetBarSignature = nil;
+}
+
+- (void)rebuildGroupedWidgetBar:(NSArray<NSString *> *)enabled {
+    // Passage du mode séparé au mode regroupé : les items individuels disparaissent.
+    for (NSStatusItem *item in self.widgetItems.allValues) [NSStatusBar.systemStatusBar removeStatusItem:item];
+    [self.widgetItems removeAllObjects];
+    [self.widgetSignatures removeAllObjects];
+    if (!enabled.count) {
+        [self removeGroupedWidgetBar];
+    } else {
+        if (!self.widgetBarItem) {
+            NSStatusItem *item = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
+            item.button.imagePosition = NSImageOnly;
+            item.button.target = self;
+            item.button.action = @selector(widgetBarClicked:);
+            item.button.identifier = @"widgetbar";
+            self.widgetBarItem = item;
+        }
+        self.widgetBarIds = enabled;
+        self.widgetBarSignature = nil;  // forcer le premier rendu
+    }
+    [self refreshQuotaWidgetFamilies];
+    [self updateMenuBarWidgetsFromMonitor];
+}
+
+// Même rendu que les items séparés (mêmes fonctions pures : lecture, plan d'affichage, forme, titre),
+// mais assemblé en une seule image. Le titre est dessiné avec l'image au lieu d'être posé par le bouton.
+- (void)updateGroupedWidgetBar:(NSDictionary *)snapshot {
+    if (!self.widgetBarItem) return;
+    CGFloat scale = [self menuBarIconScale], spacing = [self menuBarIconSpacing], gap = TMWidgetBarGap(spacing);
+    NSMutableArray<TMWidgetBarSegment *> *segments = [NSMutableArray array];
+    NSMutableArray *signatures = [NSMutableArray array], *labels = [NSMutableArray array];
+    for (NSString *wid in self.widgetBarIds) {
+        NSDictionary *readout = TMWidgetReadout(wid, snapshot);
+        NSDictionary *style = [self widgetStyleFor:wid];
+        NSString *shape = [style[@"shape"] isKindOfClass:NSString.class] ? style[@"shape"] : nil;
+        NSString *color = [style[@"color"] isKindOfClass:NSString.class] ? style[@"color"] : nil;
+        NSString *display = TMWidgetDisplayFromValue(style[@"display"]);
+        [signatures addObject:TMWidgetRenderSignatureForDisplay(readout, shape, color, display, scale, spacing)];
+        NSDictionary *plan = TMWidgetDisplayPlan(readout, shape, display);
+        NSString *imageShape = plan[@"imageShape"], *title = plan[@"title"];
+        // L'espacement négatif ne marge pas les images : c'est l'écart entre segments qui le porte.
+        NSImage *image = [imageShape length] ? TMMenuBarImageWithLayout(TMWidgetImageStyled(readout, imageShape, color), scale, 0) : nil;
+        NSAttributedString *text = nil;
+        if ([title length]) {
+            NSColor *chosen = [plan[@"display"] isEqual:@"value"] ? TMWidgetNamedColor(color) : nil;
+            text = TMMenuBarTitle(title, plan[@"titleTemplate"], (TMSeverity)[readout[@"severity"] integerValue], scale, chosen);
+        }
+        [segments addObject:[TMWidgetBarSegment segmentWithImage:image title:text]];
+        [labels addObject:TMMenuBarWidgetLabel(wid)];
+    }
+    NSDictionary *signature = @{ @"ids": self.widgetBarIds, @"segments": signatures, @"gap": @(gap) };
+    if ([signature isEqual:self.widgetBarSignature]) return;  // mêmes pixels : rien à redessiner
+    self.widgetBarSignature = signature;
+    NSMutableArray<NSNumber *> *widths = [NSMutableArray array];
+    for (TMWidgetBarSegment *segment in segments) [widths addObject:@(segment.width)];
+    self.widgetBarWidths = widths;
+    self.widgetBarGap = gap;
+    NSButton *button = self.widgetBarItem.button;
+    button.image = TMWidgetBarImage(segments, gap);
+    button.imagePosition = NSImageOnly;
+    button.attributedTitle = [[NSAttributedString alloc] initWithString:@""];
+    button.accessibilityLabel = [labels componentsJoinedByString:@", "];
+}
+
 // Réordonner impose de tout recréer : la position d'un NSStatusItem est fixée à sa création et
 // aucune API publique ne la déplace après coup. On détruit donc l'ensemble avant de laisser
 // rebuildMenuBarWidgets les recréer dans le bon ordre. Visible à l'écran (les icônes clignotent
 // brièvement), mais c'est le seul chemin disponible.
 - (void)reorderMenuBarWidgets {
+    // Regroupés, l'ordre est celui de la composition : rien à recréer.
+    if ([self widgetsGrouped]) { [self rebuildMenuBarWidgets]; return; }
     for (NSStatusItem *item in self.widgetItems.allValues)
         [NSStatusBar.systemStatusBar removeStatusItem:item];
     [self.widgetItems removeAllObjects];
@@ -943,12 +1035,34 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
 }
 
 - (void)widgetClicked:(NSButton *)sender {
-    NSString *wid = sender.identifier;
+    [self handleWidgetClick:sender.identifier sender:sender anchor:sender.bounds];
+}
+
+// Clic sur l'item regroupé : le widget visé se déduit de la position du clic dans l'image, dont on connaît
+// la largeur de chaque segment ; le popup s'ancre sous ce segment et non sous tout l'item.
+- (void)widgetBarClicked:(NSButton *)sender {
+    NSArray<NSNumber *> *widths = self.widgetBarWidths;
+    if (!widths.count || widths.count != self.widgetBarIds.count) return;
+    CGFloat total = TMWidgetBarTotalWidth(widths, self.widgetBarGap);
+    CGFloat originX = (sender.bounds.size.width - total) / 2;  // le bouton centre l'image
+    // Position de la souris à l'écran plutôt que celle de l'événement : pour un item de la barre des menus,
+    // l'événement porte le centre du bouton (mesuré), jamais le point cliqué.
+    NSPoint mouse = NSEvent.mouseLocation;
+    NSPoint inWindow = [sender.window convertRectFromScreen:NSMakeRect(mouse.x, mouse.y, 0, 0)].origin;
+    CGFloat x = [sender convertPoint:inWindow fromView:nil].x - originX;
+    NSInteger index = TMWidgetBarHitTest(widths, self.widgetBarGap, x);
+    CGFloat left = 0, width = 0;
+    if (index < 0 || !TMWidgetBarAnchor(widths, self.widgetBarGap, index, &left, &width)) return;
+    NSRect anchor = NSMakeRect(originX + left, sender.bounds.origin.y, width, sender.bounds.size.height);
+    [self handleWidgetClick:self.widgetBarIds[index] sender:sender anchor:anchor];
+}
+
+- (void)handleWidgetClick:(NSString *)wid sender:(NSButton *)sender anchor:(NSRect)anchor {
     // Widgets de consommation : leur détail, c'est le popover des quotas (comptes et fenêtres),
     // pas un panneau moniteur — widget.html ne saurait rien en dire de plus.
     if (TMWidgetUsesAccounts(wid)) {
         if (self.statusPopover.shown) { [self.statusPopover close]; return; }
-        [self showPopoverFromButton:sender];
+        [self showPopoverFromButton:sender rect:anchor];
         return;
     }
     // Réglage « Popups des widgets » = Regroupé : toutes les icônes ouvrent le même popup. Reclic sur
@@ -974,7 +1088,7 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
     self.widgetPopover.contentViewController.preferredContentSize = size;
     self.widgetPopover.contentSize = size;
     [self pushWidgetMetrics];  // remplit avant l'affichage si le web est prêt
-    [self.widgetPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMinY];
+    [self.widgetPopover showRelativeToRect:anchor ofView:sender preferredEdge:NSRectEdgeMinY];
 }
 
 // Redessine chaque widget depuis un snapshot moniteur. Les styles « bars »/« pie » posent la
@@ -999,7 +1113,7 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
     [self refreshApiWidgetFamilies];  // même déclencheur : les icônes de crédit API suivent
     NSArray *pairs = @[@[@"claudeWeek", @"claude:weekly"], @[@"codexWeek", @"openai:weekly"]];
     NSMutableArray *wanted = [NSMutableArray array];
-    for (NSArray *pair in pairs) if (self.widgetItems[pair[0]]) [wanted addObject:pair];
+    for (NSArray *pair in pairs) if ([self widgetEnabled:pair[0]]) [wanted addObject:pair];
     if (!wanted.count) { self.quotaWidgetFamilies = @[]; return; }
 
     NSArray *accounts = [self accountPayloadList];
@@ -1028,8 +1142,9 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
 }
 
 - (void)updateMenuBarWidgets:(NSDictionary *)snapshot {
-    if (!self.widgetItems.count) return;
+    if (![self hasMenuBarWidgets]) return;
     snapshot = [self snapshotWithQuotaFamilies:snapshot];
+    if ([self widgetsGrouped]) { [self updateGroupedWidgetBar:snapshot]; return; }
     if (!self.widgetSignatures) self.widgetSignatures = [NSMutableDictionary dictionary];
     [self.widgetItems enumerateKeysAndObjectsUsingBlock:^(NSString *wid, NSStatusItem *item, BOOL *stop) {
         NSDictionary *readout = TMWidgetReadout(wid, snapshot);
@@ -1067,7 +1182,7 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
 // Sans moniteur (seuls des widgets de comptes sont actifs, voir startSystemMonitor), un snapshot
 // vide suffit : leurs familles sont injectées. Avant, ces widgets restaient au tiret.
 - (void)updateMenuBarWidgetsFromMonitor {
-    if (!self.widgetItems.count) return;
+    if (![self hasMenuBarWidgets]) return;
     [self updateMenuBarWidgets:self.systemMonitor ? [self.systemMonitor snapshot] : @{}];
 }
 
@@ -1252,7 +1367,11 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
 // le bouton réellement cliqué, pas systématiquement sous la jauge.
 - (void)showPopoverFromButton:(NSButton *)button {
     if (!button) button = self.statusItem.button;
-    [self.statusPopover showRelativeToRect:button.bounds ofView:button preferredEdge:NSRectEdgeMinY];
+    [self showPopoverFromButton:button rect:button.bounds];
+}
+
+- (void)showPopoverFromButton:(NSButton *)button rect:(NSRect)rect {
+    [self.statusPopover showRelativeToRect:rect ofView:button preferredEdge:NSRectEdgeMinY];
     [self startSystemMonitor];
     [self refresh:nil];
 }
@@ -1616,7 +1735,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         if (changed) {
             [self.widgetSignatures removeAllObjects];  // forcer le redessin des widgets…
             self.statusMenuSignature = nil;             // …et de la jauge quota
-            [self updateMenuBarWidgetsFromMonitor];
+            [self rebuildMenuBarWidgets];               // un espacement négatif regroupe les icônes en un item (et inversement)
             [self updateStatusMenu];
             if (self.iconPreviewItems) [self showIconPreviews];
         }
@@ -3678,7 +3797,7 @@ static NSString *TMApiCostsPath(void) {
 - (void)refreshApiWidgetFamilies {
     NSArray *pairs = @[@[@"anthropicApi", TMApiProviderAnthropic], @[@"openaiApi", TMApiProviderOpenAI]];
     NSMutableArray *wanted = [NSMutableArray array];
-    for (NSArray *pair in pairs) if (self.widgetItems[pair[0]]) [wanted addObject:pair];
+    for (NSArray *pair in pairs) if ([self widgetEnabled:pair[0]]) [wanted addObject:pair];
     if (!wanted.count) { self.apiWidgetFamilies = @[]; return; }
     NSMutableArray *summaries = [NSMutableArray array];
     for (NSDictionary *payload in [self apiAccountPayloadList]) if ([payload[@"hasData"] boolValue]) [summaries addObject:payload];

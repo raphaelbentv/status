@@ -127,7 +127,7 @@ NSString *TMSystemSpacingPresetFor(id _Nullable spacing, id _Nullable padding);
 
 // Valeurs autorisées, dans l'ordre des boutons des Réglages. Défauts : 1.0 (taille) et 0 (espacement).
 extern NSArray<NSNumber *> *TMMenuBarIconScales(void);     // 0.85, 1.0, 1.15, 1.25
-extern NSArray<NSNumber *> *TMMenuBarIconSpacings(void);   // 0, 4, 8, 14 (points ajoutés autour de l'image)
+extern NSArray<NSNumber *> *TMMenuBarIconSpacings(void);   // -15, -12, -8, 0, 4, 8, 14 (points ; négatif = icônes regroupées en un seul item)
 
 // Valeur validée : `value` si c'est un nombre de la liste autorisée, sinon le défaut. Une préférence
 // bricolée, absente ou venue d'une version ultérieure retombe sur l'apparence actuelle.
@@ -180,5 +180,38 @@ NSDictionary *TMWidgetRenderSignatureForDisplay(NSDictionary *readout, NSString 
 // transparente en tête, un crénage en queue) — l'équivalent, pour le texte, de la marge que
 // TMMenuBarImageWithLayout pose autour d'une image. spacing ≤ 0 : le titre tel quel.
 NSAttributedString *TMTitleWithSpacing(NSAttributedString *title, CGFloat spacing);
+
+#pragma mark - Barre regroupée (espacement plus serré que macOS)
+
+// macOS ajoute 16 pt autour de chaque item de la barre des menus (mesuré : fenêtre = longueur + 16 pt) et
+// rétrécit l'icône quand on impose une longueur plus courte que son contenu : impossible de rapprocher des
+// items séparés. Pour un espacement NÉGATIF, les icônes de Status sont donc dessinées toutes ensemble dans
+// UN seul item, séparées par l'écart voulu ; le clic est attribué au bon widget d'après sa position.
+extern const CGFloat TMSystemItemGap;                     // 16 : écart que macOS laisse entre deux items
+BOOL TMWidgetBarGrouped(CGFloat spacing);                 // espacement < 0 : mode regroupé
+CGFloat TMWidgetBarGap(CGFloat spacing);                  // écart entre icônes : 16 + espacement, jamais < 0
+
+// Un segment = l'image d'un widget et, à sa droite, son titre (valeur) éventuel.
+@interface TMWidgetBarSegment : NSObject
+@property (nonatomic, readonly, nullable) NSImage *image;
+@property (nonatomic, readonly, nullable) NSAttributedString *title;
+@property (nonatomic, readonly) CGFloat width;
+@property (nonatomic, readonly) CGFloat height;
+// Vrai si le segment peut être teinté par le système (image template ou absente, titre sans couleur imposée).
+@property (nonatomic, readonly) BOOL isTemplate;
++ (instancetype)segmentWithImage:(nullable NSImage *)image title:(nullable NSAttributedString *)title;
+@end
+
+CGFloat TMWidgetBarTotalWidth(NSArray<NSNumber *> *widths, CGFloat gap);
+// Abscisse gauche de chaque segment dans l'image regroupée.
+NSArray<NSNumber *> *TMWidgetBarOffsets(NSArray<NSNumber *> *widths, CGFloat gap);
+// Segment visé par un clic à l'abscisse `x` (relative au bord gauche de l'image) : le plus proche, la moitié
+// de chaque écart revenant à chaque voisin ; −1 s'il n'y en a aucun.
+NSInteger TMWidgetBarHitTest(NSArray<NSNumber *> *widths, CGFloat gap, CGFloat x);
+// Zone d'ancrage du popup d'un segment (écarts compris), en abscisses de l'image regroupée.
+BOOL TMWidgetBarAnchor(NSArray<NSNumber *> *widths, CGFloat gap, NSInteger index, CGFloat *outX, CGFloat *outWidth);
+// Image regroupée : template seulement si tous les segments le sont (le système la teinte alors seul) ;
+// sinon, les segments template sont teintés ici à la couleur de la barre (blanc en sombre, noir en clair).
+NSImage *TMWidgetBarImage(NSArray<TMWidgetBarSegment *> *segments, CGFloat gap);
 
 NS_ASSUME_NONNULL_END

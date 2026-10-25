@@ -1091,7 +1091,7 @@ NSString *TMSystemSpacingPresetFor(id spacing, id padding) {
 #pragma mark - Taille et espacement des icônes
 
 NSArray<NSNumber *> *TMMenuBarIconScales(void) { return @[@0.85, @1.0, @1.15, @1.25]; }
-NSArray<NSNumber *> *TMMenuBarIconSpacings(void) { return @[@0, @4, @8, @14]; }
+NSArray<NSNumber *> *TMMenuBarIconSpacings(void) { return @[@-15, @-12, @-8, @0, @4, @8, @14]; }
 
 // Valeur autorisée correspondant à `value` (tolérance d'arrondi JSON), ou nil. Un booléen n'est pas
 // un nombre ici : @YES vaudrait 1.0 et passerait pour la taille normale.
@@ -1260,4 +1260,135 @@ NSAttributedString *TMTitleWithSpacing(NSAttributedString *title, CGFloat spacin
     lead[NSKernAttributeName] = @(half - blank);
     [padded insertAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:lead] atIndex:0];
     return padded;
+}
+
+#pragma mark - Barre regroupée
+
+const CGFloat TMSystemItemGap = 16.0;
+static const CGFloat TMBarImageTitleGap = 3.0;   // écart image ↔ titre, celui que macOS met entre l'image et le titre d'un bouton
+
+BOOL TMWidgetBarGrouped(CGFloat spacing) { return isfinite(spacing) && spacing < 0; }
+CGFloat TMWidgetBarGap(CGFloat spacing) {
+    if (!TMWidgetBarGrouped(spacing)) return TMSystemItemGap;
+    return MAX(0.0, TMSystemItemGap + spacing);
+}
+
+@implementation TMWidgetBarSegment
++ (instancetype)segmentWithImage:(NSImage *)image title:(NSAttributedString *)title {
+    TMWidgetBarSegment *segment = [TMWidgetBarSegment new];
+    segment->_image = image;
+    segment->_title = title.length ? [title copy] : nil;
+    CGFloat titleWidth = 0, titleHeight = 0;
+    if (segment->_title) {
+        NSRect box = [segment->_title boundingRectWithSize:NSMakeSize(10000, 10000)
+                                                   options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading];
+        // Le crénage de fin (largeur réservée) fait partie de la largeur : `size` la compte, `boundingRect` non.
+        titleWidth = ceil(MAX(box.size.width, [segment->_title size].width));
+        titleHeight = ceil(box.size.height);
+    }
+    segment->_width = (image ? image.size.width : 0) + (image && titleWidth > 0 ? TMBarImageTitleGap : 0) + titleWidth;
+    segment->_height = MAX(image ? image.size.height : 0, titleHeight);
+    BOOL titleColored = NO;
+    if (segment->_title) {
+        for (NSUInteger i = 0; i < segment->_title.length && !titleColored; i++)
+            titleColored = [segment->_title attribute:NSForegroundColorAttributeName atIndex:i effectiveRange:NULL] != nil;
+    }
+    segment->_isTemplate = (!image || image.isTemplate) && !titleColored;
+    return segment;
+}
+@end
+
+CGFloat TMWidgetBarTotalWidth(NSArray<NSNumber *> *widths, CGFloat gap) {
+    if (!widths.count) return 0;
+    CGFloat total = gap * (widths.count - 1);
+    for (NSNumber *w in widths) total += w.doubleValue;
+    return total;
+}
+
+NSArray<NSNumber *> *TMWidgetBarOffsets(NSArray<NSNumber *> *widths, CGFloat gap) {
+    NSMutableArray *offsets = [NSMutableArray arrayWithCapacity:widths.count];
+    CGFloat x = 0;
+    for (NSNumber *w in widths) { [offsets addObject:@(x)]; x += w.doubleValue + gap; }
+    return offsets;
+}
+
+NSInteger TMWidgetBarHitTest(NSArray<NSNumber *> *widths, CGFloat gap, CGFloat x) {
+    if (!widths.count) return -1;
+    if (!isfinite(x)) return 0;
+    CGFloat cursor = 0;
+    for (NSUInteger i = 0; i + 1 < widths.count; i++) {
+        CGFloat right = cursor + widths[i].doubleValue + gap / 2;   // milieu de l'écart suivant
+        if (x < right) return (NSInteger)i;
+        cursor += widths[i].doubleValue + gap;
+    }
+    return (NSInteger)widths.count - 1;
+}
+
+BOOL TMWidgetBarAnchor(NSArray<NSNumber *> *widths, CGFloat gap, NSInteger index, CGFloat *outX, CGFloat *outWidth) {
+    if (index < 0 || index >= (NSInteger)widths.count) { if (outX) *outX = 0; if (outWidth) *outWidth = 0; return NO; }
+    CGFloat left = [TMWidgetBarOffsets(widths, gap)[index] doubleValue];
+    CGFloat right = left + widths[index].doubleValue;
+    if (index > 0) left -= gap / 2;
+    if (index + 1 < (NSInteger)widths.count) right += gap / 2;
+    if (outX) *outX = left;
+    if (outWidth) *outWidth = right - left;
+    return YES;
+}
+
+static BOOL TMDrawingAppearanceIsDark(void) {
+    NSAppearance *appearance = NSAppearance.currentDrawingAppearance ?: NSApp.effectiveAppearance;
+    NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+    return [match isEqual:NSAppearanceNameDarkAqua];
+}
+
+NSImage *TMWidgetBarImage(NSArray<TMWidgetBarSegment *> *segments, CGFloat gap) {
+    if (!segments.count) return nil;
+    NSMutableArray<NSNumber *> *widths = [NSMutableArray array];
+    CGFloat height = 18;
+    BOOL allTemplate = YES;
+    for (TMWidgetBarSegment *segment in segments) {
+        [widths addObject:@(segment.width)];
+        height = MAX(height, segment.height);
+        if (!segment.isTemplate) allTemplate = NO;
+    }
+    NSSize size = NSMakeSize(TMWidgetBarTotalWidth(widths, gap), height);
+    NSArray<NSNumber *> *offsets = TMWidgetBarOffsets(widths, gap);
+    NSImage *image = [NSImage imageWithSize:size flipped:NO drawingHandler:^BOOL(NSRect dst) {
+        // Image template : le système la teinte, on dessine en noir. Sinon : teinte de la barre pour les segments
+        // qui n'ont pas de couleur propre (la barre peut être claire ou sombre selon le fond d'écran).
+        NSColor *tint = allTemplate ? nil : (TMDrawingAppearanceIsDark() ? NSColor.whiteColor : [NSColor colorWithWhite:0 alpha:0.9]);
+        for (NSUInteger i = 0; i < segments.count; i++) {
+            TMWidgetBarSegment *segment = segments[i];
+            CGFloat x = offsets[i].doubleValue, top = (size.height - segment.height) / 2;
+            if (segment.image) {
+                NSSize isz = segment.image.size;
+                NSRect target = NSMakeRect(x, top + (segment.height - isz.height) / 2, isz.width, isz.height);
+                if (tint && segment.image.isTemplate) {
+                    NSImage *tinted = [NSImage imageWithSize:isz flipped:NO drawingHandler:^BOOL(NSRect r) {
+                        [segment.image drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+                        [tint set];
+                        NSRectFillUsingOperation(r, NSCompositingOperationSourceIn);
+                        return YES;
+                    }];
+                    [tinted drawInRect:target];
+                } else {
+                    [segment.image drawInRect:target fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+                }
+            }
+            if (segment.title) {
+                NSMutableAttributedString *text = [segment.title mutableCopy];
+                NSRange all = NSMakeRange(0, text.length);
+                [text enumerateAttribute:NSForegroundColorAttributeName inRange:all options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
+                    if (!value) [text addAttribute:NSForegroundColorAttributeName value:(tint ?: NSColor.blackColor) range:range];
+                }];
+                CGFloat textX = x + (segment.image ? segment.image.size.width + TMBarImageTitleGap : 0);
+                CGFloat textH = [segment.title boundingRectWithSize:NSMakeSize(10000, 10000)
+                                                            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading].size.height;
+                [text drawAtPoint:NSMakePoint(textX, top + (segment.height - ceil(textH)) / 2)];
+            }
+        }
+        return YES;
+    }];
+    image.template = allTemplate;
+    return image;
 }

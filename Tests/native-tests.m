@@ -2653,12 +2653,86 @@ static void TestSystemMenuBarSpacing(void) {
     }
 }
 
+static void TestWidgetBar(void) {
+    Section(@"Barre regroupée : icônes de Status dans un seul item (espacement serré)");
+    // Mode et écart : seul un espacement négatif regroupe ; l'écart est celui de macOS (16 pt) moins le resserrement.
+    Check(TMSystemItemGap == 16.0, @"écart système mesuré : 16 pt");
+    Check(!TMWidgetBarGrouped(0) && !TMWidgetBarGrouped(4) && !TMWidgetBarGrouped(14), @"espacement ≥ 0 : icônes séparées");
+    Check(TMWidgetBarGrouped(-8) && TMWidgetBarGrouped(-12) && TMWidgetBarGrouped(-15), @"espacement < 0 : icônes regroupées");
+    Check(!TMWidgetBarGrouped(NAN) && !TMWidgetBarGrouped(-INFINITY), @"valeurs non finies : jamais regroupé par accident");
+    Check(TMWidgetBarGap(-8) == 8 && TMWidgetBarGap(-12) == 4 && TMWidgetBarGap(-15) == 1, @"écarts : Serré 8, Très serré 4, Hyper serré 1 pt");
+    Check(TMWidgetBarGap(-40) == 0, @"jamais un écart négatif (les icônes ne se chevauchent pas)");
+    Check(TMWidgetBarGap(0) == 16, @"hors mode regroupé : l'écart du système");
+    for (NSNumber *spacing in TMMenuBarIconSpacings())
+        if (spacing.doubleValue < 0) Check(TMWidgetBarGap(spacing.doubleValue) >= 1, @"chaque réglage serré garde au moins 1 pt entre les icônes");
+
+    // Géométrie : largeur totale, abscisses, attribution des clics.
+    NSArray *w = @[@40, @60, @30];
+    Check(TMWidgetBarTotalWidth(w, 4) == 138, @"largeur totale : 40 + 60 + 30 + 2 écarts de 4");
+    Check(TMWidgetBarTotalWidth(@[], 4) == 0 && TMWidgetBarTotalWidth(@[@25], 4) == 25, @"zéro ou un segment : aucun écart");
+    CheckEqual(TMWidgetBarOffsets(w, 4), (@[@0, @44, @108]), @"abscisses des segments");
+    Check(TMWidgetBarHitTest(w, 4, 10) == 0 && TMWidgetBarHitTest(w, 4, 41) == 0, @"clic dans le segment 1 (et la moitié de l'écart qui le suit)");
+    Check(TMWidgetBarHitTest(w, 4, 43) == 1 && TMWidgetBarHitTest(w, 4, 80) == 1, @"clic dans le segment 2");
+    Check(TMWidgetBarHitTest(w, 4, 105) == 1 && TMWidgetBarHitTest(w, 4, 107) == 2, @"milieu de l'écart : moitié pour chaque voisin");
+    Check(TMWidgetBarHitTest(w, 4, 130) == 2, @"clic dans le segment 3");
+    Check(TMWidgetBarHitTest(w, 4, -20) == 0 && TMWidgetBarHitTest(w, 4, 999) == 2, @"hors de l'image (marge système) : segment le plus proche");
+    Check(TMWidgetBarHitTest(w, 4, NAN) == 0 && TMWidgetBarHitTest(@[], 4, 5) == -1, @"abscisse invalide : premier ; aucun segment : −1");
+    Check(TMWidgetBarHitTest(w, 0, 39) == 0 && TMWidgetBarHitTest(w, 0, 41) == 1 && TMWidgetBarHitTest(w, 0, 101) == 2, @"écart nul : les segments se touchent, la frontière est exacte");
+    // Chaque point de l'image est attribué à un segment, dans l'ordre.
+    NSInteger last = 0; BOOL ordered = YES;
+    for (CGFloat x = -5; x < 145; x += 0.5) { NSInteger i = TMWidgetBarHitTest(w, 4, x); if (i < last || i < 0 || i > 2) ordered = NO; last = i; }
+    Check(ordered, @"attribution croissante sur toute la largeur, sans trou");
+    CGFloat ax = 0, aw = 0;
+    Check(TMWidgetBarAnchor(w, 4, 0, &ax, &aw) && ax == 0 && aw == 42, @"ancre du segment 1 : du bord gauche au milieu de l'écart");
+    Check(TMWidgetBarAnchor(w, 4, 1, &ax, &aw) && ax == 42 && aw == 64, @"ancre du segment 2 : écarts compris des deux côtés");
+    Check(TMWidgetBarAnchor(w, 4, 2, &ax, &aw) && ax == 106 && aw == 32, @"ancre du dernier segment : jusqu'au bord droit");
+    Check(!TMWidgetBarAnchor(w, 4, 3, &ax, &aw) && !TMWidgetBarAnchor(w, 4, -1, &ax, &aw), @"indice hors limites : pas d'ancre");
+
+    // Segments : largeur = image + écart image/titre + titre ; template seulement sans couleur imposée.
+    NSDictionary *snap = @{ @"families": @[ @{ @"id": @"cpu", @"now": @{ @"total": @37 }, @"series": @{ @"total": @[@10,@40,@70,@30,@55] } } ] };
+    NSDictionary *cpu = TMWidgetReadout(@"cpu", snap);
+    NSImage *ring = TMWidgetImageStyled(cpu, @"ring", @"auto");
+    NSImage *colored = TMWidgetImageStyled(cpu, @"ring", @"purple");
+    NSAttributedString *plain = [[NSAttributedString alloc] initWithString:@"37 %" attributes:@{ NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium] }];
+    NSAttributedString *red = [[NSAttributedString alloc] initWithString:@"37 %" attributes:@{ NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium], NSForegroundColorAttributeName: NSColor.redColor }];
+    TMWidgetBarSegment *imageOnly = [TMWidgetBarSegment segmentWithImage:ring title:nil];
+    TMWidgetBarSegment *both = [TMWidgetBarSegment segmentWithImage:ring title:plain];
+    TMWidgetBarSegment *textOnly = [TMWidgetBarSegment segmentWithImage:nil title:plain];
+    Check(imageOnly.width == ring.size.width && imageOnly.height == ring.size.height, @"image seule : sa taille");
+    Check(both.width > imageOnly.width + 3 && textOnly.width > 0 && fabs(both.width - (ring.size.width + 3 + textOnly.width)) < 0.01, @"image + titre : image + 3 pt + titre");
+    Check(textOnly.height > 0 && both.height >= imageOnly.height, @"hauteurs cohérentes");
+    Check(imageOnly.isTemplate && both.isTemplate && textOnly.isTemplate, @"icône automatique et texte sans couleur : template (le système teinte)");
+    Check(![TMWidgetBarSegment segmentWithImage:colored title:nil].isTemplate, @"image colorée : pas template");
+    Check(![TMWidgetBarSegment segmentWithImage:ring title:red].isTemplate, @"titre coloré (alerte) : pas template");
+    Check([TMWidgetBarSegment segmentWithImage:nil title:nil].width == 0, @"segment vide : largeur nulle");
+    // Largeur réservée : un titre plus court que son gabarit garde la largeur du gabarit (pas de saut entre deux valeurs).
+    NSDictionary *attrs = @{ NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium] };
+    NSAttributedString *short1 = TMTitleWithReservedWidth(@"7 %", @"100 %", attrs);
+    NSAttributedString *full = TMTitleWithReservedWidth(@"100 %", @"100 %", attrs);
+    Check(fabs([TMWidgetBarSegment segmentWithImage:nil title:short1].width - [TMWidgetBarSegment segmentWithImage:nil title:full].width) < 1.0,
+          @"« 7 % » et « 100 % » occupent la même largeur dans la barre regroupée");
+
+    // Image regroupée : taille, template seulement si tous les segments le sont.
+    NSImage *bar = TMWidgetBarImage(@[imageOnly, both, textOnly], 4);
+    Check(fabs(bar.size.width - (imageOnly.width + both.width + textOnly.width + 8)) < 0.01, @"largeur de l'image regroupée = segments + écarts");
+    Check(bar.size.height >= 18 && bar.size.height <= 24, @"hauteur entre 18 et 24 pt (barre à encoche)");
+    Check(bar.isTemplate, @"tous les segments template : image template (teinte du système)");
+    Check(!TMWidgetBarImage(@[imageOnly, [TMWidgetBarSegment segmentWithImage:colored title:nil]], 4).isTemplate, @"un segment coloré : image non template");
+    Check(TMWidgetBarImage(@[], 4) == nil, @"aucun segment : pas d'image");
+    NSBitmapImageRep *rep = TMBitmapOf(bar);
+    Check(TMInkSum(bar) > 0 && rep.pixelsWide > 0, @"l'image regroupée dessine bien quelque chose");
+    NSImage *tight = TMWidgetBarImage(@[imageOnly, imageOnly], 1), *loose = TMWidgetBarImage(@[imageOnly, imageOnly], 8);
+    Check(fabs((loose.size.width - tight.size.width) - 7) < 0.01, @"7 pt d'écart en plus : 7 pt de largeur en plus");
+    // Un espacement négatif ne marge pas les images : c'est l'écart entre segments qui le porte.
+    Check(TMMenuBarImageWithLayout(ring, 1.0, -12) == ring, @"espacement négatif : aucune enveloppe de marge sur l'image");
+}
+
 static void TestMenuBarIconLayout(void) {
     Section(@"Taille et espacement des icônes de la barre des menus");
 
     // Valeurs autorisées et repli sur le défaut : une préférence inconnue ne change rien.
     CheckEqual(TMMenuBarIconScales(), (@[@0.85, @1.0, @1.15, @1.25]), @"tailles autorisées");
-    CheckEqual(TMMenuBarIconSpacings(), (@[@0, @4, @8, @14]), @"espacements autorisés");
+    CheckEqual(TMMenuBarIconSpacings(), (@[@-15, @-12, @-8, @0, @4, @8, @14]), @"espacements autorisés (négatif = icônes regroupées)");
     for (NSNumber *scale in TMMenuBarIconScales())
         Check(TMMenuBarIconScaleFromValue(scale) == scale.doubleValue && TMMenuBarIconScaleIsAllowed(scale), @"taille autorisée conservée");
     for (NSNumber *spacing in TMMenuBarIconSpacings())
@@ -2667,7 +2741,7 @@ static void TestMenuBarIconLayout(void) {
         Check(TMMenuBarIconScaleFromValue(bad) == 1.0, @"taille inconnue : repli sur 1.0");
         Check(!TMMenuBarIconScaleIsAllowed(bad), @"taille inconnue refusée par l'action native");
     }
-    for (id bad in @[@3, @-4, @100, @"8", @YES, NSNull.null]) {
+    for (id bad in @[@3, @-4, @-16, @-1, @100, @"8", @YES, NSNull.null]) {
         Check(TMMenuBarIconSpacingFromValue(bad) == 0, @"espacement inconnu : repli sur 0");
         Check(!TMMenuBarIconSpacingIsAllowed(bad), @"espacement inconnu refusé par l'action native");
     }
@@ -2702,8 +2776,9 @@ static void TestMenuBarIconLayout(void) {
     for (NSString *wid in @[@"cpu", @"battery", @"network"])
         for (NSString *shape in @[@"", @"bars", @"graph", @"text", @"twoLine", @"battery", @"ring", @"chip"]) {
             NSDictionary *readout = TMWidgetReadout(wid, snap);
-            for (NSNumber *scale in TMMenuBarIconScales()) for (NSNumber *spacing in TMMenuBarIconSpacings())
+            for (NSNumber *scale in TMMenuBarIconScales()) for (NSNumber *spacingValue in TMMenuBarIconSpacings())
                 for (NSString *color in @[@"auto", @"purple"]) {
+                    NSNumber *spacing = @(MAX(0.0, spacingValue.doubleValue));  // négatif : aucune marge sur l'image (écart porté par la barre regroupée)
                     NSImage *base = TMWidgetImageStyled(readout, shape, color);
                     NSImage *wrapped = TMMenuBarImageWithLayout(base, scale.doubleValue, spacing.doubleValue);
                     if (scale.doubleValue == 1.0 && spacing.doubleValue == 0) { Check(wrapped == base, @"défauts : image d'origine"); continue; }
@@ -2923,7 +2998,8 @@ static void TestWidgetDisplay(void) {
     CheckEqual(@(sizeJumps), @0, [NSString stringWithFormat:@"image : même taille d'une mesure à l'autre (%ld comparaisons)", (long)measured]);
     CheckEqual(@(titleJumps), @0, @"titre : même largeur d'une mesure à l'autre (gabarit réservé)");
     // Les trois tailles d'icône et les quatre espacements : image enveloppée ET titre mis à l'échelle.
-    for (NSNumber *scale in TMMenuBarIconScales()) for (NSNumber *spacing in TMMenuBarIconSpacings()) {
+    for (NSNumber *scale in TMMenuBarIconScales()) for (NSNumber *spacingValue in TMMenuBarIconSpacings()) {
+        NSNumber *spacing = @(MAX(0.0, spacingValue.doubleValue));  // négatif : barre regroupée, aucune marge sur l'image
         NSDictionary *readout = readoutOf(@"cpu");
         NSDictionary *p = TMWidgetDisplayPlan(readout, @"chip", @"both");
         NSImage *wrapped = TMMenuBarImageWithLayout(TMWidgetImageStyled(readout, p[@"imageShape"], nil), scale.doubleValue, spacing.doubleValue);
@@ -2935,7 +3011,8 @@ static void TestWidgetDisplay(void) {
     NSAttributedString *title = TMTitleWithReservedWidth(@"43 %", @"100 %", titleAttrs);
     CGFloat plainWidth = [title size].width;
     Check(TMTitleWithSpacing(title, 0) == title, @"espacement 0 : le titre tel quel");
-    for (NSNumber *spacing in TMMenuBarIconSpacings()) {
+    for (NSNumber *spacingValue in TMMenuBarIconSpacings()) {
+        NSNumber *spacing = @(MAX(0.0, spacingValue.doubleValue));  // négatif : barre regroupée, aucune marge sur le titre
         NSAttributedString *padded = TMTitleWithSpacing(title, spacing.doubleValue);
         Check(fabs([padded size].width - (plainWidth + spacing.doubleValue)) < 0.75,
               [NSString stringWithFormat:@"valeur seule : espacement %@ → +%@ pt autour du texte", spacing, spacing]);
@@ -3057,6 +3134,7 @@ int main(void) {
         TestWidgetColors();
         TestWidgetNewShapes();
         TestMenuBarIconLayout();
+        TestWidgetBar();
         TestWidgetDisplay();
         TestSystemMenuBarSpacing();
         TestApiRegistry();

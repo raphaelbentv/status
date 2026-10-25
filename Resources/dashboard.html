@@ -952,7 +952,9 @@ function quotaIconRow(data,p,provider){
 // Taille et espacement des icônes de Status dans la barre des menus. Les valeurs sont celles que le
 // natif accepte (StatusMenuBarWidgets.m) : toute autre valeur y serait ignorée.
 const ICON_SCALES=[[0.85,'small'],[1,'normal'],[1.15,'large'],[1.25,'xlarge']];
-const ICON_SPACINGS=[[0,'normal'],[4,'airy'],[8,'wide'],[14,'xwide']];
+// Négatif = icônes regroupées en un seul bloc, à 16 + valeur points les unes des autres (macOS en laisse 16) ;
+// 0 = icônes séparées, espacement du système ; positif = marge ajoutée autour de chaque icône.
+const ICON_SPACINGS=[[-15,'flush'],[-12,'tight'],[-8,'snug'],[0,'normal'],[4,'airy'],[8,'wide'],[14,'xwide']];
 function iconLayoutRow(kind,options,current,field){
   const buttons=options.map(([v,key])=>`<button class="seg ${Math.abs(current-v)<1e-6?'on':''}" aria-pressed="${Math.abs(current-v)<1e-6}" onclick="send('setMenuBarIconLayout',{${field}:${v}})">${t('bar.layout.'+kind+'.'+key)}</button>`).join('');
   return `<div class="layout-row" data-layout="${field}"><div class="setting-copy"><strong>${t('bar.layout.'+(field==='scale'?'size':'spacing'))}</strong><small>${t('bar.layout.'+(field==='scale'?'sizeDesc':'spacingDesc'))}</small></div><span class="segmented">${buttons}</span></div>`;
