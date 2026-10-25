@@ -1,0 +1,499 @@
+/* phosphore — habillage et mise en page, chargé par dashboard.html, menubar.html et widget.html.
+   Direction « Terminal à phosphore » : un moniteur P1 d'atelier, version élégante. Monochrome vert
+   sur noir verdi, Geist Mono partout, un halo mesuré sur les seuls chiffres et titres (jamais sur
+   le texte courant), cadres à coins en équerre, jauges en cellules (▮▮▮▯▯), états actifs en vidéo
+   inversée, invite « > » et curseur clignotant sur les titres. Des lignes de balayage très
+   discrètes couvrent l'écran ; elles et le curseur disparaissent sous prefers-reduced-motion.
+   Les deux fournisseurs se distinguent par la teinte (OpenAI menthe, Claude citron vert), les états
+   par l'ambre et le rouge, seules couleurs étrangères au vert.
+   Tout est scopé html[data-theme="phosphore"] : la spécificité l'emporte sur les <style> en ligne.
+   Les couleurs d'état suivent data-level (ok / warn / crit), calculé sur le RESTANT. */
+
+/* ═══ 1. Jetons ═══════════════════════════════════════════════════════════════
+   --blue = OpenAI (menthe), --purple = Claude (citron vert). Lus aussi par widget.html. */
+html[data-theme="phosphore"]{
+  color-scheme:dark;
+  --bg:#040a06;--sidebar:#020503;--panel-bg:rgba(89,255,176,.035);--panel-bg-strong:rgba(2,6,3,.94);
+  --text:#8dfbc8;--muted:#4fc48c;
+  --hair:rgba(89,255,176,.2);--hair-strong:rgba(89,255,176,.4);
+  --soft:rgba(89,255,176,.055);--soft-hover:rgba(89,255,176,.12);
+  --blue:#59ffb0;--blue-soft:rgba(89,255,176,.09);--purple:#bff562;--purple-soft:rgba(191,245,98,.09);
+  --green:#59ffb0;--amber:#ffc247;--danger:#ff6b5e;
+  --chart-a:#59ffb0;--chart-b:#bff562;
+  --grid:transparent;
+  --font:"Geist Mono","IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --radius:0px;
+  --bg-image:radial-gradient(110% 70% at 50% -5%,rgba(60,255,160,.1),transparent 62%),radial-gradient(90% 60% at 50% 125%,rgba(60,255,160,.06),transparent 70%);
+  --bg-size:auto;
+  /* Jetons propres au thème */
+  --ink:#d6ffe9;--ink2:#8dfbc8;--ink3:#5fd39c;--rule:rgba(89,255,176,.13);--ink-on:#02130a;
+  --glow:0 0 8px rgba(89,255,176,.45);--glow-lime:0 0 8px rgba(191,245,98,.45);
+  --card:linear-gradient(180deg,rgba(89,255,176,.055),rgba(89,255,176,.018));
+}
+
+/* Lignes de balayage : un voile de 1 px sur 3, quasi invisible, par-dessus tout sans jamais capter
+   la souris. Coupé sous prefers-reduced-motion (voir fin de feuille). */
+html[data-theme="phosphore"]::after{content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px)}
+
+/* ═══ 2. Coque : fenêtre, barre latérale, barre de titre ═════════════════════ */
+html[data-theme="phosphore"] body{font-size:12.5px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;font-feature-settings:"zero" 1}
+html[data-theme="phosphore"] .shell,html[data-theme="phosphore"] .popover{--muted:#58c995}
+
+html[data-theme="phosphore"] .sidebar{padding:20px 14px 16px;background:rgba(2,5,3,.9);border-right:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .product{margin:2px 4px 26px;padding:9px 12px;font:600 13px/1 var(--font);letter-spacing:.22em;color:var(--blue);text-shadow:var(--glow);
+  text-transform:uppercase;border:1px solid var(--hair-strong);background:var(--soft)}
+html[data-theme="phosphore"] .product::before{content:"> ";letter-spacing:0;opacity:.85}
+
+html[data-theme="phosphore"] .nav button{padding:8px 12px 8px 38px;margin-bottom:2px;border:1px solid transparent;border-radius:0;font-size:13px;color:var(--ink3);transition:background .1s,color .1s}
+html[data-theme="phosphore"] .nav button::before{left:12px;font:500 11px/1 var(--font);opacity:.8;color:var(--ink3)}
+html[data-theme="phosphore"] .nav button:hover{background:var(--soft);border-color:var(--hair);color:var(--ink)}
+html[data-theme="phosphore"] .nav button.active{background:var(--blue);border-color:var(--blue);color:var(--ink-on);font-weight:700}
+html[data-theme="phosphore"] .nav button.active::before{content:">";opacity:1;color:var(--ink-on);font-weight:700;font-size:13px}
+
+html[data-theme="phosphore"] .sidebar-bottom{border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .connection-state{padding:8px 12px;font:400 11.5px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .connection-state i{width:8px;height:8px;background:#2b4d3c}
+html[data-theme="phosphore"] .connection-state i.live{background:var(--blue);box-shadow:var(--glow)}
+html[data-theme="phosphore"] .connection-state i.warn{background:var(--amber);box-shadow:0 0 8px rgba(255,194,71,.55)}
+
+html[data-theme="phosphore"] main{padding:0 36px 40px}
+html[data-theme="phosphore"] main::-webkit-scrollbar{width:10px}
+html[data-theme="phosphore"] main::-webkit-scrollbar-thumb{background:rgba(89,255,176,.28);border:2px solid transparent;background-clip:padding-box}
+html[data-theme="phosphore"] ::selection{background:var(--blue);color:var(--ink-on)}
+
+html[data-theme="phosphore"] .toolbar{height:74px;gap:14px;border-bottom:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .toolbar h1{font:600 16px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--blue);text-shadow:var(--glow)}
+html[data-theme="phosphore"] .toolbar h1::before{content:"> ";letter-spacing:0;opacity:.7}
+html[data-theme="phosphore"] .toolbar h1::after{content:"_";letter-spacing:0;margin-left:.15em;animation:phos-blink 1.1s steps(1) infinite}
+@keyframes phos-blink{50%{opacity:0}}
+html[data-theme="phosphore"] .toolbar-meta{font:400 12px/1.3 var(--font);color:var(--ink3);white-space:nowrap}
+html[data-theme="phosphore"] .toolbar-warn{white-space:nowrap;font:500 12px/1 var(--font);color:var(--amber)}
+
+/* Boutons : [ crochets ], vidéo inversée au survol. */
+html[data-theme="phosphore"] .button,html[data-theme="phosphore"] .account-action,html[data-theme="phosphore"] .provider-manage{
+  padding:6px 12px;border:1px solid var(--hair-strong);border-radius:0;background:transparent;color:var(--ink2);font:500 12px/1.2 var(--font);white-space:nowrap;transition:background .1s,color .1s}
+html[data-theme="phosphore"] .button::before,html[data-theme="phosphore"] .account-action::before{content:"[ ";opacity:.55;white-space:pre}
+html[data-theme="phosphore"] .button::after,html[data-theme="phosphore"] .account-action::after{content:" ]";opacity:.55;white-space:pre}
+html[data-theme="phosphore"] .button:hover,html[data-theme="phosphore"] .account-action:hover,html[data-theme="phosphore"] .provider-manage:hover{background:var(--provider,var(--blue));border-color:var(--provider,var(--blue));color:var(--ink-on)}
+html[data-theme="phosphore"] .button:active,html[data-theme="phosphore"] .account-action:active{filter:brightness(.85)}
+html[data-theme="phosphore"] .toolbar .button{border-color:var(--blue);color:var(--blue);text-shadow:var(--glow)}
+html[data-theme="phosphore"] .toolbar .button:hover{text-shadow:none}
+html[data-theme="phosphore"] .button.on{border-color:var(--blue);color:var(--blue);background:var(--blue-soft)}
+html[data-theme="phosphore"] .button[disabled],html[data-theme="phosphore"] .account-action[disabled]{opacity:.4;cursor:default;background:transparent;border-style:dashed;color:var(--ink3);text-shadow:none}
+html[data-theme="phosphore"] .account-action.primary{background:var(--provider,var(--blue));border-color:var(--provider,var(--blue));color:var(--ink-on);font-weight:700}
+html[data-theme="phosphore"] .account-action.primary::before,html[data-theme="phosphore"] .account-action.primary::after{opacity:.7}
+html[data-theme="phosphore"] .account-action.primary:hover{filter:brightness(1.12)}
+html[data-theme="phosphore"] .provider-manage{margin-left:12px;padding:2px 9px;font-size:11px;letter-spacing:.06em;color:var(--ink3)}
+
+/* Segmentés : cellules ; l'élément actif passe en vidéo inversée. */
+html[data-theme="phosphore"] .segmented,html[data-theme="phosphore"] .view-toggle{border:1px solid var(--hair-strong);border-radius:0;background:transparent;overflow:hidden}
+html[data-theme="phosphore"] .seg,html[data-theme="phosphore"] .view-toggle button{padding:6px 12px;font:500 12px/1.2 var(--font);color:var(--ink3);transition:background .1s,color .1s}
+html[data-theme="phosphore"] .seg:hover,html[data-theme="phosphore"] .view-toggle button:hover{background:var(--soft-hover);color:var(--ink)}
+html[data-theme="phosphore"] .seg+.seg{border-left:1px solid var(--hair)}
+html[data-theme="phosphore"] .seg.on,html[data-theme="phosphore"] .view-toggle button.on{background:var(--blue);color:var(--ink-on);font-weight:700}
+html[data-theme="phosphore"] .seg[disabled]{opacity:.3;cursor:default}
+html[data-theme="phosphore"] .seg-wrap .seg{border:1px solid var(--hair-strong)}
+
+html[data-theme="phosphore"] select{padding:7px 12px;background:#020805;border:1px solid var(--hair-strong);border-radius:0;color:var(--ink2);font:500 12.5px/1.2 var(--font)}
+html[data-theme="phosphore"] select:hover{border-color:var(--blue)}
+html[data-theme="phosphore"] input[type="number"]{background:#020805;border:1px solid var(--hair-strong);border-radius:0;padding:5px 8px;color:var(--ink2);font:500 12.5px/1.2 var(--font)}
+/* Focus clavier : cadre plein vert vif avec filet noir, visible sur noir comme sur vidéo inversée. */
+html[data-theme="phosphore"] button:focus-visible,html[data-theme="phosphore"] summary:focus-visible,
+html[data-theme="phosphore"] select:focus-visible,html[data-theme="phosphore"] input:focus-visible{outline:2px solid #d6ffe9;outline-offset:2px}
+html[data-theme="phosphore"] .notice{border:1px solid var(--amber);border-radius:0;background:rgba(255,194,71,.07)}
+html[data-theme="phosphore"] .notice strong{font:600 12px/1.3 var(--font);letter-spacing:.06em;text-transform:uppercase}
+html[data-theme="phosphore"] .notice p{color:var(--ink2)}
+html[data-theme="phosphore"] .sort-row{margin:18px 0 6px;color:var(--ink2);font-size:12.5px}
+
+/* Cadres : filet de 1 px et équerres aux coins haut-gauche / bas-droit, teintées par fournisseur
+   quand --provider existe, vert sinon. Le contenu garde son rythme : les équerres sont absolues. */
+html[data-theme="phosphore"] .provider-block,html[data-theme="phosphore"] .connection-panel,html[data-theme="phosphore"] .quota-grid>.quota-card,
+html[data-theme="phosphore"] .metric-card,html[data-theme="phosphore"] .day-card,html[data-theme="phosphore"] .display-card,
+html[data-theme="phosphore"] .settings-pane .setting,html[data-theme="phosphore"] .cost-total,html[data-theme="phosphore"] .api-foot,
+html[data-theme="phosphore"] #providers .quota-card,html[data-theme="phosphore"] .account-list,html[data-theme="phosphore"] .api-credits{
+  position:relative;--k:var(--lv,var(--provider,var(--blue)));border:1px solid var(--hair);border-radius:0;background:var(--card);background-color:rgba(3,10,6,.82);clip-path:none}
+html[data-theme="phosphore"] .provider-block::before,html[data-theme="phosphore"] .connection-panel::before,html[data-theme="phosphore"] .quota-grid>.quota-card::before,
+html[data-theme="phosphore"] .metric-card::before,html[data-theme="phosphore"] .day-card::before,html[data-theme="phosphore"] .display-card::before,
+html[data-theme="phosphore"] .settings-pane .setting::before,html[data-theme="phosphore"] .cost-total::before,html[data-theme="phosphore"] .api-foot::before,
+html[data-theme="phosphore"] #providers .quota-card::before,html[data-theme="phosphore"] .account-list::before,html[data-theme="phosphore"] .api-credits::before{
+  content:"";position:absolute;left:-1px;top:-1px;right:auto;bottom:auto;width:10px;height:10px;background:none;border-top:2px solid var(--k);border-left:2px solid var(--k);pointer-events:none}
+html[data-theme="phosphore"] .provider-block::after,html[data-theme="phosphore"] .connection-panel::after,html[data-theme="phosphore"] .quota-grid>.quota-card::after,
+html[data-theme="phosphore"] .metric-card::after,html[data-theme="phosphore"] .day-card::after,html[data-theme="phosphore"] .display-card::after,
+html[data-theme="phosphore"] .settings-pane .setting::after,html[data-theme="phosphore"] .cost-total::after,html[data-theme="phosphore"] .api-foot::after,
+html[data-theme="phosphore"] #providers .quota-card::after,html[data-theme="phosphore"] .account-list::after,html[data-theme="phosphore"] .api-credits::after{
+  content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-bottom:2px solid var(--k);border-right:2px solid var(--k);pointer-events:none}
+html[data-theme="phosphore"] .connection-panel:nth-child(2)::before{background:none}
+
+/* ═══ 3. Quotas (vue « Status ») ═════════════════════════════════════════════ */
+html[data-theme="phosphore"] .provider-blocks{gap:18px;margin-top:14px}
+html[data-theme="phosphore"] .provider-block{padding:20px 22px 22px;border-color:var(--hair-strong)}
+html[data-theme="phosphore"] .provider-block-head{margin-bottom:18px;padding-bottom:12px;border-bottom:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .provider{gap:10px;font:600 13px/1 var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--provider);text-shadow:0 0 8px color-mix(in srgb,var(--provider) 50%,transparent)}
+html[data-theme="phosphore"] .provider-dot{width:9px;height:9px;background:var(--provider)}
+html[data-theme="phosphore"] .status-label{font:400 12px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .status-label i{width:6px;height:6px}
+
+html[data-theme="phosphore"] .account-block+.account-block{border-top:1px dashed var(--hair-strong);margin-top:20px;padding-top:20px}
+html[data-theme="phosphore"] .account-block-head{align-items:center;margin-bottom:6px}
+html[data-theme="phosphore"] .account-block-head strong,html[data-theme="phosphore"] .account-copy strong{font-size:13.5px;font-weight:600;color:var(--ink)}
+html[data-theme="phosphore"] .account-identity{font-weight:400;color:var(--ink3);font-size:12px;margin-left:9px}
+/* État du compte : « [●] connecté », ambre en erreur, éteint sans session. */
+html[data-theme="phosphore"] .account-block .status-label{--st:var(--blue);display:inline-flex;align-items:center;padding:2px 9px;border:1px solid color-mix(in srgb,var(--st) 55%,transparent);color:var(--st);font:500 11.5px/1.3 var(--font)}
+html[data-theme="phosphore"] .account-block[data-connected="0"] .status-label{--st:#6bb18f}
+html[data-theme="phosphore"] .account-block[data-error="1"] .status-label{--st:var(--amber)}
+html[data-theme="phosphore"] .account-block .status-label i{background:var(--st);margin-right:7px;box-shadow:0 0 6px var(--st)}
+html[data-theme="phosphore"] .account-block[data-connected="0"] .status-label i{box-shadow:none}
+html[data-theme="phosphore"] .freshness{margin:0 0 12px;font:400 12px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .freshness.stale{color:var(--amber)}
+html[data-theme="phosphore"] .billing-line{margin:0 0 12px;font:400 12px/1.4 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .billing-line.soon{color:var(--amber)}
+html[data-theme="phosphore"] .quota-error{margin-top:12px;padding:8px 12px;border:1px solid var(--danger);background:rgba(255,107,94,.08);color:#ff9d93;font-size:12.5px}
+html[data-theme="phosphore"] .quota-error::before{content:"! ";font-weight:700}
+html[data-theme="phosphore"] .quota-stale{color:var(--amber)}
+html[data-theme="phosphore"] .quota-empty{border:1px dashed var(--hair-strong);border-radius:0;color:var(--ink2);padding:16px}
+
+html[data-theme="phosphore"] .quota-grid{gap:10px}
+html[data-theme="phosphore"] .quota-card{--lv:var(--provider,var(--blue))}
+html[data-theme="phosphore"] .quota-card[data-level="warn"]{--lv:var(--amber)}
+html[data-theme="phosphore"] .quota-card[data-level="crit"]{--lv:var(--danger)}
+html[data-theme="phosphore"] .quota-grid>.quota-card{padding:13px 16px 12px;border-color:var(--hair)}
+html[data-theme="phosphore"] .quota-top{align-items:baseline}
+html[data-theme="phosphore"] .quota-top span{font:500 11.5px/1.3 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--ink2)}
+html[data-theme="phosphore"] .quota-top strong{font:600 14px/1.2 var(--font);letter-spacing:0;color:var(--lv);text-shadow:0 0 8px color-mix(in srgb,var(--lv) 50%,transparent);white-space:nowrap}
+html[data-theme="phosphore"] .quota-card small{font-size:12px;color:var(--ink3);line-height:1.45}
+html[data-theme="phosphore"] .quota-foot{align-items:center;gap:10px}
+html[data-theme="phosphore"] .quota-foot small{font:400 11.5px/1.45 var(--font)}
+html[data-theme="phosphore"] .spark{margin-left:auto}
+html[data-theme="phosphore"] .spark .area{fill:var(--c);opacity:.12}
+html[data-theme="phosphore"] .spark .line{stroke-width:1.3;filter:drop-shadow(0 0 2px var(--c))}
+html[data-theme="phosphore"] .manual-reset{font:400 11.5px/1.4 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .manual-reset.available{color:var(--blue);font-weight:600}
+html[data-theme="phosphore"] .reset-expiries li.soon{color:var(--amber)}
+html[data-theme="phosphore"] .extra-credits{border:1px dashed var(--hair-strong)!important;border-radius:0!important;background:transparent!important}
+html[data-theme="phosphore"] .extra-credits span{font:500 11px/1.3 var(--font)!important;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)!important}
+html[data-theme="phosphore"] .extra-credits strong{color:var(--ink)}
+
+/* Jauge : cellules de 5 px séparées de 2 px, comme une barre de caractères. Le masque découpe
+   le remplissage (dont la couleur d'alerte inline du popover) ; le fond du rail montre les
+   cellules éteintes. Servent aux deux pages (.quota-track du tableau de bord, .rail du popover). */
+html[data-theme="phosphore"] .quota-track,html[data-theme="phosphore"] .rail{--tc:var(--lv,var(--provider,var(--blue)));position:relative;height:12px;margin:10px 0 8px;overflow:hidden;
+  border:0;border-radius:0;background:repeating-linear-gradient(90deg,rgba(89,255,176,.16) 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .quota-track i,html[data-theme="phosphore"] .rail i{height:100%;box-shadow:none;
+  background:var(--tc);-webkit-mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 7px);mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .quota-track i[style*="width:0%"],html[data-theme="phosphore"] .rail i[style*="width:0%"]{display:none}
+html[data-theme="phosphore"] .rail.thin{height:8px;margin:0}
+
+html[data-theme="phosphore"] .cost-total{margin-top:20px;padding:14px 16px;--k:var(--purple);border-color:var(--hair-strong)}
+html[data-theme="phosphore"] .cost-total.scanning{border-style:dashed;font-size:12px}
+html[data-theme="phosphore"] .cost-total-label{font:500 11px/1.3 var(--font);letter-spacing:.14em;color:var(--ink3);margin-bottom:6px}
+html[data-theme="phosphore"] .cost-total-amount{font:400 28px/1 var(--font);letter-spacing:-.02em;color:var(--purple);text-shadow:var(--glow-lime);white-space:nowrap}
+html[data-theme="phosphore"] .cost-amount{color:var(--purple)}
+html[data-theme="phosphore"] .cost-warn{color:var(--amber)}
+html[data-theme="phosphore"] .summary-note{margin-top:8px;font-size:12px;color:var(--ink3);line-height:1.45}
+html[data-theme="phosphore"] .model-table{font:400 12px/1.4 var(--font)}
+html[data-theme="phosphore"] .model-table th{color:var(--ink3);letter-spacing:.1em;font-weight:500;border-bottom:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .model-table td{border-bottom:1px dashed var(--rule);padding:5px 0}
+html[data-theme="phosphore"] .model-table td:first-child{overflow-wrap:anywhere}
+html[data-theme="phosphore"] .model-table .num{white-space:nowrap;padding-left:12px}
+
+html[data-theme="phosphore"] .section-head{margin:28px 0 18px}
+html[data-theme="phosphore"] .section-head h2{font:600 12px/1.3 var(--font);letter-spacing:.18em;color:var(--blue);margin-bottom:6px}
+html[data-theme="phosphore"] .section-head h2::before{content:"// ";opacity:.6;letter-spacing:0}
+html[data-theme="phosphore"] .section-head p{color:var(--ink3)}
+html[data-theme="phosphore"] .wk-svg{border:1px solid var(--hair-strong);border-radius:0;background:rgba(3,10,6,.7)}
+html[data-theme="phosphore"] .wk-legend{color:var(--ink2)}
+
+/* ═══ 4. Moniteur ════════════════════════════════════════════════════════════ */
+html[data-theme="phosphore"] .vitals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:20px;border:1px solid var(--hair-strong);border-radius:0;background:var(--hair-strong);overflow:hidden}
+html[data-theme="phosphore"] .vital{--c:var(--chart-a);gap:5px;padding:12px 14px 10px;background:rgba(2,7,4,.94)}
+html[data-theme="phosphore"] .vital:hover{background:var(--c);color:var(--ink-on)}
+html[data-theme="phosphore"] .vital:hover .vital-label,html[data-theme="phosphore"] .vital:hover .vital-value,html[data-theme="phosphore"] .vital:hover .vital-value small{color:var(--ink-on);text-shadow:none}
+html[data-theme="phosphore"] .vital:hover svg path{stroke:var(--ink-on);filter:none}
+html[data-theme="phosphore"] .vital.warn{--c:var(--amber)}
+html[data-theme="phosphore"] .vital.crit{--c:var(--danger)}
+html[data-theme="phosphore"] .vital-label{font:500 10.5px/1.25 var(--font);letter-spacing:.1em;color:var(--ink3)}
+html[data-theme="phosphore"] .vital .vital-value{font:500 19px/1.1 var(--font);letter-spacing:-.03em;color:var(--ink);text-shadow:var(--glow)}
+html[data-theme="phosphore"] .vital.warn .vital-value{color:var(--amber);text-shadow:0 0 8px rgba(255,194,71,.5)}
+html[data-theme="phosphore"] .vital.crit .vital-value{color:var(--danger);text-shadow:0 0 8px rgba(255,107,94,.5)}
+html[data-theme="phosphore"] .vital.boost .vital-value{color:var(--purple);text-shadow:var(--glow-lime)}
+html[data-theme="phosphore"] .vital-value small{font:400 11px/1 var(--font);color:var(--ink3);text-shadow:none}
+html[data-theme="phosphore"] .vital svg path{stroke:var(--c);stroke-width:1.4;filter:drop-shadow(0 0 2px var(--c))}
+
+html[data-theme="phosphore"] .monitor-section{margin-top:30px}
+html[data-theme="phosphore"] .monitor-section>h2{display:flex;align-items:center;gap:10px;font:600 11.5px/1.3 var(--font);letter-spacing:.18em;color:var(--blue);margin-bottom:12px}
+html[data-theme="phosphore"] .monitor-section>h2::before{content:"//";letter-spacing:0;opacity:.6}
+html[data-theme="phosphore"] .monitor-section>h2::after{content:"";flex:1;height:0;border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .monitor-section .metric-grid{gap:16px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="phosphore"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}
+html[data-theme="phosphore"] .metric-card,html[data-theme="phosphore"] .day-card{padding:16px 20px 16px;border-color:var(--hair-strong);--k:var(--blue)}
+html[data-theme="phosphore"] .metric-card.expandable:hover{border-color:var(--blue)}
+html[data-theme="phosphore"] .metric-head{align-items:center;margin-bottom:6px}
+html[data-theme="phosphore"] .metric-head h3{font:600 12px/1.3 var(--font);letter-spacing:.16em;color:var(--ink2)}
+html[data-theme="phosphore"] .metric-value{font:400 28px/1 var(--font);letter-spacing:-.04em;color:var(--ink);text-shadow:var(--glow);white-space:nowrap}
+html[data-theme="phosphore"] .metric-value .unit{font:400 13px/1 var(--font);letter-spacing:0;color:var(--ink3);text-shadow:none;margin-left:3px}
+html[data-theme="phosphore"] .metric-head .unit{font-size:12.5px;color:var(--ink2)}
+html[data-theme="phosphore"] .metric-readout{font:400 11.5px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .metric-badge{padding:2px 8px;border:1px solid var(--hair-strong);font:500 11px/1.3 var(--font);letter-spacing:.03em;color:var(--ink2)}
+html[data-theme="phosphore"] .metric-badge.warn{color:var(--amber);border-color:var(--amber);background:rgba(255,194,71,.1)}
+html[data-theme="phosphore"] .metric-badge.crit{color:var(--danger);border-color:var(--danger);background:rgba(255,107,94,.1)}
+html[data-theme="phosphore"] .metric-card .chevron{color:var(--blue);opacity:1}
+
+html[data-theme="phosphore"] .metric-chart .line{stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 0 3px var(--chart-a))}
+html[data-theme="phosphore"] .metric-chart path.line:nth-of-type(4){filter:drop-shadow(0 0 3px var(--chart-b))}
+html[data-theme="phosphore"] .metric-chart .area{opacity:.1}
+html[data-theme="phosphore"] .metric-chart .baseline{stroke:var(--hair-strong)}
+html[data-theme="phosphore"] .metric-chart .gridline{stroke:rgba(89,255,176,.3)}
+html[data-theme="phosphore"] .metric-legend{color:var(--ink2);font:400 11.5px/1.3 var(--font)}
+html[data-theme="phosphore"] .metric-legend i{height:3px;box-shadow:0 0 5px currentColor}
+html[data-theme="phosphore"] .metric-detail{border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .detail-label,html[data-theme="phosphore"] .core-group-label{font:500 10.5px/1.3 var(--font);color:var(--ink3);letter-spacing:.1em}
+html[data-theme="phosphore"] .day-head strong{font:600 12px/1.3 var(--font);letter-spacing:.14em;color:var(--ink2)}
+html[data-theme="phosphore"] .day-stats b{color:var(--ink)}
+html[data-theme="phosphore"] .day-axis{color:var(--ink3)}
+html[data-theme="phosphore"] .day-chart path{filter:drop-shadow(0 0 3px var(--chart-a))}
+
+html[data-theme="phosphore"] .core-bars{gap:3px}
+html[data-theme="phosphore"] .core-bars i{background:var(--chart-a);box-shadow:0 0 6px rgba(89,255,176,.5)}
+html[data-theme="phosphore"] .core-schematic .core-bars i{width:8px}
+
+html[data-theme="phosphore"] .stat-row{grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:6px;background:transparent;border:0}
+html[data-theme="phosphore"] .stat-cell{background:rgba(2,7,4,.94);border:1px solid var(--hair-strong);padding:9px 11px}
+html[data-theme="phosphore"] .stat-cell b{font:500 15px/1.2 var(--font);color:var(--ink);white-space:nowrap}
+html[data-theme="phosphore"] .stat-cell span{font:500 10.5px/1.3 var(--font);color:var(--ink3);letter-spacing:.08em}
+html[data-theme="phosphore"] .stat-cell.warn b{color:var(--amber)}
+
+html[data-theme="phosphore"] .fan-panel{border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .fan-meter{font:400 12px/1.3 var(--font)}
+html[data-theme="phosphore"] .fan-meter .quota-track{height:8px;margin:2px 0 0}
+html[data-theme="phosphore"] .fan-meter b{color:var(--ink);white-space:nowrap}
+html[data-theme="phosphore"] .fan-actions strong{color:var(--purple);font:500 12px/1.3 var(--font)}
+
+html[data-theme="phosphore"] .proc-head{font:500 10.5px/1.3 var(--font);letter-spacing:.1em;color:var(--ink3)}
+html[data-theme="phosphore"] .proc-head .sorted,html[data-theme="phosphore"] .proc-val.sorted{color:var(--ink);font-weight:700;text-shadow:var(--glow)}
+html[data-theme="phosphore"] .proc-row{border-top:1px dashed var(--rule);padding:6px 0;font-size:12px}
+html[data-theme="phosphore"] .proc-cpu{font-weight:600;color:var(--ink)}
+html[data-theme="phosphore"] .metric-table{font:400 12.5px/1.4 var(--font)}
+html[data-theme="phosphore"] .metric-table th{color:var(--ink3);letter-spacing:.1em;font-weight:500;border-bottom:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .metric-table td{border-bottom:1px dashed var(--rule);color:var(--ink)}
+html[data-theme="phosphore"] .metric-table td:first-child{color:var(--ink2)}
+html[data-theme="phosphore"] .metric-empty{color:var(--ink2)}
+html[data-theme="phosphore"] .storage-summary{font-size:13px}
+html[data-theme="phosphore"] .storage-summary strong{color:var(--ink)}
+
+/* ═══ 5. Écrans ══════════════════════════════════════════════════════════════ */
+html[data-theme="phosphore"] .display-grid{gap:16px;margin-top:6px}
+html[data-theme="phosphore"] .display-card{padding:18px 20px 20px;border-color:var(--hair-strong);--k:var(--blue)}
+html[data-theme="phosphore"] .display-head{margin-bottom:18px}
+html[data-theme="phosphore"] .display-name{font-size:13.5px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+html[data-theme="phosphore"] .display-badge{flex:none;padding:2px 8px;font:500 10.5px/1.3 var(--font);letter-spacing:.08em;color:var(--ink2);border:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .display-badge.builtin{color:var(--ink-on);background:var(--blue);border-color:var(--blue);font-weight:700}
+html[data-theme="phosphore"] .display-unavailable{color:var(--ink3);font-size:12.5px}
+html[data-theme="phosphore"] .brightness-row{gap:16px}
+html[data-theme="phosphore"] .brightness-value{width:auto;min-width:58px;font:400 24px/1 var(--font);color:var(--ink);text-shadow:var(--glow);white-space:nowrap}
+
+/* Curseurs : cellules, pouce en bloc plein. La partie parcourue se remplit par l'ombre géante du
+   pouce (l'input clippe en overflow:hidden). */
+html[data-theme="phosphore"] .brightness-slider,html[data-theme="phosphore"] .b-slider{height:14px;overflow:hidden;border:0;border-radius:0;
+  background:repeating-linear-gradient(90deg,rgba(89,255,176,.16) 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .brightness-slider::-webkit-slider-thumb,html[data-theme="phosphore"] .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:7px;height:14px;margin-top:0;border:0;border-radius:0;background:var(--ink);
+  box-shadow:-1200px 0 0 1193px rgba(89,255,176,.55),0 0 8px rgba(89,255,176,.6)}
+html[data-theme="phosphore"] .brightness-slider:disabled{opacity:.4}
+
+/* ═══ 6. Réglages ════════════════════════════════════════════════════════════ */
+html[data-theme="phosphore"] .settings-layout{gap:32px;margin-top:22px;grid-template-columns:184px minmax(0,1fr)}
+html[data-theme="phosphore"] .settings-nav{gap:2px}
+html[data-theme="phosphore"] .settings-nav button{padding:8px 14px;border:1px solid transparent;border-radius:0;font-size:13px;color:var(--ink3)}
+html[data-theme="phosphore"] .settings-nav button:hover{background:var(--soft);border-color:var(--hair);color:var(--ink)}
+html[data-theme="phosphore"] .settings-nav button.on{background:var(--blue);border-color:var(--blue);color:var(--ink-on);font-weight:700}
+html[data-theme="phosphore"] .settings-nav button.on::before{display:none}
+html[data-theme="phosphore"] .settings-pane-head h2{font:600 14px/1.3 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--blue);text-shadow:var(--glow);margin-bottom:6px}
+html[data-theme="phosphore"] .settings-pane-head h2::before{content:"> ";opacity:.6;letter-spacing:0}
+html[data-theme="phosphore"] .settings-pane-head p{color:var(--ink3);font-size:12.5px}
+
+html[data-theme="phosphore"] .settings-pane .settings{gap:12px}
+html[data-theme="phosphore"] .settings-pane .setting{padding:16px 20px;border-color:var(--hair-strong);gap:22px;--k:var(--blue)}
+html[data-theme="phosphore"] .settings-pane .setting-copy strong{font-size:13.5px;font-weight:600;color:var(--ink);margin-bottom:5px}
+html[data-theme="phosphore"] .settings-pane .setting-copy small{font-size:12px;color:var(--ink3);line-height:1.55}
+html[data-theme="phosphore"] .setting-state{font:400 12px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .setting-state.ok{color:var(--blue);text-shadow:var(--glow)}
+html[data-theme="phosphore"] .settings-pane .setting>.button:not(.on){color:var(--ink3)}
+html[data-theme="phosphore"] .settings-pane .setting>.button:not(.on):hover{color:var(--ink-on)}
+html[data-theme="phosphore"] .connection-note{color:var(--ink3)}
+
+html[data-theme="phosphore"] .widget-config{gap:10px}
+html[data-theme="phosphore"] .wc-toggle{min-width:124px;padding:6px 14px;border:1px solid var(--hair-strong);color:var(--ink3);background:transparent}
+html[data-theme="phosphore"] .wc-toggle.on{color:var(--ink-on);border-color:var(--blue);background:var(--blue);font-weight:700}
+html[data-theme="phosphore"] .wc-dot{width:9px;height:9px;border-radius:0}
+html[data-theme="phosphore"] .wc-move{border-radius:0}
+html[data-theme="phosphore"] .wc-swatch{width:16px;height:16px;border-radius:0;border:1px solid rgba(255,255,255,.35)}
+html[data-theme="phosphore"] .wc-swatch.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--ink)}
+html[data-theme="phosphore"] .wc-sub{border-left:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .wc-sublabel{font:500 10.5px/1.3 var(--font);color:var(--ink3);letter-spacing:.1em}
+
+html[data-theme="phosphore"] .theme-swatch{padding:9px 12px;border:1px solid var(--hair);border-radius:0;background:rgba(2,7,4,.7);color:var(--ink3);font-size:12.5px}
+html[data-theme="phosphore"] .theme-swatch:hover{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--ink)}
+html[data-theme="phosphore"] .theme-swatch.on{color:var(--ink-on);font-weight:700;border-color:var(--blue);background:var(--blue)}
+html[data-theme="phosphore"] .theme-swatch .dot{width:9px;height:9px;border-radius:0}
+
+html[data-theme="phosphore"] .connections{gap:16px}
+html[data-theme="phosphore"] .connection-panel{padding:20px 22px 22px;border-color:var(--hair-strong);--k:var(--blue)}
+html[data-theme="phosphore"] .connection-panel:nth-child(2){--k:var(--purple)}
+html[data-theme="phosphore"] .connection-panel h3{font:600 13px/1.3 var(--font);letter-spacing:.16em;text-transform:uppercase;margin-bottom:6px}
+html[data-theme="phosphore"] .connection-panel>p{color:var(--ink3);font-size:12.5px}
+html[data-theme="phosphore"] .quota-block{border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .account-copy small{color:var(--ink3);font-size:12px}
+html[data-theme="phosphore"] .account-add{border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .account-add small{color:var(--ink3)}
+html[data-theme="phosphore"] .account-menu summary{border:1px solid var(--hair-strong);border-radius:0;padding:3px 12px;font-size:16px;line-height:1.2;background:transparent}
+html[data-theme="phosphore"] .account-menu summary:hover{background:var(--blue);color:var(--ink-on)}
+html[data-theme="phosphore"] .account-menu-items{background:#030c07;border:1px solid var(--hair-strong);border-radius:0;box-shadow:0 16px 36px rgba(0,0,0,.7)}
+html[data-theme="phosphore"] .pin-list{border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .shortcut-row kbd{background:transparent;border:1px solid var(--hair-strong);border-radius:0;color:var(--ink);box-shadow:2px 2px 0 rgba(89,255,176,.25)}
+html[data-theme="phosphore"] .bar-preview{border:1px solid var(--hair-strong);border-radius:0;background:rgba(2,7,4,.7)}
+html[data-theme="phosphore"] .bar-chip{border-radius:0}
+html[data-theme="phosphore"] .icon-style{border:1px solid var(--hair);border-radius:0;background:rgba(2,7,4,.7)}
+html[data-theme="phosphore"] .icon-style.on{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+html[data-theme="phosphore"] .field-select{background:#020805}
+html[data-theme="phosphore"] .api-figures strong{font:500 15px/1.2 var(--font)}
+html[data-theme="phosphore"] .api-rail{height:8px;border-radius:0;background:repeating-linear-gradient(90deg,rgba(89,255,176,.16) 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .api-rail i{-webkit-mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 7px);mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .api-foot{--k:var(--blue)}
+
+/* ═══ 7. Popover (480 × 640) ═════════════════════════════════════════════════ */
+html[data-theme="phosphore"] .popover{box-shadow:inset 0 0 0 1px var(--hair-strong)}
+html[data-theme="phosphore"] .providers{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px 12px 8px}
+html[data-theme="phosphore"] .providers::-webkit-scrollbar{width:0}
+
+html[data-theme="phosphore"] #providers .quota-card{padding:12px 13px 10px;border-color:var(--hair-strong)}
+html[data-theme="phosphore"] #providers .quota-card header{margin-bottom:6px;gap:6px}
+html[data-theme="phosphore"] .provider-name{font:600 11.5px/1 var(--font);letter-spacing:.18em;text-transform:uppercase;color:var(--provider);text-shadow:0 0 8px color-mix(in srgb,var(--provider) 50%,transparent)}
+html[data-theme="phosphore"] .account-name{font:400 12px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .provider-picker{padding:5px 8px;background:#020805;border:1px solid var(--hair-strong);border-radius:0;color:var(--ink2);font:500 12px/1.2 var(--font)}
+html[data-theme="phosphore"] #providers .quota-main{gap:4px}
+html[data-theme="phosphore"] .value{font:400 44px/1 var(--font);letter-spacing:-.06em;color:var(--lv,var(--provider));white-space:nowrap;
+  text-shadow:0 0 10px color-mix(in srgb,var(--lv,var(--provider)) 55%,transparent)}
+html[data-theme="phosphore"] #providers .quota-main .value{font-size:44px}
+html[data-theme="phosphore"] .value .unit{font:400 .34em/1 var(--font);letter-spacing:0;opacity:.9;margin-left:.2em;vertical-align:1em}
+/* Le chiffre, la jauge et l'équerre suivent tous data-level (reste ≤ 20 % : rouge, ≤ 45 % : ambre),
+   quelle que soit la couleur d'alerte inline que le script pose sur le remplissage. */
+html[data-theme="phosphore"] #providers .quota-card .rail i{background:var(--tc)!important}
+html[data-theme="phosphore"] .value.empty-value{color:var(--ink3);opacity:.7;text-shadow:none}
+html[data-theme="phosphore"] .quota-label{font:500 10.5px/1.3 var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+html[data-theme="phosphore"] .quota-side .primary-rail{margin-top:7px;margin-bottom:6px}
+html[data-theme="phosphore"] .reset{font:400 11.5px/1.3 var(--font);color:var(--ink2)}
+html[data-theme="phosphore"] .session-row{--lv:var(--provider);gap:6px 8px;margin-top:9px;padding-top:9px;border-top:1px dashed var(--hair-strong);font:500 11.5px/1.3 var(--font);color:var(--ink2)}
+html[data-theme="phosphore"] .session-row[data-level="warn"]{--lv:var(--amber)}
+html[data-theme="phosphore"] .session-row[data-level="crit"]{--lv:var(--danger)}
+html[data-theme="phosphore"] .session-row>b{color:var(--lv);font-weight:700}
+html[data-theme="phosphore"] .session-row>small{color:var(--ink3);white-space:nowrap}
+html[data-theme="phosphore"] .account-note,html[data-theme="phosphore"] .quota-card .account-note{font:400 11.5px/1.35 var(--font);color:var(--ink3);white-space:normal;overflow:visible;text-overflow:clip;text-wrap:balance}
+html[data-theme="phosphore"] .account-note.stale{color:var(--amber);font-weight:600}
+html[data-theme="phosphore"] .account-note.live{color:var(--blue)}
+html[data-theme="phosphore"] .quota-card .who{color:var(--ink);font-weight:600;font-size:12.5px}
+html[data-theme="phosphore"] .quota-card .extra-credits{border:0!important;border-top:1px dashed var(--hair-strong)!important;padding:8px 0 0!important}
+html[data-theme="phosphore"] .popup-notice{border-bottom:1px solid var(--amber);background:rgba(255,194,71,.08)}
+html[data-theme="phosphore"] .popup-notice button{border:1px solid var(--amber);border-radius:0;padding:4px 12px;color:var(--ink)}
+
+html[data-theme="phosphore"] .account-list,html[data-theme="phosphore"] .api-credits{border-color:var(--hair-strong);--k:var(--blue)}
+html[data-theme="phosphore"] .account-list>header,html[data-theme="phosphore"] .api-credits>header{font:600 11px/1.3 var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--blue);margin-bottom:4px}
+html[data-theme="phosphore"] .account-list>header::before,html[data-theme="phosphore"] .api-credits>header::before{content:"// ";opacity:.6;letter-spacing:0}
+html[data-theme="phosphore"] .al-row{border-top:1px dashed var(--rule);font-size:12px}
+html[data-theme="phosphore"] .al-row>i{width:8px;height:8px;border-radius:0;background:var(--provider);box-shadow:0 0 6px color-mix(in srgb,var(--provider) 60%,transparent)}
+html[data-theme="phosphore"] .al-row>span{color:var(--ink)}
+html[data-theme="phosphore"] .al-row>small{font:400 11px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .al-row>b{font:600 12px/1.3 var(--font);color:var(--ink)}
+html[data-theme="phosphore"] .al-row>b.warning,html[data-theme="phosphore"] .api-row>b.warning{color:var(--amber)}
+html[data-theme="phosphore"] .al-row>b.critical,html[data-theme="phosphore"] .api-row>b.critical{color:var(--danger)}
+html[data-theme="phosphore"] .al-row.off>span,html[data-theme="phosphore"] .al-row.off>b{color:var(--ink3)}
+html[data-theme="phosphore"] .api-row{border-top:1px dashed var(--rule)}
+html[data-theme="phosphore"] .api-row>span{font-weight:700}
+html[data-theme="phosphore"] .api-row>b{font-weight:600}
+html[data-theme="phosphore"] .api-row>small{font:400 11.5px/1.4 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .api-row>small.error{color:var(--amber)}
+
+html[data-theme="phosphore"] .fans{padding:10px 14px 11px;border-top:1px solid var(--hair-strong);background:rgba(2,6,3,.94)}
+html[data-theme="phosphore"] .fan-head strong{font:600 11px/1.3 var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--blue)}
+html[data-theme="phosphore"] .fan-head span{color:var(--ink2)}
+html[data-theme="phosphore"] .fan-row .account-action{padding:6px 12px}
+html[data-theme="phosphore"] .fan-state{font:500 12px/1.3 var(--font);color:var(--ink2)}
+html[data-theme="phosphore"] .fan-state.on{color:var(--purple);text-shadow:var(--glow-lime)}
+html[data-theme="phosphore"] .fan-note{color:var(--ink3)}
+
+html[data-theme="phosphore"] .mac-tools{background:rgba(2,6,3,.94);border-top:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .mac-tools>summary{padding:9px 14px;font:600 11px/1.3 var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--blue)}
+html[data-theme="phosphore"] .mac-tools>summary:hover{color:var(--ink)}
+html[data-theme="phosphore"] .metrics{gap:1px;background:var(--hair-strong);border-top:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .mtile{padding:8px 10px 7px;background:rgba(2,7,4,.96)}
+html[data-theme="phosphore"] .mtile .mlabel{font:500 10px/1.3 var(--font);letter-spacing:.08em;color:var(--ink3);white-space:nowrap}
+html[data-theme="phosphore"] .mtile .mvalue{font:500 13px/1.2 var(--font);color:var(--ink);margin:2px 0 4px;text-shadow:var(--glow)}
+html[data-theme="phosphore"] .mtile .line{stroke:var(--chart-a);stroke-width:1.5;filter:drop-shadow(0 0 2px var(--chart-a))}
+html[data-theme="phosphore"] .mtile .line:nth-of-type(2){stroke:var(--chart-b);filter:drop-shadow(0 0 2px var(--chart-b))}
+html[data-theme="phosphore"] .brightness{background:var(--hair-strong)}
+html[data-theme="phosphore"] .b-row{background:rgba(2,7,4,.96);padding:8px 12px;gap:10px}
+html[data-theme="phosphore"] .b-sun{color:var(--purple)}
+html[data-theme="phosphore"] .b-label{color:var(--ink2);width:160px;font-size:12px}
+html[data-theme="phosphore"] .b-value{color:var(--ink);width:40px}
+html[data-theme="phosphore"] .tools{background:var(--hair-strong);border-top:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .tool{background:rgba(2,7,4,.96);color:var(--ink2);padding:10px 6px;font:500 11.5px/1.3 var(--font);letter-spacing:.02em;text-transform:none}
+html[data-theme="phosphore"] .tool:hover{background:var(--soft-hover);color:var(--ink)}
+html[data-theme="phosphore"] .tool.on{background:var(--blue);color:var(--ink-on);font-weight:700}
+html[data-theme="phosphore"] .tool.on .glyph{color:var(--ink-on)}
+html[data-theme="phosphore"] .tool .glyph{color:var(--blue)}
+
+html[data-theme="phosphore"] .footer{border-top:1px solid var(--hair-strong);background:rgba(1,4,2,.98);padding:7px 10px}
+html[data-theme="phosphore"] .footer-row>button{border:1px solid transparent;border-radius:0;padding:6px 10px;color:var(--ink2)}
+html[data-theme="phosphore"] .footer-row>button.sync{font:400 11.5px/1.3 var(--font);color:var(--ink3)}
+html[data-theme="phosphore"] .footer-row>button:hover{background:var(--soft-hover);border-color:var(--hair-strong);color:var(--ink)}
+html[data-theme="phosphore"] .footer-row>button.go{background:var(--blue);border-color:var(--blue);color:var(--ink-on);font-weight:700;padding:6px 16px}
+html[data-theme="phosphore"] .footer-row>button.go:hover{filter:brightness(1.12);color:var(--ink-on)}
+html[data-theme="phosphore"] .footer-row>button[title^="Quitter"]{color:var(--danger)!important}
+
+/* ═══ 8. Panneaux de widgets (264 px) — jetons et classes existantes, structure intacte ═══ */
+html[data-theme="phosphore"] .panel{padding:13px 14px 14px}
+html[data-theme="phosphore"] .head{border-bottom:1px solid var(--hair-strong)}
+html[data-theme="phosphore"] .head h1{font:600 11px/1.2 var(--font);letter-spacing:.18em;color:var(--blue);text-shadow:var(--glow)}
+html[data-theme="phosphore"] .head h1::before{content:"> ";letter-spacing:0;opacity:.7}
+html[data-theme="phosphore"] .big{font:400 28px/1 var(--font);letter-spacing:-.06em;color:var(--ink);text-shadow:var(--glow)}
+html[data-theme="phosphore"] .big .u{font:400 12px/1 var(--font);letter-spacing:0;color:var(--ink3);text-shadow:none}
+html[data-theme="phosphore"] .big .sub{font:400 10.5px/1.3 var(--font);color:var(--ink3);text-shadow:none}
+html[data-theme="phosphore"] .dual b{font:500 14px/1.15 var(--font);color:var(--ink)}
+html[data-theme="phosphore"] .badge{border-radius:0;font:500 9.5px/1.3 var(--font);letter-spacing:.06em;color:var(--ink2)}
+html[data-theme="phosphore"] .chart .line{stroke-width:1.8;filter:drop-shadow(0 0 3px var(--chart-a))}
+html[data-theme="phosphore"] .chart .area{opacity:.1}
+html[data-theme="phosphore"] .row{font-size:11.5px}
+html[data-theme="phosphore"] .row .k{color:var(--ink3)}
+html[data-theme="phosphore"] .row .v{color:var(--ink)}
+html[data-theme="phosphore"] .cores .grp .lbl{font:500 9px/1.3 var(--font);letter-spacing:.08em;color:var(--ink3)}
+html[data-theme="phosphore"] .bars i{box-shadow:0 0 5px rgba(89,255,176,.45)}
+html[data-theme="phosphore"] .stat-row .stat{background:rgba(2,7,4,.94)}
+html[data-theme="phosphore"] .stat b{font:500 13px/1.2 var(--font);color:var(--ink)}
+html[data-theme="phosphore"] .stat span{font:500 9px/1.3 var(--font);letter-spacing:.08em;color:var(--ink3)}
+html[data-theme="phosphore"] .stat.warn b{color:var(--amber)}
+html[data-theme="phosphore"] .stat.crit b{color:var(--danger)}
+html[data-theme="phosphore"] .empty{color:var(--ink2)}
+html[data-theme="phosphore"] .track{height:10px;border:0;border-radius:0;background:repeating-linear-gradient(90deg,rgba(89,255,176,.16) 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .track i{-webkit-mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 7px);mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 7px)}
+html[data-theme="phosphore"] .section{font:600 9.5px/1.3 var(--font);letter-spacing:.14em;color:var(--blue);border-top:1px dashed var(--hair-strong)}
+html[data-theme="phosphore"] .section::before{content:"// ";opacity:.6;letter-spacing:0}
+html[data-theme="phosphore"] .split{border:1px solid var(--hair-strong);border-radius:0;background:rgba(2,7,4,.7)}
+html[data-theme="phosphore"] .legend .lg{font-size:10.5px;color:var(--ink3)}
+html[data-theme="phosphore"] .legend .lg b{color:var(--ink)}
+html[data-theme="phosphore"] .p .vv{font-size:10.5px;color:var(--ink2)}
+html[data-theme="phosphore"] .p .pbar{height:3px;background:var(--hair)}
+html[data-theme="phosphore"] .vol .vh .vf{color:var(--ink3)}
+html[data-theme="phosphore"] .dot{border-radius:0}
+
+/* ═══ 9. Étroit (fenêtre mini 940) ═══════════════════════════════════════════ */
+@media (max-width:970px){
+  html[data-theme="phosphore"] .shell{grid-template-columns:184px 1fr}
+  html[data-theme="phosphore"] main{padding:0 24px 28px}
+  html[data-theme="phosphore"] .settings-layout{grid-template-columns:1fr;gap:14px}
+  html[data-theme="phosphore"] .settings-nav{flex-direction:row;flex-wrap:wrap}
+}
+
+/* Mouvement réduit : ni balayage, ni curseur clignotant, ni transitions. */
+@media (prefers-reduced-motion:reduce){
+  html[data-theme="phosphore"]::after{display:none}
+  html[data-theme="phosphore"] *{transition:none!important;animation:none!important}
+}
