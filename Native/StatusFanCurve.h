@@ -79,6 +79,8 @@ typedef struct { TMFanCommandKind kind; NSInteger minutes, percent; } TMFanComma
 // Validation stricte (listes blanches, bornes entières) ; NO = rien n'a changé.
 - (BOOL)setMode:(NSString *)mode preset:(nullable NSString *)preset percent:(NSInteger)percent minutes:(NSInteger)minutes;
 - (void)forceAuto:(nullable NSString *)notice;
+// Mémorise le préréglage sans changer de mode (préférence relue au lancement). NO si inconnu.
+- (BOOL)choosePreset:(nullable NSString *)preset;
 // Relevé capteur (mode courbe seulement ; ignoré sinon).
 - (void)sensorAt:(double)now tempC:(double)tempC thermal:(NSInteger)thermal;
 // Palier voulu à cet instant : 0 = rendre la main à macOS.

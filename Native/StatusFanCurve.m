@@ -125,6 +125,11 @@ typedef NS_ENUM(NSInteger, TMFanManualPhase) { TMFanManualNeedStart, TMFanManual
     _nextStartAt = -INFINITY; [_failures removeAllObjects];
     return YES;
 }
+- (BOOL)choosePreset:(NSString *)preset {
+    if (!TMFanCurvePoints(preset)) return NO;
+    _preset = [preset copy];
+    return YES;
+}
 - (void)forceAuto:(NSString *)notice {
     _mode = @"auto"; _curve = nil; _phase = TMFanManualNeedStart; _notice = [notice copy]; _generation++;
 }

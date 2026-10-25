@@ -1,5 +1,6 @@
 #import "StatusLidClient.h"
 #import "StatusLidProtocol.h"
+#import "StatusFanCurve.h"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
@@ -439,7 +440,15 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property TMAwake *awake;
 @property TMLidClient *lidMode;
 @property NSTimer *lidTimer;
+// Modes des ventilateurs (auto / courbe / manuel), pilotés via le service existant. Voir driveFans.
+@property TMFanController *fanController;
+@property double fanTempC;          // dernier relevé (NAN si absent), pour l'aperçu de la courbe
+@property NSInteger fanThermal;
 @end
+
+// Horloge monotone (sommeil compris) du pilotage des ventilateurs : un saut d'heure ne doit ni
+// prolonger un palier ni faire croire à un capteur muet.
+static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1e9; }
 
 @implementation TMAppDelegate
 
@@ -450,11 +459,18 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
     __weak typeof(self) weakSelf = self;
     // Le service répond toutes les 5 s (vitesse des ventilateurs) : seul l'état des outils est
     // renvoyé, pas tout le payload (historique, comptes…) à chaque fois.
-    self.lidMode.onChange = ^{ [weakSelf pushTools]; };
+    // Chaque réponse du service peut débloquer la commande suivante (arrêt puis relance d'un palier).
+    self.lidMode.onChange = ^{ [weakSelf pushTools]; [weakSelf driveFans]; };
     self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
         [weakSelf.lidMode refresh];
     }];
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    // Ventilateurs : le préréglage de courbe est mémorisé, mais chaque lancement repart en Auto —
+    // jamais de ventilateurs forcés sans geste de l'utilisateur dans la session.
+    self.fanController = [TMFanController new];
+    self.fanTempC = NAN;
+    [self.fanController choosePreset:[defaults stringForKey:@"fanCurvePreset"]];
+    [defaults setObject:@"auto" forKey:@"fanMode"];
     [defaults registerDefaults:@{
         @"refreshIntervalSeconds": @60,
         // lowest | claude:session | claude:weekly | openai:weekly — quel % accompagne l'icône.
@@ -540,6 +556,7 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self.lidTimer invalidate];
+    [self stopFansForTermination];
     [self.lidMode invalidate];  // Le service indépendant restaure sur rupture XPC (ou après 20 s).
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.keyboardLock forceUnlock];
@@ -890,7 +907,14 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
                            @"detail": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{},
                            // Popups séparés ou regroupé ; en regroupé, ids des widgets système activés, dans l'ordre d'affichage.
                            @"popupMode": [self widgetPopupGrouped] ? @"grouped" : @"separate",
-                           @"widgets": [self groupedWidgetIds] };
+                           @"widgets": [self groupedWidgetIds],
+                           // Pilotage des ventilateurs (panneau Température) : mode courant et préréglage mémorisé.
+                           @"fanMode": self.fanController.mode ?: @"auto",
+                           @"fanCurvePreset": self.fanController.preset ?: @"balanced" };
+    // État courant du pilotage + état du service (autorisation, boost appliqué, message).
+    NSMutableDictionary *fan = [[self fanModePayload] mutableCopy];
+    fan[@"service"] = self.lidMode.snapshot ?: @{};
+    payload[@"fan"] = fan;
     payload[@"processes"] = self.topProcesses ?: @[];  // top consommateurs, pour les panneaux CPU/Mémoire
     payload[@"intervalSeconds"] = @([self metricsInterval]);  // cadence des séries : graduations du niveau « hyper détaillé »
     return payload;
@@ -1791,16 +1815,30 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             [self.lidMode startMinutes:minutes.integerValue];
     }
     if ([action isEqualToString:@"stopLidMode"]) [self.lidMode stop];
+    // Boost du popup quota et des Réglages = mode Manuel : le contrôleur arrête proprement un palier
+    // de courbe en cours avant de lancer celui-ci (le service refuse de relancer un boost actif).
     if ([action isEqualToString:@"startFanBoost"]) {
-        NSNumber *minutes=[body[@"minutes"] isKindOfClass:NSNumber.class] ? body[@"minutes"] : nil;
-        if (minutes && minutes.doubleValue==minutes.integerValue && minutes.integerValue>=1 && minutes.integerValue<=60)
-        {
-            NSNumber *percent=[body[@"percent"] isKindOfClass:NSNumber.class] ? body[@"percent"] : @100;
-            if (percent.integerValue>=50 && percent.integerValue<=100)
-                [self.lidMode startFanBoostMinutes:minutes.integerValue percent:percent.integerValue];
-        }
+        NSNumber *minutes = TMFanInteger(body[@"minutes"]);
+        NSNumber *percent = body[@"percent"] ? TMFanInteger(body[@"percent"]) : @100;
+        if (minutes && percent) [self applyFanMode:@"manual" preset:nil percent:percent.integerValue minutes:minutes.integerValue];
     }
-    if ([action isEqualToString:@"stopFanBoost"]) [self.lidMode stopFanBoost];
+    // « Auto Apple » (popup quota, Réglages) : repasse aussi le mode en Auto, et garde l'appel direct
+    // au service, qui répare au passage un ventilateur resté en manuel hors boost.
+    if ([action isEqualToString:@"stopFanBoost"]) {
+        [self.lidMode stopFanBoost];
+        [self applyFanMode:@"auto" preset:nil percent:0 minutes:0];
+    }
+    // Panneau Température : { mode: auto|curve|manual, preset?, percent?, minutes? }, listes blanches
+    // et bornes vérifiées par TMFanController (préréglage connu, 50–100 %, 1–60 min, entiers).
+    if ([action isEqualToString:@"setFanMode"]) {
+        NSString *mode = [body[@"mode"] isKindOfClass:NSString.class] ? body[@"mode"] : nil;
+        NSString *preset = [body[@"preset"] isKindOfClass:NSString.class] ? body[@"preset"] : nil;
+        NSNumber *percent = TMFanInteger(body[@"percent"]), *minutes = TMFanInteger(body[@"minutes"]);
+        BOOL wellFormed = [mode isEqualToString:@"auto"]
+            || ([mode isEqualToString:@"curve"] && (!body[@"preset"] || preset))
+            || ([mode isEqualToString:@"manual"] && percent && minutes);
+        if (wellFormed) [self applyFanMode:mode preset:preset percent:percent.integerValue minutes:minutes.integerValue];
+    }
     if ([action isEqualToString:@"showLidMode"]) {
         [self openDashboard:nil];
         [self.webView evaluateJavaScript:@"settingsTab='system'; goToView('settings');" completionHandler:nil];
@@ -2035,10 +2073,120 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
     }
 }
 
+#pragma mark - Ventilateurs : modes Auto / Courbe / Manuel
+
+// Entier strict venu d'une page : un nombre (pas un booléen JSON), fini et sans décimale.
+static NSNumber *TMFanInteger(id value) {
+    if (![value isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) return nil;
+    double v = [value doubleValue];
+    return isfinite(v) && v == floor(v) && fabs(v) < 1e6 ? @((NSInteger)v) : nil;
+}
+
+- (TMFanServiceView)fanServiceView {
+    NSDictionary *lid = self.lidMode.snapshot ?: @{};
+    NSDictionary *f = [lid[@"fanBoost"] isKindOfClass:NSDictionary.class] ? lid[@"fanBoost"] : @{};
+    return (TMFanServiceView){
+        .ok = [lid[@"authorized"] boolValue] && [f[@"version"] isEqual:@2] && ![lid[@"unconfirmed"] boolValue],
+        .busy = [lid[@"busy"] boolValue], .active = [f[@"active"] boolValue],
+        .restorationPending = [f[@"restorationPending"] boolValue],
+        .percent = [f[@"percent"] integerValue], .remainingSeconds = [f[@"remainingSeconds"] doubleValue]};
+}
+
+// Le mode est validé par le contrôleur ; la page n'est que l'interface. Un changement de mode
+// arrête proprement l'ancien (voir TMFanController.nextCommand), et le panneau ouvert se met à jour.
+- (void)applyFanMode:(NSString *)mode preset:(NSString *)preset percent:(NSInteger)percent minutes:(NSInteger)minutes {
+    if (![mode isEqualToString:@"auto"] && !self.fanServiceView.ok) return;  // modes forcés sans service : refusés
+    if (![self.fanController setMode:mode preset:preset percent:percent minutes:minutes]) return;
+    if ([mode isEqualToString:@"curve"]) {
+        [NSUserDefaults.standardUserDefaults setObject:self.fanController.preset forKey:@"fanCurvePreset"];
+        // Premier palier calculé tout de suite sur le dernier relevé, sans attendre le tick suivant.
+        [self.fanController sensorAt:TMFanClock() tempC:self.fanTempC thermal:self.fanThermal];
+    }
+    [self fanModeChanged];
+    [self driveFans];
+    [self pushTools];
+    [self pushWidgetMetrics];
+}
+
+// Préférence `fanMode` = mode courant (relue par les pages), remise à « auto » à chaque lancement.
+// Hors mode Auto, le moniteur doit tourner : c'est lui qui fournit la température à la courbe.
+- (void)fanModeChanged {
+    NSString *mode = self.fanController.mode ?: @"auto";
+    if ([[NSUserDefaults.standardUserDefaults stringForKey:@"fanMode"] isEqualToString:mode]) return;
+    [NSUserDefaults.standardUserDefaults setObject:mode forKey:@"fanMode"];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf startSystemMonitor]; [weakSelf pushTools]; [weakSelf pushWidgetMetrics]; });
+}
+
+// Boucle du pilotage : au plus une commande au service par appel (jamais pendant une requête en
+// vol). Appelée à chaque tick du moniteur (~1 Hz) et à chaque réponse du service.
+// GARDE-FOU PRINCIPAL : la courbe n'est jamais qu'une suite de boosts de 2 minutes renouvelés. Si
+// Status plante, se ferme ou se fige, plus rien n'est renouvelé et le service rend la main à macOS
+// tout seul en ≤ 2 min — sans compter ses propres garde-fous (rupture XPC, 20 s sans battement).
+- (void)driveFans {
+    if (!self.fanController) return;
+    TMFanCommand command = [self.fanController nextCommand:self.fanServiceView now:TMFanClock()];
+    if (command.kind == TMFanCommandStart) [self.lidMode startFanBoostMinutes:command.minutes percent:command.percent];
+    else if (command.kind == TMFanCommandStop) [self.lidMode stopFanBoost];
+    [self fanModeChanged];  // retour en Auto décidé par le contrôleur (service perdu, palier refusé…)
+}
+
+// Relevé du moniteur → courbe. Température absente (famille muette) = NAN : la courbe tient 10 s
+// puis abandonne.
+- (void)feedFanSensors:(NSDictionary *)snapshot {
+    NSDictionary *now = nil;
+    for (NSDictionary *family in snapshot[@"families"]) if ([family[@"id"] isEqual:@"sensors"]) now = family[@"now"];
+    NSNumber *temp = [now[@"tempC"] isKindOfClass:NSNumber.class] ? now[@"tempC"] : nil;
+    self.fanTempC = temp ? temp.doubleValue : NAN;
+    self.fanThermal = [now[@"thermalState"] isKindOfClass:NSNumber.class] ? [now[@"thermalState"] integerValue]
+                                                                          : NSProcessInfo.processInfo.thermalState;
+    [self.fanController sensorAt:TMFanClock() tempC:self.fanTempC thermal:self.fanThermal];
+    if (!self.fanController.idle) [self driveFans];
+}
+
+// État du pilotage pour les pages : mode, palier voulu, préréglages (points de la courbe, dessinés
+// tels quels) et valeur de chaque courbe à la température actuelle — calculée ici, une seule fois.
+- (NSDictionary *)fanModePayload {
+    TMFanController *c = self.fanController;
+    NSMutableDictionary *presets = [NSMutableDictionary dictionary], *values = [NSMutableDictionary dictionary];
+    for (NSString *preset in TMFanCurvePresetIds()) {
+        presets[preset] = TMFanCurvePoints(preset);
+        double v = TMFanCurveValue(TMFanCurvePoints(preset), self.fanTempC);
+        values[preset] = isfinite(v) ? @(round(v)) : NSNull.null;
+    }
+    NSString *reason = @"auto";
+    if (c.curve) reason = @[@"idle", @"curve", @"critical", @"lost"][c.curve.reason];
+    return @{ @"mode": c.mode ?: @"auto", @"preset": c.preset ?: @"balanced",
+              @"target": @(c.desiredPercent), @"reason": reason, @"notice": c.notice ?: NSNull.null,
+              @"manualPercent": @(c.manualPercent), @"manualMinutes": @(c.manualMinutes),
+              @"tempC": isfinite(self.fanTempC) ? @(round(self.fanTempC)) : NSNull.null,
+              @"presetIds": TMFanCurvePresetIds(), @"presets": presets, @"values": values,
+              @"floor": @(TMFanCurveFloor), @"criticalC": @(TMFanCurveCriticalC) };
+}
+
+// Fermeture de l'app en mode Courbe ou Manuel : arrêt explicite, sans attendre la rupture XPC ni
+// l'échéance du bail. Attente bornée (3 s) : le client refuse une requête tant qu'une autre est en vol.
+- (void)stopFansForTermination {
+    TMFanServiceView view = self.fanServiceView;
+    BOOL forced = ![self.fanController.mode isEqualToString:@"auto"] || view.active;
+    [self.fanController forceAuto:nil];
+    if (!forced || !view.ok) return;
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    while (self.fanServiceView.busy && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    [self.lidMode stopFanBoost];
+    while (self.fanServiceView.busy && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    [NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:@"fanMode"];
+}
+
 - (NSDictionary *)toolsPayload {
     return @{
         @"awake": @{ @"active": @(self.awake.isEnabled) },
         @"lidMode": self.lidMode.snapshot ?: @{},
+        // Mode des ventilateurs : le popup quota et les Réglages affichent une courbe active.
+        @"fanMode": @{ @"mode": self.fanController.mode ?: @"auto", @"preset": self.fanController.preset ?: @"balanced",
+                       @"target": @(self.fanController.desiredPercent) },
         @"keyboardLock": @{ @"state": self.keyboardLock.state == TMLockStateLocked ? @"locked"
                                     : self.keyboardLock.state == TMLockStateBlocked ? @"blocked" : @"unlocked" }
     };
@@ -2118,6 +2266,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         || (self.monitorViewActive && self.window.isVisible)
         || (self.macToolsVisible && self.statusPopover.isShown)
         || systemWidgetEnabled
+        || ![(self.fanController.mode ?: @"auto") isEqualToString:@"auto"]  // la courbe lit la température à chaque tick
         || [[NSUserDefaults.standardUserDefaults stringForKey:@"menuBarMetric"] hasPrefix:@"system:"];
     [self.metricsTimer invalidate];
     self.metricsTimer = nil;
@@ -2223,6 +2372,7 @@ static NSDictionary *TMAlertDefaults(void) {
 - (void)metricsTick {
     [self.systemMonitor sample];
     NSDictionary *snapshot = [self.systemMonitor snapshot];
+    [self feedFanSensors:snapshot];     // courbe des ventilateurs : un palier recalculé à chaque relevé
     [self checkSystemAlerts:snapshot];  // les alertes veillent même toutes surfaces fermées
     [self appendLongHistory:snapshot];  // idem : l'historique 24 h se remplit en arrière-plan
     [self updateMenuBarWidgets:snapshot];  // icônes système : toujours à jour, même surfaces fermées
