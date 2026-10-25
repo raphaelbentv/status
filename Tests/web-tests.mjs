@@ -408,6 +408,155 @@ widget('StatusWidget.show("cpu", ' + JSON.stringify({ ...richSnap, prefs: { them
 check(widget('window.__sent').some(m => m.action === 'resizeWidgetPanel'), 'niveau changé par le natif : hauteur remesurée et renvoyée');
 widget('metrics = ' + JSON.stringify(wsnap)); widget('widgetId = null');  // restaure
 
+// ── Popup regroupé (widget.html) ─────────────────────────────────────────────
+// Un seul panneau pour tous les widgets activés : les renderers existants, empilés, avec un niveau
+// global (prefs.detail.grouped, défaut Résumé) ; cartes compactes au niveau Résumé.
+section('widget.html — popup regroupé');
+function groupedAt(lv, { widgets = Object.keys(RENDER), snap = richSnap, panels } = {}) {
+  const m = JSON.parse(JSON.stringify(snap));
+  m.prefs = { theme: 'neon', popupMode: 'grouped', widgets, ...(lv == null ? {} : { detail: { grouped: lv } }), ...(panels ? { panels } : {}) };
+  widget('metrics = ' + JSON.stringify(m)); widget('widgetId = "grouped"');
+  return widget('renderGrouped()');
+}
+const posOf = (html, id) => html.indexOf(`id="g-${id}"`);
+
+// Niveau : Résumé par défaut (≠ Détaillé des panneaux séparés), valeurs hors bornes ramenées au Résumé.
+groupedAt(null);
+checkEqual(widget('level()'), 0, 'regroupé : niveau par défaut = Résumé');
+for (const bad of [7, -1, 1.5, 'x']) { groupedAt(bad); checkEqual(widget('level()'), 0, `regroupé : niveau ${bad} hors bornes → Résumé`); }
+checkEqual([0, 1, 2].map(lv => { groupedAt(lv); return widget('level()'); }), [0, 1, 2], 'regroupé : les trois niveaux sont lus dans detail.grouped');
+renderAt('cpu', null); checkEqual(widget('level()'), 1, 'séparé : le défaut reste Détaillé');
+
+// Sélecteur global : trois segments, un seul actif, jamais de sélecteur par widget.
+for (const lv of [0, 1, 2]) {
+  const html = groupedAt(lv);
+  check(count(html, /<button type="button"/g) === 3, `regroupé niveau ${lv} : un seul sélecteur (3 segments), aucun par widget`);
+  check(new RegExp(`class="on" aria-pressed="true"[^>]*setDetail\\(${lv}\\)`).test(html) && count(html, /aria-pressed="true"/g) === 1, `regroupé niveau ${lv} : segment ${lv} actif`);
+  check(/Tous les widgets/.test(html), `regroupé niveau ${lv} : titre « Tous les widgets »`);
+  check(html.indexOf('w-seg') < html.indexOf('<!--w-body-->'), `regroupé niveau ${lv} : le sélecteur est dans l’en-tête fixe, avant le corps`);
+}
+
+// Widgets activés seulement, dans l'ordre fourni ; désactivés absents ; ids inconnus et doublons écartés.
+for (const lv of [0, 1, 2]) {
+  const html = groupedAt(lv, { widgets: ['disk', 'cpu', 'bogus', 'gpu', 'cpu', 'claudeWeek'] });
+  const [d, c, g] = ['disk', 'cpu', 'gpu'].map(id => posOf(html, id));
+  check(d > -1 && c > d && g > c, `regroupé niveau ${lv} : disque, CPU, GPU dans l’ordre d’affichage`);
+  check(['memory', 'network', 'temperature', 'battery', 'bogus', 'claudeWeek'].every(id => posOf(html, id) === -1), `regroupé niveau ${lv} : widgets désactivés ou sans panneau absents`);
+  checkEqual(count(html, /id="g-cpu"/g), 1, `regroupé niveau ${lv} : un widget en double n’apparaît qu’une fois`);
+}
+checkEqual(count(groupedAt(0), /class="w-gc" /g), 7, 'résumé : une carte par widget (7)');
+checkEqual(count(groupedAt(0), /id="g-/g), 7, 'résumé : sept cartes ancrées');
+checkEqual(count(groupedAt(1), /<section class="w-gs"/g), 7, 'détaillé : sept sections empilées');
+checkEqual(count(groupedAt(2), /<section class="w-gs"/g), 7, 'hyper détaillé : sept sections empilées');
+// Niveau Résumé : cartes, pas de sections ; Détaillé/Hyper : sections, pas de cartes.
+check(!/w-gs/.test(groupedAt(0)) && /w-gc/.test(groupedAt(0)), 'résumé : cartes compactes seulement');
+check(!/w-gc/.test(groupedAt(1)) && !/w-gc/.test(groupedAt(2)), 'détaillé / hyper : pas de cartes');
+// Carte de résumé : nom, valeur héros, mini-courbe, une ligne clé.
+const card = groupedAt(0, { widgets: ['cpu'] });
+check(/w-gn">CPU</.test(card) && /w-gv">43<small>%<\/small>/.test(card) && /<svg class="w-chart"/.test(card) && /w-gk">utilisateur 31 % · système 12 %</.test(plain(card)),
+  'résumé CPU : nom, 43 %, mini-courbe et ligne utilisateur/système');
+check(/↓ 1,1<small>Mo\/s<\/small>/.test(groupedAt(0, { widgets: ['network'] })) && /↑ 84 Ko\/s/.test(groupedAt(0, { widgets: ['network'] })), 'résumé Réseau : débit reçu en valeur héros, émis sur la ligne clé');
+check(/90<small>%/.test(groupedAt(0, { widgets: ['disk'] })) && /92 Go libre \/ 926 Go/.test(groupedAt(0, { widgets: ['disk'] })), 'résumé Disque : % utilisé, libre / total');
+check(/data-state="crit"/.test(groupedAt(0, { widgets: ['disk'] })) && /data-state="warn"/.test(groupedAt(0, { widgets: ['memory'] })), 'résumé : l’alerte colore la valeur (disque 90 % critique, pression mémoire élevée)');
+// Détaillé / Hyper : mêmes sections que les panneaux séparés (renderers réutilisés), en-tête sans sélecteur.
+check(/Processus · CPU/.test(groupedAt(1, { widgets: ['cpu'] })) && /w-cores/.test(groupedAt(1, { widgets: ['cpu'] })), 'détaillé : sections du panneau CPU reprises');
+check(/w-mam/.test(groupedAt(2, { widgets: ['cpu'] })) && /w-ticks/.test(groupedAt(2, { widgets: ['cpu'] })), 'hyper détaillé : min/moy./max et graduations repris');
+check(!/Processus · CPU/.test(groupedAt(0, { widgets: ['cpu'] })), 'résumé : pas de liste de processus');
+check(/class="w-hd"[^>]*>(?:(?!<\/div>).)*CPU/s.test(groupedAt(1, { widgets: ['cpu'] })), 'détaillé : pastille-glyphe et nom du widget en tête de section');
+// Les contenus des sections suivent le niveau global : plus long du résumé à l'hyper détaillé.
+{ const [a, b, c] = [0, 1, 2].map(lv => groupedAt(lv).length); check(a < b && b < c, `regroupé : le contenu grandit avec le niveau (${a} < ${b} < ${c})`); }
+// Interrupteurs de section des Réglages : « off » l'emporte, aussi dans le regroupé.
+for (const lv of [0, 1, 2]) {
+  const off = panels => groupedAt(lv, { widgets: Object.keys(RENDER), panels });
+  check(!/Processus · CPU/.test(off({ cpu: { processes: false } })), `regroupé niveau ${lv} : processus CPU « off » masqués`);
+  check(!/utilisateur/.test(off({ cpu: { split: false } })), `regroupé niveau ${lv} : user/sys « off » masqué (carte comme section)`);
+  check(!/Volumes/.test(off({ disk: { volumes: false } })), `regroupé niveau ${lv} : volumes « off » masqués`);
+  check(!/w-split/.test(off({ memory: { breakdown: false } })), `regroupé niveau ${lv} : répartition mémoire « off » masquée`);
+}
+// Les interrupteurs sont ceux du widget rendu, pas ceux d'un autre : couper les processus du CPU ne touche pas la mémoire.
+check(/Processus · mémoire/.test(groupedAt(1, { panels: { cpu: { processes: false } } })), 'regroupé : l’interrupteur d’un widget ne masque pas la section d’un autre');
+check(!/w-chart/.test(groupedAt(0, { widgets: ['temperature'], panels: { temperature: { chart: false } } })), 'résumé : courbe température « off » masquée');
+check(!/w-chart/.test(groupedAt(0, { widgets: ['battery'], panels: { battery: { chart: false } } })), 'résumé : courbe batterie « off » masquée');
+// Aucun undefined/NaN : données complètes, partielles, absentes, familles manquantes ; liste vide.
+for (const lv of [0, 1, 2]) {
+  check(cleanNull(groupedAt(lv)), `regroupé niveau ${lv} : données complètes, aucun undefined/NaN`);
+  check(cleanNull(groupedAt(lv, { snap: sparse })), `regroupé niveau ${lv} : données partielles, aucun undefined/NaN`);
+  check(cleanNull(groupedAt(lv, { snap: bare })), `regroupé niveau ${lv} : valeurs absentes, aucun undefined/NaN`);
+  check(cleanNull(groupedAt(lv, { snap: { families: [], prefs: {} } })), `regroupé niveau ${lv} : familles absentes, aucun undefined/NaN`);
+  check(/Aucun widget activé/.test(groupedAt(lv, { widgets: [] })) && !/w-gc|w-gs/.test(groupedAt(lv, { widgets: [] })), `regroupé niveau ${lv} : liste vide, message sans carte`);
+}
+check(/Mesure en cours/.test(groupedAt(0, { snap: bare })) && !/Mesure en cours/.test(groupedAt(0)), 'résumé : « mesure en cours » seulement sans donnée mesurée');
+check(!/↓ —/.test(groupedAt(0, { snap: sparse })), 'résumé : pas de flèche seule quand le débit manque');
+// Pas de couleur en dur dans les cartes ni la mise en page regroupée (jetons de thème uniquement).
+{ const css = readFileSync(join(root, 'Resources', 'widget.html'), 'utf8').match(/Popup « Regroupé »[\s\S]*?\.w-gs \.w-hero\{[^}]*\}/)[0];
+  check(!/#[0-9a-fA-F]{3,8}\b/.test(css), 'CSS du regroupé : aucun hexadécimal en dur');
+  check(/\.w-gc\b/.test(css) && !/\.row|\.badge|\.stat\b/.test(css), 'CSS du regroupé : classes préfixées « w- »'); }
+
+// Mode : le même renderer sert séparé et regroupé ; le séparé reste inchangé.
+renderAt('cpu', 1);
+check(count(widget('renderCPU()'), /<button type="button"/g) === 3 && /w-hd/.test(widget('renderCPU()')), 'séparé : le panneau CPU garde son sélecteur propre');
+widget('widgetId = "grouped"'); check(!/<button/.test(widget('renderCPU()')), 'regroupé : le même renderCPU n’émet plus de sélecteur par widget');
+widget('window.__panel = {innerHTML:"", className:"", getBoundingClientRect:()=>({height:300, top:0}), offsetHeight:0}');
+widget('document.querySelector = sel => sel === "#panel" ? window.__panel : ({innerHTML:"", getBoundingClientRect:()=>({height:300, top:0}), offsetHeight:0})');
+{ const m = JSON.parse(JSON.stringify(richSnap)); m.prefs = { theme: 'neon', popupMode: 'separate', widgets: ['cpu', 'disk'], detail: { cpu: 2 } };
+  widget('StatusWidget.show("cpu", ' + JSON.stringify(m) + ')');
+  checkEqual(widget('window.__panel.className'), 'panel', 'séparé : show(id) ne passe jamais en mise en page regroupée, même si la liste regroupée est fournie');
+  checkEqual(widget('document.documentElement.dataset.mode'), 'separate', 'séparé : le document reste en mode séparé');
+  checkEqual(widget('level()'), 2, 'séparé : le niveau par widget reste celui de detail[id]');
+  widget('StatusWidget.show("grouped", ' + JSON.stringify(m) + ')');
+  checkEqual(widget('window.__panel.className'), 'panel grouped', 'regroupé : mise en page regroupée (en-tête fixe)');
+  checkEqual(widget('document.documentElement.dataset.mode'), 'grouped', 'regroupé : le document passe en mode regroupé (défilement de la fenêtre)');
+  widget('StatusWidget.show("cpu", ' + JSON.stringify(m) + ')');
+  checkEqual(widget('window.__panel.className'), 'panel', 'regroupé → séparé : la mise en page se remet à zéro'); }
+
+// Mesure de hauteur : repart de zéro au changement de niveau et de liste de widgets (regroupé).
+widget('window.__sent = []');
+widget('document.querySelector = () => ({getBoundingClientRect:()=>({height:__h, top:0}), offsetHeight:0, className:""})');
+widget('window.__setH(400)');
+{ const m = n => { const s = JSON.parse(JSON.stringify(richSnap)); s.prefs = { theme: 'neon', widgets: n, detail: { grouped: 0 } }; return JSON.stringify(s); };
+  widget(`StatusWidget.show("grouped", ${m(['cpu', 'disk'])})`);
+  checkEqual(widget('window.__sent'), [{ action: 'resizeWidgetPanel', id: 'grouped', height: 400 }], 'regroupé : la hauteur mesurée part avec l’identifiant « grouped »');
+  widget('window.__sent = []'); widget(`StatusWidget.updateMetrics(${m(['cpu', 'disk'])})`);
+  checkEqual(widget('window.__sent.length'), 0, 'regroupé : tick sans changement de hauteur, rien d’envoyé');
+  widget(`StatusWidget.show("grouped", ${m(['cpu', 'disk', 'gpu'])})`);
+  checkEqual(widget('window.__sent.length'), 1, 'regroupé : liste de widgets modifiée, hauteur remesurée même inchangée');
+  widget('window.__sent = []'); widget('setDetail(2)');
+  checkEqual(widget('window.__sent')[0], { action: 'setWidgetDetail', id: 'grouped', level: 2 }, 'regroupé : le niveau global part au natif sous l’id « grouped »');
+  check(widget('window.__sent').some(m => m.action === 'resizeWidgetPanel'), 'regroupé : changement de niveau, hauteur remesurée');
+  checkEqual(widget('level()'), 2, 'regroupé : niveau appliqué tout de suite côté page');
+  // Changer de panneau (regroupé → widget séparé) remet la mesure à zéro aussi.
+  widget('window.__sent = []'); widget(`StatusWidget.show("cpu", ${m(['cpu'])})`);
+  check(widget('window.__sent').some(x => x.id === 'cpu'), 'passage regroupé → séparé : hauteur remesurée'); }
+
+// Focus : l'icône cliquée amène sa section sous l'en-tête fixe ; consommé une fois, id inconnu ignoré.
+widget('window.__scrolls = []; window.scrollTo = (x, y) => window.__scrolls.push(y)');
+widget('document.querySelector = sel => ({getBoundingClientRect:()=>({height:__h, top: sel === "#g-disk" ? 900 : sel === "#g-gpu" ? 40 : 0}), offsetHeight: 80, className:""})');
+{ const m = JSON.parse(JSON.stringify(richSnap)); m.prefs = { theme: 'neon', widgets: Object.keys(RENDER), detail: { grouped: 1 } };
+  const s = JSON.stringify(m);
+  widget(`StatusWidget.show("grouped", ${s}, "disk")`);
+  checkEqual(widget('window.__scrolls'), [810], 'focus : défilement jusqu’à la section du disque, moins l’en-tête fixe et une marge');
+  widget('window.__scrolls = []'); widget(`StatusWidget.show("grouped", ${s}, "gpu")`);
+  checkEqual(widget('window.__scrolls'), [0], 'focus : jamais de défilement négatif');
+  widget('window.__scrolls = []'); widget(`StatusWidget.show("grouped", ${s}, "bogus")`);
+  checkEqual(widget('window.__scrolls'), [], 'focus : id inconnu ignoré');
+  widget('window.__scrolls = []'); widget(`StatusWidget.show("grouped", ${s})`);
+  checkEqual(widget('window.__scrolls'), [], 'focus : un rafraîchissement sans focus ne fait pas défiler');
+  widget(`StatusWidget.show("cpu", ${s}, "disk")`);
+  widget('window.__scrolls = []'); widget(`StatusWidget.show("cpu", ${s})`);
+  checkEqual(widget('window.__scrolls'), [], 'séparé : aucun défilement'); }
+widget('metrics = ' + JSON.stringify(wsnap)); widget('widgetId = null');  // restaure
+
+// Réglage « Popups des widgets » (dashboard).
+section('dashboard.html — réglage « Popups des widgets »');
+{ const row = p => dashboard(`widgetPopupModeRow(${JSON.stringify(p)})`);
+  check(/Popups des widgets/.test(row({})) && /Un popup par widget/.test(row({})), 'réglage : titre et courte description');
+  check(/class="seg on" aria-pressed="true"[^>]*>Séparés</.test(row({})), 'réglage : Séparés actif par défaut');
+  check(/class="seg on" aria-pressed="true"[^>]*>Séparés</.test(row({ widgetPopupMode: 'bogus' })), 'réglage : valeur inconnue → Séparés');
+  check(/class="seg on" aria-pressed="true"[^>]*>Regroupé</.test(row({ widgetPopupMode: 'grouped' })), 'réglage : Regroupé actif quand choisi');
+  check(row({}).includes(`send('setWidgetPopupMode',{mode:'grouped'})`) && row({}).includes(`send('setWidgetPopupMode',{mode:'separate'})`), 'réglage : chaque segment envoie setWidgetPopupMode');
+  check(/Chaque icône ouvre le panneau de son propre widget/.test(row({})) && /un seul popup avec tous les widgets activés/.test(row({ widgetPopupMode: 'grouped' })), 'réglage : description du mode choisi');
+  check(dashboard(`menuBarSettings({prefs:{}},{widgetPopupMode:'grouped',menuBarWidgets:['cpu']})`).includes('setWidgetPopupMode'), 'réglage : présent dans la section des widgets système (Affichage)'); }
+
 // Échelle auto : la crête ne doit pas toucher le bord haut, sinon la courbe se lit comme saturée.
 section('widget.html — échelle des courbes sans pourcentage');
 const autoScale = widget('chart([{values:[10,50],color:"var(--chart-a)"}],{percent:false})');
