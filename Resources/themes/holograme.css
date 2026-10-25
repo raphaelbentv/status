@@ -1,0 +1,538 @@
+/* holograme — habillage et mise en page, chargé par dashboard.html, menubar.html et widget.html.
+   Direction « Verre irisé » : le sujet est la transparence. Des vitres givrées flottent sur une
+   aurore bleu nuit ; chaque bord capte un reflet qui dérive du cyan au violet puis au rose, les
+   jauges portent la même dérive et un éclat de surface. Léger, aérien, jamais criard : le texte
+   repose toujours sur une vitre assez dense (≥ 62 % d'opacité sur un fond sombre), et sans
+   backdrop-filter le rendu reste lisible tel quel. Tout est scopé html[data-theme="holograme"].
+   Les couleurs d'état suivent data-level (ok / warn / crit), calculé sur le RESTANT : ok = teinte
+   du fournisseur, warn = ambre, crit = rose corail — un aplat franc, jamais irisé, pour que
+   l'alerte ne se confonde pas avec la décoration. */
+
+/* ═══ 1. Jetons ═══════════════════════════════════════════════════════════════
+   --blue = OpenAI (cyan glacé), --purple = Claude (violet lilas). Aussi lus par widget.html. */
+[data-theme="holograme"]{
+  color-scheme:dark;
+  --bg:#070a1b;--sidebar:rgba(12,17,40,.5);--panel-bg:rgba(20,27,58,.6);--panel-bg-strong:rgba(15,20,46,.9);
+  --text:#f3f6ff;--muted:rgba(226,232,255,.7);
+  --hair:rgba(255,255,255,.12);--hair-strong:rgba(255,255,255,.26);
+  --soft:rgba(255,255,255,.055);--soft-hover:rgba(150,185,255,.16);
+  --blue:#74d7ff;--blue-soft:rgba(116,215,255,.12);--purple:#c6a0ff;--purple-soft:rgba(198,160,255,.12);
+  --green:#72f0cf;--amber:#ffc65c;--danger:#ff7f98;
+  --chart-a:#74d7ff;--chart-b:#d6a0ff;
+  --grid:transparent;
+  --font:"Figtree",-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --radius:14px;
+  --bg-image:radial-gradient(640px 420px at 10% -10%,rgba(72,170,255,.3),transparent 70%),radial-gradient(560px 460px at 100% 14%,rgba(178,112,255,.26),transparent 70%),radial-gradient(660px 440px at 52% 116%,rgba(255,122,192,.2),transparent 70%),linear-gradient(180deg,#0a0e26,#070a1b);
+  --bg-size:auto;
+  /* Jetons propres au thème */
+  --pink:#ff9fd6;--violet:#a79bff;--ink2:rgba(243,246,255,.84);--ink3:rgba(226,232,255,.64);
+  --iris:linear-gradient(115deg,#74d7ff 0%,#a79bff 52%,#ff9fd6 100%);
+  --rim:linear-gradient(135deg,rgba(130,226,255,.78),rgba(190,155,255,.34) 48%,rgba(255,165,216,.6));
+  --glass:linear-gradient(152deg,rgba(255,255,255,.115),rgba(255,255,255,.03) 52%,rgba(255,255,255,.07)),rgba(15,21,48,.64);
+  --sheen:inset 0 1px 0 rgba(255,255,255,.24),0 14px 34px -16px rgba(2,4,18,.75);
+}
+
+/* ═══ 2. Vitre : surface, reflet de bord, repli opaque ═══════════════════════
+   Chaque carte reçoit un fond verre (dégradé blanc très léger sur un bleu nuit à 64 %), un flou
+   d'arrière-plan et un liseré irisé dessiné par ::before (masque par différence : seul l'anneau
+   d'1 px est peint, l'intérieur reste translucide). Le fond de page est opaque dans les trois
+   WebViews, donc le flou ne floute que l'aurore de la page : pas de dépendance au NSPopover. */
+html[data-theme="holograme"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.vital,.cost-total,.wk-svg,.account-menu-items,.quota-empty){
+  position:relative;border:1px solid transparent;border-radius:18px;background:var(--glass);box-shadow:var(--sheen);
+  -webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
+html[data-theme="holograme"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.vital,.cost-total,.mtile,.account-menu-items)::before{
+  content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1px;background:var(--rim);pointer-events:none;height:auto;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+/* Sans verre (backdrop-filter absent ou désactivé) : fond opaque, même lisibilité. */
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  html[data-theme="holograme"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.vital,.cost-total,.wk-svg,.account-menu-items,.quota-empty){
+    background:linear-gradient(152deg,rgba(255,255,255,.1),rgba(255,255,255,.03)),#10163a}
+}
+
+/* ═══ 3. Coque : fenêtre, barre latérale, barre de titre ═════════════════════ */
+html[data-theme="holograme"] body{font-size:13.5px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+html[data-theme="holograme"] .shell,html[data-theme="holograme"] .popover{--muted:rgba(226,232,255,.7)}
+
+html[data-theme="holograme"] .sidebar{padding:20px 14px 18px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02));border-right:1px solid rgba(255,255,255,.1);
+  -webkit-backdrop-filter:blur(22px) saturate(1.4);backdrop-filter:blur(22px) saturate(1.4);position:relative;z-index:1;
+  box-shadow:inset -1px 0 0 rgba(130,200,255,.08)}
+html[data-theme="holograme"] .product{font:600 24px/1 var(--font);letter-spacing:.01em;text-transform:none;margin:4px 0 28px 8px;
+  background:var(--iris);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+
+/* Navigation : icône (masque SVG statique) + libellé ; l'onglet actif devient une vitre à liseré irisé. */
+html[data-theme="holograme"] .nav button{position:relative;padding:11px 14px 11px 46px;margin-bottom:6px;border:1px solid transparent;border-radius:14px;font-size:14.5px;font-weight:500;color:var(--ink2);
+  transition:background .18s,border-color .18s,color .18s}
+html[data-theme="holograme"] .nav button::before{content:"";left:15px;width:20px;height:20px;font-size:0;opacity:.85;background:currentColor;
+  -webkit-mask:var(--ic) center/contain no-repeat;mask:var(--ic) center/contain no-repeat}
+html[data-theme="holograme"] .nav button[data-view="overview"]::before{content:"";--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 17a8 8 0 1 1 16 0'/%3E%3Cpath d='M12 17l4-5'/%3E%3C/svg%3E")}
+html[data-theme="holograme"] .nav button[data-view="monitor"]::before{content:"";--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2.5-6 4 12 2.5-6H21'/%3E%3C/svg%3E")}
+html[data-theme="holograme"] .nav button[data-view="displays"]::before{content:"";--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='12' rx='2'/%3E%3Cpath d='M8 20h8M12 16v4'/%3E%3C/svg%3E")}
+html[data-theme="holograme"] .nav button[data-view="settings"]::before{content:"";--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3.4'/%3E%3Cpath d='M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6'/%3E%3C/svg%3E")}
+html[data-theme="holograme"] .nav button:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#fff}
+html[data-theme="holograme"] .nav button.active{color:#fff;font-weight:600;border-color:rgba(190,170,255,.5);
+  background:linear-gradient(120deg,rgba(116,215,255,.2),rgba(167,155,255,.18) 55%,rgba(255,159,214,.16));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 22px -10px rgba(150,130,255,.7)}
+html[data-theme="holograme"] .nav button.active::before{opacity:1;background:var(--iris);-webkit-mask:var(--ic) center/contain no-repeat;mask:var(--ic) center/contain no-repeat}
+
+html[data-theme="holograme"] .sidebar-bottom{border-top:0;padding-top:0}
+html[data-theme="holograme"] .connection-state{gap:10px;padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);font-size:13px;color:var(--ink2)}
+html[data-theme="holograme"] .connection-state i{width:9px;height:9px;border-radius:50%;flex:none;background:rgba(255,255,255,.34)}
+html[data-theme="holograme"] .connection-state i.live{background:var(--green);box-shadow:0 0 0 3px rgba(114,240,207,.18),0 0 12px var(--green)}
+html[data-theme="holograme"] .connection-state i.warn{background:var(--amber);box-shadow:0 0 0 3px rgba(255,198,92,.2),0 0 12px var(--amber)}
+
+html[data-theme="holograme"] main{padding:0 30px 30px}
+html[data-theme="holograme"] main::-webkit-scrollbar{width:10px}
+html[data-theme="holograme"] main::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:99px;border:2px solid transparent;background-clip:padding-box}
+
+html[data-theme="holograme"] .toolbar{height:76px;border-bottom:1px solid;border-image:linear-gradient(90deg,rgba(116,215,255,.5),rgba(167,155,255,.32) 45%,rgba(255,159,214,.12) 80%,transparent) 1;gap:14px}
+html[data-theme="holograme"] .toolbar h1{font:600 26px/1 var(--font);letter-spacing:.005em;text-transform:none;color:#fff;text-shadow:0 0 22px rgba(130,190,255,.45)}
+html[data-theme="holograme"] .toolbar-meta{margin-left:auto;font-size:13px;color:var(--ink2);white-space:nowrap;padding:7px 15px;border-radius:99px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05)}
+html[data-theme="holograme"] .toolbar-warn{white-space:nowrap;font-weight:600}
+
+/* Boutons : pastille de verre ; le primaire se remplit de la teinte du fournisseur, avec reflet. */
+html[data-theme="holograme"] .button,html[data-theme="holograme"] .account-action,html[data-theme="holograme"] .provider-manage{--c:var(--blue);font-weight:600;color:#fff;white-space:nowrap;border:1px solid rgba(255,255,255,.3);border-radius:99px;padding:7px 17px;
+  background:linear-gradient(180deg,rgba(255,255,255,.17),rgba(255,255,255,.06));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 6px 16px -8px rgba(100,160,255,.6);
+  transition:background .18s,border-color .18s,box-shadow .18s}
+html[data-theme="holograme"] .button:hover,html[data-theme="holograme"] .account-action:hover,html[data-theme="holograme"] .provider-manage:hover{background:linear-gradient(180deg,rgba(255,255,255,.26),rgba(255,255,255,.1));border-color:rgba(190,215,255,.7);color:#fff}
+html[data-theme="holograme"] .button.on{border-color:rgba(114,240,207,.7);color:#fff;background:linear-gradient(180deg,rgba(114,240,207,.3),rgba(114,240,207,.1));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 6px 18px -8px var(--green)}
+html[data-theme="holograme"] .button[disabled],html[data-theme="holograme"] .account-action[disabled]{opacity:.42;box-shadow:none;cursor:default}
+html[data-theme="holograme"] .account-action{--c:var(--provider,var(--blue));padding:6px 14px;font-size:12.5px}
+html[data-theme="holograme"] .account-action.primary{border-color:rgba(255,255,255,.55);color:#0a0e26;font-weight:700;
+  background:linear-gradient(180deg,rgba(255,255,255,.4),transparent 55%),linear-gradient(115deg,color-mix(in srgb,var(--c) 78%,#fff),var(--c) 55%,color-mix(in srgb,var(--c) 55%,var(--pink)));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 8px 20px -8px var(--c)}
+html[data-theme="holograme"] .account-action.primary:hover{filter:brightness(1.08)}
+html[data-theme="holograme"] .account-action.primary[disabled]{filter:saturate(.5)}
+html[data-theme="holograme"] .provider-manage{--c:var(--provider);padding:2px 12px;margin-left:10px;font-size:12px;font-weight:500}
+
+/* Segmentés : pilule creuse ; l'élément actif s'allume d'un voile irisé. Les .seg isolés aussi. */
+html[data-theme="holograme"] .segmented,html[data-theme="holograme"] .view-toggle{border:1px solid rgba(255,255,255,.2);border-radius:99px;padding:3px;gap:2px;overflow:visible;background:rgba(7,10,27,.4);box-shadow:inset 0 1px 3px rgba(0,0,0,.35)}
+html[data-theme="holograme"] .segmented{flex-wrap:wrap;width:-webkit-fit-content;width:fit-content;max-width:100%}
+html[data-theme="holograme"] .seg,html[data-theme="holograme"] .view-toggle button{border:1px solid transparent;border-radius:99px;padding:5px 13px;font-size:12.5px;font-weight:500;color:var(--ink2);white-space:nowrap;transition:background .15s,color .15s}
+html[data-theme="holograme"] .seg+.seg{border-left:1px solid transparent}
+html[data-theme="holograme"] .seg:hover,html[data-theme="holograme"] .view-toggle button:hover{background:rgba(255,255,255,.09);color:#fff}
+html[data-theme="holograme"] .seg.on,html[data-theme="holograme"] .view-toggle button.on{color:#fff;font-weight:600;border-color:rgba(200,185,255,.5);
+  background:linear-gradient(115deg,rgba(116,215,255,.5),rgba(167,155,255,.46) 55%,rgba(255,159,214,.4));box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 4px 14px -6px rgba(150,140,255,.85)}
+html[data-theme="holograme"] .seg[disabled]{opacity:.32}
+html[data-theme="holograme"] .view-toggle{margin-left:0}
+html[data-theme="holograme"] .view-toggle button{padding:5px 15px}
+html[data-theme="holograme"] .seg-wrap .seg{border:1px solid rgba(255,255,255,.2);border-radius:99px}
+
+html[data-theme="holograme"] select{background:rgba(12,17,42,.92);border:1px solid rgba(255,255,255,.26);border-radius:99px;padding:6px 14px;color:#fff;font-size:13px}
+html[data-theme="holograme"] input[type="number"]{background:rgba(12,17,42,.92);border:1px solid rgba(255,255,255,.26);border-radius:12px;padding:5px 8px;color:#fff;font:inherit}
+html[data-theme="holograme"] button:focus-visible,html[data-theme="holograme"] summary:focus-visible,html[data-theme="holograme"] select:focus-visible,html[data-theme="holograme"] input:focus-visible{outline:2px solid #fff;outline-offset:3px;box-shadow:0 0 0 5px rgba(150,140,255,.55)}
+html[data-theme="holograme"] .notice{border-radius:20px;margin:18px 0}
+html[data-theme="holograme"] .notice::before{--rim:linear-gradient(135deg,var(--amber),rgba(255,198,92,.35))}
+html[data-theme="holograme"] .notice strong{color:var(--amber)}
+html[data-theme="holograme"] .sort-row{margin:6px 0 18px;color:var(--ink2)}
+
+/* ═══ 4. Quotas (vue « Status ») ═════════════════════════════════════════════ */
+html[data-theme="holograme"] .provider-blocks{gap:18px;margin-top:8px}
+html[data-theme="holograme"] .provider-block{padding:20px 22px 22px;border-radius:26px;--rim:linear-gradient(135deg,color-mix(in srgb,var(--provider) 85%,#fff),rgba(255,255,255,.1) 46%,color-mix(in srgb,var(--provider) 50%,var(--pink)));
+  background:linear-gradient(152deg,color-mix(in srgb,var(--provider) 13%,transparent),rgba(255,255,255,.02) 55%,rgba(255,255,255,.05)),rgba(14,20,46,.66)}
+html[data-theme="holograme"] .provider-block[data-provider="openai"]{--drift:#8fa6ff}
+html[data-theme="holograme"] .provider-block[data-provider="claude"]{--drift:#ff9fd6}
+html[data-theme="holograme"] .provider-block-head{margin-bottom:14px}
+html[data-theme="holograme"] .provider{gap:12px;font-size:20px;font-weight:600;color:#fff;text-transform:none;letter-spacing:0}
+html[data-theme="holograme"] .provider-dot{width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff,var(--provider) 55%,color-mix(in srgb,var(--provider) 50%,var(--pink)));box-shadow:0 0 14px -1px var(--provider)}
+html[data-theme="holograme"] .provider-block-head .status-label{font-size:12.5px;color:var(--ink2)}
+html[data-theme="holograme"] .provider-block-head .status-label i{display:none}
+
+html[data-theme="holograme"] .account-block+.account-block{border-top:1px solid rgba(255,255,255,.12);margin-top:20px;padding-top:20px}
+html[data-theme="holograme"] .account-block-head{align-items:center;gap:12px;margin-bottom:8px}
+html[data-theme="holograme"] .account-block-head strong,html[data-theme="holograme"] .account-copy strong{font-size:15px;font-weight:600;color:#fff}
+html[data-theme="holograme"] .account-identity{font-weight:400;color:var(--ink3);font-size:12.5px}
+html[data-theme="holograme"] .account-block .status-label{--st:var(--green);flex:none;display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:#fff;
+  padding:3px 12px;border-radius:99px;border:1px solid color-mix(in srgb,var(--st) 75%,transparent);background:color-mix(in srgb,var(--st) 14%,transparent)}
+html[data-theme="holograme"] .account-block[data-connected="0"] .status-label{--st:rgba(255,255,255,.4);color:var(--ink2)}
+html[data-theme="holograme"] .account-block[data-error="1"] .status-label{--st:var(--amber)}
+html[data-theme="holograme"] .account-block .status-label i{width:7px;height:7px;border-radius:50%;margin-right:7px;background:var(--st);box-shadow:0 0 8px 1px var(--st)}
+html[data-theme="holograme"] .freshness{margin:0 0 10px;font-size:12.5px}
+html[data-theme="holograme"] .billing-line{margin:0 0 12px;font-size:12.5px}
+html[data-theme="holograme"] .quota-error{color:var(--danger);font-size:12.5px;font-weight:500}
+html[data-theme="holograme"] .quota-stale{font-size:12.5px}
+html[data-theme="holograme"] .quota-empty{border:1px dashed rgba(255,255,255,.3);border-radius:18px;color:var(--ink2);box-shadow:none;background:rgba(255,255,255,.03)}
+html[data-theme="holograme"] .quota-empty::before{display:none}
+
+/* Carte de fenêtre : liseré, jauge et chiffre suivent le niveau (ok = couleur du fournisseur). */
+html[data-theme="holograme"] .quota-card{--lv:var(--provider,var(--blue));--lvt:#fff;--drift:#a79bff;padding:14px 18px 14px;border-radius:20px;
+  --rim:linear-gradient(135deg,color-mix(in srgb,var(--lv) 80%,#fff),rgba(255,255,255,.1) 46%,color-mix(in srgb,var(--lv) 55%,var(--pink)))}
+html[data-theme="holograme"] [data-provider="openai"] .quota-card,html[data-theme="holograme"] .quota-card[data-provider="openai"]{--drift:#8fa6ff}
+html[data-theme="holograme"] [data-provider="claude"] .quota-card,html[data-theme="holograme"] .quota-card[data-provider="claude"]{--drift:#ff9fd6}
+html[data-theme="holograme"] .quota-card[data-level="warn"]{--lv:var(--amber);--lvt:var(--amber);--drift:#ffe3a1;--rim:linear-gradient(135deg,var(--amber),rgba(255,198,92,.28));
+  background:linear-gradient(152deg,rgba(255,198,92,.13),rgba(255,255,255,.02) 55%),rgba(24,22,44,.7)}
+html[data-theme="holograme"] .quota-card[data-level="crit"]{--lv:var(--danger);--lvt:var(--danger);--drift:#ffc0cc;--rim:linear-gradient(135deg,var(--danger),rgba(255,127,152,.3));
+  background:linear-gradient(152deg,rgba(255,127,152,.16),rgba(255,255,255,.02) 55%),rgba(28,18,42,.72)}
+html[data-theme="holograme"] .quota-grid{gap:12px}
+html[data-theme="holograme"] .quota-top{align-items:baseline}
+html[data-theme="holograme"] .quota-top span{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2)}
+html[data-theme="holograme"] .quota-top strong{font-size:24px;font-weight:300;letter-spacing:-.01em;line-height:1.1;color:var(--lvt);white-space:nowrap;text-shadow:0 0 20px color-mix(in srgb,var(--lv) 55%,transparent)}
+html[data-theme="holograme"] .quota-card small,html[data-theme="holograme"] .quota-empty{font-size:12.5px}
+html[data-theme="holograme"] .quota-foot{flex-wrap:wrap;align-items:center;gap:6px 10px}
+html[data-theme="holograme"] .quota-foot small{flex:1 1 auto;color:var(--ink3)}
+html[data-theme="holograme"] .spark{margin-left:auto}
+html[data-theme="holograme"] .spark .area{fill:var(--c);opacity:.14}
+html[data-theme="holograme"] .spark .line{stroke-width:1.6;filter:drop-shadow(0 0 3px var(--c))}
+html[data-theme="holograme"] .spark .tip{filter:drop-shadow(0 0 4px #fff)}
+html[data-theme="holograme"] .manual-reset{font-size:12.5px;color:var(--ink3)}
+html[data-theme="holograme"] .manual-reset.available{color:var(--green);font-weight:600}
+html[data-theme="holograme"] .reset-expiries li.soon{color:var(--amber)}
+html[data-theme="holograme"] .extra-credits{border:1px solid rgba(255,255,255,.16)!important;border-radius:16px!important;background:rgba(255,255,255,.05)!important}
+
+/* Jauge : rigole creusée dans la vitre, remplissage irisé (teinte → dérive) et reflet de surface.
+   Sert aux jauges des deux pages (.quota-track du tableau de bord, .rail du popover). Les couleurs
+   inline posées par le JS sont écrasées (!important) ; celles d'alerte sont relues plus bas. */
+html[data-theme="holograme"] .quota-track,html[data-theme="holograme"] .rail{--tc:var(--lv,var(--provider,var(--blue)));position:relative;height:11px;margin:10px 0 8px;overflow:hidden;border-radius:99px;
+  background:rgba(4,7,22,.55);border:1px solid rgba(255,255,255,.1);box-shadow:inset 0 2px 4px rgba(0,0,0,.45)}
+html[data-theme="holograme"] .quota-track i,html[data-theme="holograme"] .rail i{position:relative;border-radius:99px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--tc) 72%,#fff) 0%,var(--tc) 45%,color-mix(in srgb,var(--tc) 38%,var(--drift,#a79bff)) 100%)!important;
+  box-shadow:0 0 14px -1px color-mix(in srgb,var(--tc) 65%,transparent)}
+html[data-theme="holograme"] .quota-track i::after,html[data-theme="holograme"] .rail i::after{content:"";position:absolute;left:4px;right:4px;top:1px;height:38%;border-radius:99px;background:linear-gradient(180deg,rgba(255,255,255,.65),rgba(255,255,255,0))}
+html[data-theme="holograme"] .quota-track i[style*="width:0%"],html[data-theme="holograme"] .rail i[style*="width:0%"]{display:none}
+html[data-theme="holograme"] .rail i[style*="--danger"]{background:linear-gradient(90deg,#ffc0cc,var(--danger) 55%,#ff5f80)!important;box-shadow:0 0 14px -1px var(--danger)}
+html[data-theme="holograme"] .rail i[style*="--amber"]{background:linear-gradient(90deg,#ffe8b0,var(--amber) 55%,#ffa83a)!important;box-shadow:0 0 14px -1px var(--amber)}
+html[data-theme="holograme"] .api-rail{height:9px;margin-top:12px;border-radius:99px;background:rgba(4,7,22,.55);border:1px solid rgba(255,255,255,.1);box-shadow:inset 0 2px 4px rgba(0,0,0,.45)}
+html[data-theme="holograme"] .api-rail i{border-radius:99px;background:linear-gradient(90deg,color-mix(in srgb,var(--provider) 72%,#fff),var(--provider) 50%,color-mix(in srgb,var(--provider) 40%,var(--pink)))}
+html[data-theme="holograme"] .api-rail.warning i{background:linear-gradient(90deg,#ffe8b0,var(--amber))}
+html[data-theme="holograme"] .api-rail.critical i{background:linear-gradient(90deg,#ffc0cc,var(--danger))}
+
+/* Coût équivalent API */
+html[data-theme="holograme"] .cost-total{margin-top:16px;padding:14px 18px;border-radius:20px;--rim:linear-gradient(135deg,rgba(114,240,207,.8),rgba(255,255,255,.1) 48%,rgba(116,215,255,.55));
+  background:linear-gradient(152deg,rgba(114,240,207,.1),rgba(255,255,255,.02) 55%),rgba(14,22,46,.66)}
+html[data-theme="holograme"] .cost-total.scanning{--rim:linear-gradient(135deg,rgba(255,255,255,.25),rgba(255,255,255,.1));font-size:12.5px;color:var(--ink2)}
+html[data-theme="holograme"] .cost-total-label{font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none;color:var(--green);margin-bottom:6px;line-height:1.35}
+html[data-theme="holograme"] .cost-total-head{align-items:flex-start}
+html[data-theme="holograme"] .cost-period{margin-bottom:6px}
+html[data-theme="holograme"] .cost-total-amount{font-size:28px;font-weight:300;color:#fff;white-space:nowrap;letter-spacing:-.01em;text-shadow:0 0 22px rgba(114,240,207,.5)}
+html[data-theme="holograme"] .cost-warn{color:var(--amber)}
+html[data-theme="holograme"] .summary-note{margin-top:6px;font-size:12px;color:var(--ink3);line-height:1.45}
+html[data-theme="holograme"] .model-table{font-size:12.5px}
+html[data-theme="holograme"] .model-table th{color:var(--ink3);letter-spacing:.1em;font-weight:500;border-bottom:1px solid rgba(255,255,255,.18)}
+html[data-theme="holograme"] .model-table td{border-bottom:1px solid rgba(255,255,255,.08);padding:5px 0}
+html[data-theme="holograme"] .model-table td:first-child{overflow-wrap:anywhere}
+html[data-theme="holograme"] .model-table .num{white-space:nowrap;padding-left:10px}
+
+/* Consommation 7 jours */
+html[data-theme="holograme"] .section-head h2{font-size:12px;font-weight:600;letter-spacing:.16em;color:var(--blue)}
+html[data-theme="holograme"] .wk-svg{border-radius:22px;background:var(--glass)}
+html[data-theme="holograme"] .wk-legend{color:var(--ink2)}
+html[data-theme="holograme"] .wk-leg i{height:3px;border-radius:2px}
+
+/* ═══ 5. Moniteur ════════════════════════════════════════════════════════════ */
+/* Bandeau de signes vitaux : une vitre par mesure ; la teinte passe à l'ambre / au corail selon .warn / .crit. */
+html[data-theme="holograme"] .vitals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;background:transparent;border:0;border-radius:0;overflow:visible;margin-top:6px}
+html[data-theme="holograme"] .vital{--c:var(--blue);gap:4px;padding:11px 14px 10px;border-radius:18px;--rim:linear-gradient(135deg,color-mix(in srgb,var(--c) 85%,#fff),rgba(255,255,255,.08) 50%,color-mix(in srgb,var(--c) 50%,var(--pink)))}
+html[data-theme="holograme"] .vital:nth-child(2){--c:var(--purple)}
+html[data-theme="holograme"] .vital:nth-child(3){--c:var(--pink)}
+html[data-theme="holograme"] .vital:nth-child(4){--c:var(--green)}
+html[data-theme="holograme"] .vital:nth-child(5){--c:var(--violet)}
+html[data-theme="holograme"] .vital:nth-child(6){--c:var(--blue)}
+html[data-theme="holograme"] .vital:nth-child(7){--c:var(--purple)}
+html[data-theme="holograme"] .vital:nth-child(8){--c:var(--green)}
+html[data-theme="holograme"] .vital.warn{--c:var(--amber);--rim:linear-gradient(135deg,var(--amber),rgba(255,198,92,.3))}
+html[data-theme="holograme"] .vital.crit{--c:var(--danger);--rim:linear-gradient(135deg,var(--danger),rgba(255,127,152,.3))}
+html[data-theme="holograme"] .vital:hover{background:linear-gradient(152deg,rgba(255,255,255,.18),rgba(255,255,255,.06)),rgba(15,21,48,.7)}
+html[data-theme="holograme"] .vital-label{font-size:10.5px;font-weight:600;letter-spacing:.1em;color:var(--c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+html[data-theme="holograme"] .vital .vital-value{font-size:19px;font-weight:300;color:#fff;letter-spacing:-.01em}
+html[data-theme="holograme"] .vital.warn .vital-value{color:var(--amber)}
+html[data-theme="holograme"] .vital.crit .vital-value{color:var(--danger)}
+html[data-theme="holograme"] .vital-value small{font-size:12px;color:var(--ink2)}
+html[data-theme="holograme"] .vital svg path{stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;filter:drop-shadow(0 0 3px var(--c))}
+html[data-theme="holograme"] .vital.boost .vital-value{color:var(--blue)}
+
+html[data-theme="holograme"] .monitor-section{--c:var(--blue);--chart-a:var(--blue);--chart-b:var(--purple);margin-top:24px}
+html[data-theme="holograme"] .monitor-section:nth-of-type(2){--c:var(--pink);--chart-a:var(--pink);--chart-b:var(--amber)}
+html[data-theme="holograme"] .monitor-section:nth-of-type(3){--c:var(--green);--chart-a:var(--green);--chart-b:var(--blue)}
+html[data-theme="holograme"] .monitor-section:nth-of-type(4){--c:var(--purple);--chart-a:var(--purple);--chart-b:var(--blue)}
+html[data-theme="holograme"] .monitor-section>h2{font-size:12px;font-weight:600;letter-spacing:.16em;color:var(--c);margin-bottom:12px}
+html[data-theme="holograme"] .monitor-section .metric-grid{gap:16px}
+html[data-theme="holograme"] .metric-card,html[data-theme="holograme"] .day-card{--c:var(--blue);border-radius:24px;padding:17px 22px;--rim:linear-gradient(135deg,color-mix(in srgb,var(--chart-a,var(--blue)) 80%,#fff),rgba(255,255,255,.1) 48%,color-mix(in srgb,var(--chart-b,var(--purple)) 60%,var(--pink)))}
+html[data-theme="holograme"] .monitor-section .metric-card{background:var(--glass);padding:17px 22px}
+html[data-theme="holograme"] .metric-card.expandable:hover{--rim:linear-gradient(135deg,#fff,rgba(255,255,255,.3) 48%,var(--pink))}
+html[data-theme="holograme"] .metric-head{align-items:center;margin-bottom:4px}
+html[data-theme="holograme"] .metric-head h3{font-size:16.5px;font-weight:600;letter-spacing:0;text-transform:none;color:#fff}
+html[data-theme="holograme"] .metric-value{font-size:32px;font-weight:300;line-height:1;color:#fff;letter-spacing:-.02em;white-space:nowrap;text-shadow:0 0 22px color-mix(in srgb,var(--chart-a,var(--blue)) 55%,transparent)}
+html[data-theme="holograme"] .metric-value .unit{font-size:13px;font-weight:500;color:var(--ink2);text-shadow:none}
+html[data-theme="holograme"] .metric-head .unit{font-size:12.5px;color:var(--ink2)}
+html[data-theme="holograme"] .metric-readout{font-size:12px;color:var(--ink3)}
+html[data-theme="holograme"] .metric-badge{border-radius:99px;padding:2px 11px;border:1px solid rgba(255,255,255,.3);color:var(--ink2);font-weight:500}
+html[data-theme="holograme"] .metric-badge.warn{color:var(--amber);border-color:var(--amber);background:rgba(255,198,92,.1)}
+html[data-theme="holograme"] .metric-badge.crit{color:var(--danger);border-color:var(--danger);background:rgba(255,127,152,.12)}
+html[data-theme="holograme"] .metric-card .chevron{color:var(--chart-a,var(--blue))}
+
+html[data-theme="holograme"] .metric-chart .line{stroke-width:2;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 0 3px color-mix(in srgb,var(--chart-a) 45%,transparent))}
+html[data-theme="holograme"] .detail-cell .metric-chart .line{filter:none;stroke-width:1.6}
+html[data-theme="holograme"] .metric-chart .area{opacity:.14}
+html[data-theme="holograme"] .metric-chart .baseline{stroke:rgba(255,255,255,.18)}
+html[data-theme="holograme"] .metric-chart .gridline{stroke:rgba(255,255,255,.12)}
+html[data-theme="holograme"] .metric-legend{color:var(--ink2)}
+html[data-theme="holograme"] .metric-legend i{height:3px;border-radius:2px}
+html[data-theme="holograme"] .metric-detail{border-top:1px solid rgba(255,255,255,.12)}
+html[data-theme="holograme"] .detail-label,html[data-theme="holograme"] .core-group-label{color:var(--ink3);letter-spacing:.08em}
+html[data-theme="holograme"] .day-chart path{filter:drop-shadow(0 0 4px color-mix(in srgb,var(--chart-a,var(--blue)) 70%,transparent))}
+html[data-theme="holograme"] .day-head strong{color:var(--blue);letter-spacing:.14em}
+html[data-theme="holograme"] .day-stats b{color:#fff}
+html[data-theme="holograme"] .day-card{border-radius:20px}
+html[data-theme="holograme"] .core-bars{gap:4px}
+html[data-theme="holograme"] .core-bars i{border-radius:99px 99px 3px 3px;background:linear-gradient(180deg,#fff,var(--chart-a) 40%,color-mix(in srgb,var(--chart-a) 50%,var(--chart-b)));box-shadow:0 0 8px -1px var(--chart-a)}
+html[data-theme="holograme"] .core-schematic .core-bars i{width:8px}
+html[data-theme="holograme"] .stat-row{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;background:transparent;border:0}
+html[data-theme="holograme"] .stat-cell{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:8px 12px}
+html[data-theme="holograme"] .stat-cell b{font-weight:400;font-size:16px;color:#fff;white-space:nowrap}
+html[data-theme="holograme"] .stat-cell span{color:var(--ink3);letter-spacing:.1em}
+html[data-theme="holograme"] .stat-cell.warn b{color:var(--amber)}
+html[data-theme="holograme"] .fan-panel{border-top:1px solid rgba(255,255,255,.12)}
+html[data-theme="holograme"] .fan-meter .quota-track{height:7px;margin:2px 0 0}
+html[data-theme="holograme"] .fan-meter .quota-track i::after{display:none}
+html[data-theme="holograme"] .fan-meter b{color:#fff;white-space:nowrap}
+html[data-theme="holograme"] .fan-actions strong{color:#fff}
+html[data-theme="holograme"] .proc-head{letter-spacing:.1em;color:var(--ink3)}
+html[data-theme="holograme"] .proc-head .sorted,html[data-theme="holograme"] .proc-val.sorted{color:#fff;font-weight:600}
+html[data-theme="holograme"] .proc-row{border-top:1px solid rgba(255,255,255,.09);padding:6px 0}
+html[data-theme="holograme"] .proc-cpu{font-weight:600;color:#fff}
+html[data-theme="holograme"] .metric-table th{color:var(--ink3);letter-spacing:.1em;border-bottom:1px solid rgba(255,255,255,.18)}
+html[data-theme="holograme"] .metric-table td{border-bottom:1px solid rgba(255,255,255,.08);color:#fff}
+html[data-theme="holograme"] .metric-table td:first-child{color:var(--ink2)}
+html[data-theme="holograme"] .metric-empty{color:var(--ink2)}
+html[data-theme="holograme"] .day-axis{color:var(--ink3)}
+
+/* ═══ 6. Écrans ══════════════════════════════════════════════════════════════ */
+html[data-theme="holograme"] .display-grid{grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;margin-top:16px}
+html[data-theme="holograme"] .display-card{--c:var(--blue);padding:18px 22px 20px;border-radius:24px;--rim:linear-gradient(135deg,color-mix(in srgb,var(--c) 85%,#fff),rgba(255,255,255,.1) 48%,color-mix(in srgb,var(--c) 50%,var(--pink)))}
+html[data-theme="holograme"] .display-card:nth-child(2n){--c:var(--purple)}
+html[data-theme="holograme"] .display-card:nth-child(3n){--c:var(--green)}
+html[data-theme="holograme"] .display-head{margin-bottom:16px}
+html[data-theme="holograme"] .display-name{font-size:16.5px;font-weight:600;color:#fff;overflow-wrap:anywhere}
+html[data-theme="holograme"] .display-badge{flex:none;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:none;color:#fff;border:1px solid color-mix(in srgb,var(--c) 70%,transparent);
+  background:color-mix(in srgb,var(--c) 14%,transparent);border-radius:99px;padding:3px 12px}
+html[data-theme="holograme"] .display-badge.builtin{color:#fff;border-color:var(--c)}
+html[data-theme="holograme"] .display-unavailable{color:var(--ink3);font-size:12.5px}
+html[data-theme="holograme"] .brightness-row{gap:16px}
+html[data-theme="holograme"] .brightness-value{width:auto;min-width:64px;font-size:24px;font-weight:300;color:#fff;white-space:nowrap;text-shadow:0 0 20px color-mix(in srgb,var(--c) 60%,transparent)}
+
+/* Curseurs : rigole creusée ; la partie gauche est remplie par l'ombre géante du pouce (l'input
+   clippe en overflow:hidden), le pouce est une perle de verre. */
+html[data-theme="holograme"] .brightness-slider,html[data-theme="holograme"] .b-slider{--c:var(--blue);height:20px;border-radius:99px;overflow:hidden;background:rgba(4,7,22,.55);border:1px solid rgba(255,255,255,.12);
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.45)}
+html[data-theme="holograme"] .display-card .brightness-slider{--c:inherit}
+html[data-theme="holograme"] .brightness-slider::-webkit-slider-thumb,html[data-theme="holograme"] .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:-1px;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#fff,#d7e4ff 45%,#9fb2ff);border:1px solid rgba(255,255,255,.9);
+  box-shadow:-1200px 0 0 1190px color-mix(in srgb,var(--c) 88%,transparent),0 0 12px rgba(150,170,255,.8)}
+html[data-theme="holograme"] .brightness-slider:disabled,html[data-theme="holograme"] .b-slider:disabled{opacity:.4}
+
+/* ═══ 7. Réglages ════════════════════════════════════════════════════════════ */
+html[data-theme="holograme"] .settings-layout{gap:30px;margin-top:8px;grid-template-columns:180px minmax(0,1fr)}
+html[data-theme="holograme"] .settings-nav{gap:6px;top:6px}
+html[data-theme="holograme"] .settings-nav button{padding:9px 15px;border:1px solid transparent;border-radius:14px;font-size:14.5px;font-weight:500;color:var(--ink2)}
+html[data-theme="holograme"] .settings-nav button:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#fff}
+html[data-theme="holograme"] .settings-nav button.on{color:#fff;font-weight:600;border-color:rgba(190,170,255,.5);background:linear-gradient(120deg,rgba(116,215,255,.2),rgba(167,155,255,.18) 55%,rgba(255,159,214,.16));box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
+html[data-theme="holograme"] .settings-nav button.on::before{display:none}
+html[data-theme="holograme"] .settings-pane-head{margin-bottom:16px;align-items:center}
+html[data-theme="holograme"] .settings-pane-head h2{font-size:21px;font-weight:600;color:#fff;margin-bottom:4px}
+html[data-theme="holograme"] .settings-pane-head p{font-size:12.5px;color:var(--ink2)}
+
+html[data-theme="holograme"] .settings-pane .settings{gap:14px}
+html[data-theme="holograme"] .settings-pane .setting{padding:17px 22px;border-radius:22px;gap:20px}
+html[data-theme="holograme"] .settings-pane .setting-copy strong{font-size:15px;font-weight:600;color:#fff;margin-bottom:4px}
+html[data-theme="holograme"] .settings-pane .setting-copy small{font-size:12.5px;color:var(--ink2);line-height:1.5}
+html[data-theme="holograme"] .setting-state{font-size:12.5px;color:var(--ink2)}
+html[data-theme="holograme"] .setting-state.ok{color:var(--green);font-weight:600}
+html[data-theme="holograme"] .settings-pane .setting>.button.on{--c:var(--green)}
+html[data-theme="holograme"] .settings-pane .setting>.button:not(.on){color:var(--ink2);background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.22);box-shadow:none}
+html[data-theme="holograme"] .settings-pane .setting>.button:not(.on):hover{color:#fff;border-color:rgba(255,255,255,.5)}
+html[data-theme="holograme"] .connection-note{color:var(--ink2)}
+
+html[data-theme="holograme"] .widget-config{gap:10px}
+html[data-theme="holograme"] .wc-toggle{min-width:122px;padding:5px 14px;border:1px solid rgba(255,255,255,.26);color:var(--ink2)}
+html[data-theme="holograme"] .wc-toggle.on{color:#fff;border-color:rgba(114,240,207,.75);background:linear-gradient(180deg,rgba(114,240,207,.28),rgba(114,240,207,.1));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 14px -6px var(--green)}
+html[data-theme="holograme"] .wc-toggle.on:hover{background:linear-gradient(180deg,rgba(114,240,207,.38),rgba(114,240,207,.16))}
+html[data-theme="holograme"] .wc-dot{width:9px;height:9px;border-width:1.5px}
+html[data-theme="holograme"] .wc-toggle.on .wc-dot{box-shadow:0 0 8px 1px var(--green)}
+html[data-theme="holograme"] .wc-move{border:1px solid rgba(255,255,255,.22);border-radius:99px;padding:2px;gap:2px}
+html[data-theme="holograme"] .wc-move .seg{padding:4px 11px}
+html[data-theme="holograme"] .wc-shapes .seg{padding:4px 12px;font-size:12.5px}
+html[data-theme="holograme"] .wc-swatch{width:19px;height:19px;border:1px solid rgba(255,255,255,.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 0 8px -1px rgba(255,255,255,.3)}
+html[data-theme="holograme"] .wc-swatch.on{box-shadow:0 0 0 2px #0a0e26,0 0 0 3.5px #fff,0 0 14px 3px rgba(190,170,255,.7)}
+html[data-theme="holograme"] .wc-sub{border-left:2px solid rgba(190,170,255,.4)}
+html[data-theme="holograme"] .wc-sublabel{color:var(--ink3);letter-spacing:.12em}
+
+html[data-theme="holograme"] .theme-swatch{border:1px solid rgba(255,255,255,.2);border-radius:99px;background:rgba(255,255,255,.05);padding:8px 14px;color:var(--ink2);font-size:13px}
+html[data-theme="holograme"] .theme-swatch:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.4);color:#fff}
+html[data-theme="holograme"] .theme-swatch.on{color:#fff;font-weight:600;border-color:rgba(200,185,255,.65);background:linear-gradient(115deg,rgba(116,215,255,.28),rgba(167,155,255,.26) 55%,rgba(255,159,214,.22));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 14px -6px rgba(150,140,255,.8)}
+html[data-theme="holograme"] .theme-swatch .dot{width:10px;height:10px;box-shadow:0 0 0 1px rgba(255,255,255,.35)}
+
+html[data-theme="holograme"] .connections{gap:16px}
+html[data-theme="holograme"] .connection-panel{padding:20px 22px 22px;border-radius:26px;--rim:linear-gradient(135deg,color-mix(in srgb,var(--provider) 85%,#fff),rgba(255,255,255,.1) 46%,color-mix(in srgb,var(--provider) 50%,var(--pink)));
+  background:linear-gradient(152deg,color-mix(in srgb,var(--provider) 13%,transparent),rgba(255,255,255,.02) 55%,rgba(255,255,255,.05)),rgba(14,20,46,.66)}
+html[data-theme="holograme"] .connection-panel h3,html[data-theme="holograme"] .connection-panel:nth-child(2) h3{font-size:20px;font-weight:600;text-transform:none;letter-spacing:0;color:#fff}
+html[data-theme="holograme"] .connection-panel>p{color:var(--ink2);font-size:12.5px}
+html[data-theme="holograme"] .quota-block{border-top:1px solid rgba(255,255,255,.12)}
+html[data-theme="holograme"] .account-copy small{color:var(--ink3);font-size:12.5px}
+html[data-theme="holograme"] .account-add{border-top:1px solid rgba(255,255,255,.12)}
+html[data-theme="holograme"] .account-add small{color:var(--ink2)}
+html[data-theme="holograme"] .account-menu summary{border:1px solid rgba(255,255,255,.34);border-radius:99px;padding:3px 14px;font-size:16px;line-height:1.2;background:rgba(255,255,255,.07)}
+html[data-theme="holograme"] .account-menu-items{padding:8px;border-radius:18px;background:rgba(13,18,44,.97);box-shadow:0 18px 40px rgba(0,0,0,.6)}
+html[data-theme="holograme"] .account-menu-items .account-action{text-align:center}
+html[data-theme="holograme"] .api-figures strong{color:#fff;font-weight:600}
+html[data-theme="holograme"] .api-figures strong.warning{color:var(--amber)}
+html[data-theme="holograme"] .api-figures strong.critical{color:var(--danger)}
+html[data-theme="holograme"] .api-foot{border-radius:22px}
+html[data-theme="holograme"] .shortcut-row kbd{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.3);border-radius:8px;color:#fff;box-shadow:0 2px 0 rgba(255,255,255,.14)}
+html[data-theme="holograme"] .storage-summary strong{color:#fff}
+html[data-theme="holograme"] .bar-preview{border-radius:20px}
+html[data-theme="holograme"] .bar-chip{border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.07)}
+html[data-theme="holograme"] .field-select{border-radius:99px}
+html[data-theme="holograme"] .icon-style{border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+html[data-theme="holograme"] .icon-style.on{border-color:rgba(200,185,255,.7);background:linear-gradient(115deg,rgba(116,215,255,.25),rgba(167,155,255,.24),rgba(255,159,214,.2));box-shadow:0 4px 14px -6px rgba(150,140,255,.8)}
+
+/* ═══ 8. Popover (480 × 640) ═════════════════════════════════════════════════ */
+html[data-theme="holograme"] .popover{box-shadow:inset 0 0 0 1px rgba(160,190,255,.16),inset 0 1px 0 rgba(255,255,255,.3)}
+html[data-theme="holograme"] .providers{gap:10px;padding:12px 12px 8px}
+html[data-theme="holograme"] .providers::-webkit-scrollbar{width:0}
+
+html[data-theme="holograme"] #providers .quota-card{padding:12px 14px 11px;border-radius:22px}
+html[data-theme="holograme"] #providers .quota-main{gap:3px}
+html[data-theme="holograme"] #providers .quota-main .value{font-size:42px}
+html[data-theme="holograme"] #providers .quota-card footer{padding-top:6px}
+html[data-theme="holograme"] #providers .quota-card header{margin-bottom:4px;gap:4px}
+html[data-theme="holograme"] .provider-name{font-size:17px;font-weight:600;letter-spacing:0;text-transform:none;color:#fff;display:flex;align-items:center;gap:8px}
+html[data-theme="holograme"] .provider-name::before{content:"";width:11px;height:11px;border-radius:50%;flex:none;background:radial-gradient(circle at 32% 28%,#fff,var(--provider) 55%,color-mix(in srgb,var(--provider) 50%,var(--pink)));box-shadow:0 0 12px -1px var(--provider)}
+html[data-theme="holograme"] .account-name{font-size:12px;color:var(--ink3)}
+html[data-theme="holograme"] .provider-picker{background:rgba(10,15,40,.9);border:1px solid rgba(255,255,255,.26);border-radius:99px;padding:4px 12px;color:#fff;font-size:12px}
+html[data-theme="holograme"] .value{font-weight:300;color:var(--lvt,#fff);letter-spacing:-.025em;white-space:nowrap;text-shadow:0 0 24px color-mix(in srgb,var(--lv,var(--provider)) 60%,transparent)}
+html[data-theme="holograme"] .value.critical,html[data-theme="holograme"] .value.warning{color:var(--lvt,#fff)}
+html[data-theme="holograme"] .value .unit{font-size:.4em;font-weight:500;opacity:.9;margin-left:.1em}
+html[data-theme="holograme"] .value.empty-value{opacity:.55;color:#fff}
+html[data-theme="holograme"] .quota-label{font-size:12px;color:var(--ink3)}
+html[data-theme="holograme"] .quota-side .primary-rail{margin-top:7px;margin-bottom:7px}
+html[data-theme="holograme"] .reset{font-size:12.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-theme="holograme"] .session-row{--lv:var(--provider);gap:5px 8px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.12);color:var(--ink2)}
+html[data-theme="holograme"] .session-row[data-level="warn"]{--lv:var(--amber);--drift:#ffe3a1}
+html[data-theme="holograme"] .session-row[data-level="crit"]{--lv:var(--danger);--drift:#ffc0cc}
+html[data-theme="holograme"] .session-row>b{color:#fff;font-weight:600}
+html[data-theme="holograme"] .session-row>small{color:var(--ink3);white-space:nowrap}
+html[data-theme="holograme"] .rail.thin{height:7px;margin:0}
+html[data-theme="holograme"] .rail.thin i::after{display:none}
+html[data-theme="holograme"] .account-note{color:var(--ink3);font-size:12px}
+html[data-theme="holograme"] .account-note.stale{color:var(--amber);font-weight:600}
+html[data-theme="holograme"] .account-note.live{color:var(--green)}
+html[data-theme="holograme"] .quota-card .who{color:#fff;font-weight:600}
+html[data-theme="holograme"] .quota-card .extra-credits{border:0!important;border-top:1px solid rgba(255,255,255,.12)!important;border-radius:0!important;background:transparent!important;padding:7px 2px}
+html[data-theme="holograme"] .extra-credits span,html[data-theme="holograme"] .extra-credits small{color:var(--ink3)}
+html[data-theme="holograme"] .popup-notice{border-bottom:1px solid var(--amber);background:rgba(255,198,92,.1)}
+html[data-theme="holograme"] .popup-notice button{border:1px solid var(--amber);border-radius:99px;padding:3px 13px;color:#fff;background:rgba(255,198,92,.12)}
+
+html[data-theme="holograme"] .account-list,html[data-theme="holograme"] .api-credits{padding:10px 16px 6px;border-radius:22px}
+html[data-theme="holograme"] .account-list>header,html[data-theme="holograme"] .api-credits>header{font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2);margin-bottom:4px}
+html[data-theme="holograme"] .al-row{border-top:1px solid rgba(255,255,255,.09);padding:6px 0}
+html[data-theme="holograme"] .al-row>i{box-shadow:0 0 8px var(--provider)}
+html[data-theme="holograme"] .al-row>span{color:#fff}
+html[data-theme="holograme"] .al-row>small{color:var(--ink3)}
+html[data-theme="holograme"] .al-row>b{font-weight:600}
+html[data-theme="holograme"] .api-row{border-top:1px solid rgba(255,255,255,.09)}
+html[data-theme="holograme"] .api-row>small{color:var(--ink3)}
+html[data-theme="holograme"] .api-row>small.error{color:var(--amber)}
+
+/* Ventilateurs */
+html[data-theme="holograme"] .fans{padding:10px 14px 10px;border-top:1px solid rgba(255,255,255,.14);background:rgba(10,15,38,.6)}
+html[data-theme="holograme"] .fan-head strong{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--pink)}
+html[data-theme="holograme"] .fan-head span{color:var(--ink2)}
+html[data-theme="holograme"] .fan-row .account-action{--c:var(--blue);padding:5px 15px}
+html[data-theme="holograme"] .fan-state{color:var(--ink2)}
+html[data-theme="holograme"] .fan-state.on{color:#fff}
+html[data-theme="holograme"] .fan-note{color:var(--ink3)}
+html[data-theme="holograme"] .fan-row .seg{padding:4px 9px;overflow:visible}
+
+/* Outils du Mac : en-tête repliable, tuiles de mesure, luminosité, boutons. */
+html[data-theme="holograme"] .mac-tools{background:rgba(10,15,38,.55);border-top:1px solid rgba(255,255,255,.14)}
+html[data-theme="holograme"] .mac-tools>summary{padding:8px 16px;font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--blue)}
+html[data-theme="holograme"] .metrics{gap:8px;padding:2px 12px 8px;background:transparent;border-top:0}
+html[data-theme="holograme"] .mtile{--c:var(--blue);position:relative;padding:6px 10px 6px;border-radius:14px;--rim:linear-gradient(135deg,color-mix(in srgb,var(--c) 80%,#fff),rgba(255,255,255,.08) 55%,color-mix(in srgb,var(--c) 40%,var(--pink)));
+  background:var(--glass);box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+html[data-theme="holograme"] .mtile:nth-child(2){--c:var(--purple)}
+html[data-theme="holograme"] .mtile:nth-child(3){--c:var(--pink)}
+html[data-theme="holograme"] .mtile:nth-child(4){--c:var(--green)}
+html[data-theme="holograme"] .mtile:nth-child(5){--c:var(--violet)}
+html[data-theme="holograme"] .mtile .mlabel{font-size:10.5px;font-weight:600;letter-spacing:.08em;color:var(--c);white-space:nowrap}
+html[data-theme="holograme"] .mtile .mvalue{font-size:15px;font-weight:400;color:#fff;margin:2px 0 4px}
+html[data-theme="holograme"] .mtile .line{stroke:var(--c);stroke-width:1.6;filter:drop-shadow(0 0 3px var(--c))}
+html[data-theme="holograme"] .mtile .line:nth-of-type(2){stroke:var(--purple);filter:drop-shadow(0 0 3px var(--purple))}
+
+html[data-theme="holograme"] .brightness{gap:4px;padding:2px 12px 8px;background:transparent;border-top:0}
+html[data-theme="holograme"] .b-row{gap:10px;padding:2px 2px;background:transparent}
+html[data-theme="holograme"] .b-sun{color:var(--amber);filter:drop-shadow(0 0 4px var(--amber))}
+html[data-theme="holograme"] .b-label{color:var(--ink2)}
+html[data-theme="holograme"] .b-slider{height:14px;--c:var(--blue)}
+html[data-theme="holograme"] .b-slider::-webkit-slider-thumb{width:14px;height:14px;margin-top:-1px}
+html[data-theme="holograme"] .b-value{color:#fff;width:40px}
+
+html[data-theme="holograme"] .tools{gap:8px;padding:2px 12px 8px;background:transparent;border-top:0}
+html[data-theme="holograme"] .tool{--ic:var(--blue);flex-direction:row;justify-content:center;gap:8px;padding:7px 6px;border-radius:99px;color:var(--ink2);
+  border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.05);letter-spacing:.02em;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s}
+html[data-theme="holograme"] .tool:nth-child(2){--ic:var(--purple)}
+html[data-theme="holograme"] .tool:nth-child(3){--ic:var(--pink)}
+html[data-theme="holograme"] .tool .glyph{color:var(--ic);flex:none;width:auto}
+html[data-theme="holograme"] .tool:hover{background:rgba(255,255,255,.1);color:#fff}
+html[data-theme="holograme"] .tool.on{color:#fff;font-weight:600;border-color:color-mix(in srgb,var(--ic) 80%,#fff);background:color-mix(in srgb,var(--ic) 20%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 14px -6px var(--ic)}
+
+/* Pied */
+html[data-theme="holograme"] .footer{border-top:1px solid rgba(255,255,255,.16);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02)),rgba(10,15,38,.92);padding:7px 12px;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+html[data-theme="holograme"] .footer-row > button.sync{color:var(--ink2);font-size:12.5px}
+html[data-theme="holograme"] .footer-row > button{border:1px solid transparent;border-radius:99px;padding:5px 15px;color:var(--ink2)}
+html[data-theme="holograme"] .footer-row > button:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.24);color:#fff}
+html[data-theme="holograme"] .footer-row > button.go{color:#fff;font-weight:600;border-color:rgba(200,185,255,.55);background:linear-gradient(115deg,rgba(116,215,255,.3),rgba(167,155,255,.28) 55%,rgba(255,159,214,.24));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 14px -6px rgba(150,140,255,.8)}
+html[data-theme="holograme"] .footer-row > button[title^="Quitter"]{color:var(--danger)!important}
+
+/* ═══ 9. Panneaux de widgets (264 px) : jetons et classes existantes seulement ═══ */
+html[data-theme="holograme"] .panel{background:radial-gradient(260px 190px at 0% 0%,rgba(72,170,255,.26),transparent 70%),radial-gradient(240px 220px at 100% 38%,rgba(178,112,255,.2),transparent 70%),radial-gradient(260px 200px at 35% 100%,rgba(255,122,192,.16),transparent 70%)}
+html[data-theme="holograme"] .head{border-bottom:1px solid;border-image:linear-gradient(90deg,rgba(116,215,255,.55),rgba(167,155,255,.35) 55%,transparent) 1}
+html[data-theme="holograme"] .head h1{font-size:11.5px;font-weight:600;letter-spacing:.14em;color:var(--blue)}
+html[data-theme="holograme"] .big{font-weight:300;letter-spacing:-.02em;color:#fff;text-shadow:0 0 18px rgba(130,190,255,.5)}
+html[data-theme="holograme"] .big .u{font-weight:500;color:var(--ink2);text-shadow:none}
+html[data-theme="holograme"] .big .sub,html[data-theme="holograme"] .dual b{text-shadow:none}
+html[data-theme="holograme"] .badge{border-radius:99px;padding:2px 9px;color:var(--ink2);border-color:rgba(255,255,255,.3)}
+html[data-theme="holograme"] .badge.warn{background:rgba(255,198,92,.1)}
+html[data-theme="holograme"] .badge.crit{background:rgba(255,127,152,.12)}
+html[data-theme="holograme"] .chart .line{filter:drop-shadow(0 0 3px color-mix(in srgb,var(--chart-a) 70%,transparent))}
+html[data-theme="holograme"] .stat-row{gap:6px;background:transparent;border:0}
+html[data-theme="holograme"] .stat{border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14)}
+html[data-theme="holograme"] .stat b{font-weight:600}
+html[data-theme="holograme"] .stat span{color:var(--ink3)}
+html[data-theme="holograme"] .stat.warn b{color:var(--amber)}
+html[data-theme="holograme"] .stat.crit b{color:var(--danger)}
+html[data-theme="holograme"] .track{height:10px;border-radius:99px;background:rgba(4,7,22,.55);border:1px solid rgba(255,255,255,.1);box-shadow:inset 0 2px 4px rgba(0,0,0,.45)}
+html[data-theme="holograme"] .track i{border-radius:99px;background:linear-gradient(90deg,color-mix(in srgb,var(--chart-a) 72%,#fff),var(--chart-a) 50%,color-mix(in srgb,var(--chart-a) 40%,var(--chart-b)))}
+html[data-theme="holograme"] .section{color:var(--ink3);letter-spacing:.12em;border-top:1px solid rgba(255,255,255,.12)}
+html[data-theme="holograme"] .split{border-radius:99px;border:1px solid rgba(255,255,255,.12);background:rgba(4,7,22,.55)}
+html[data-theme="holograme"] .legend .lg{color:var(--ink2)}
+html[data-theme="holograme"] .legend .lg b{color:#fff}
+html[data-theme="holograme"] .p .pbar{border-radius:99px;background:rgba(255,255,255,.1)}
+html[data-theme="holograme"] .p .pbar i{border-radius:99px;background:linear-gradient(90deg,var(--chart-a),color-mix(in srgb,var(--chart-a) 40%,var(--chart-b)))}
+html[data-theme="holograme"] .p .vv,html[data-theme="holograme"] .row .k,html[data-theme="holograme"] .vol .vh .vf{color:var(--ink2)}
+html[data-theme="holograme"] .bars i{border-radius:99px 99px 2px 2px;background:linear-gradient(180deg,#fff,var(--chart-a) 45%,color-mix(in srgb,var(--chart-a) 50%,var(--chart-b)))}
+html[data-theme="holograme"] .empty{color:var(--ink2)}
+
+/* ═══ 10. Mouvement et accessibilité ═════════════════════════════════════════ */
+@media (prefers-reduced-motion:reduce){
+  html[data-theme="holograme"] *,html[data-theme="holograme"] *::before,html[data-theme="holograme"] *::after{transition:none!important;animation:none!important}
+}
+@media (prefers-reduced-transparency:reduce){
+  html[data-theme="holograme"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.vital,.cost-total,.wk-svg,.account-menu-items,.quota-empty,.sidebar,.footer){
+    -webkit-backdrop-filter:none;backdrop-filter:none;background:#10163a}
+}
+@media (prefers-contrast:more){
+  html[data-theme="holograme"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.vital){background:#10163a}
+  html[data-theme="holograme"] .seg,html[data-theme="holograme"] .button{border-color:#fff}
+}
+
+/* ═══ 11. Étroit (fenêtre mini 940) ═══════════════════════════════════════════ */
+@media (max-width:970px){
+  html[data-theme="holograme"] .shell{grid-template-columns:184px 1fr}
+  html[data-theme="holograme"] .nav button{padding-left:42px}
+  html[data-theme="holograme"] .settings-layout{grid-template-columns:1fr;gap:14px}
+  html[data-theme="holograme"] .settings-nav{flex-direction:row;flex-wrap:wrap}
+  html[data-theme="holograme"] main{padding:0 22px 24px}
+  html[data-theme="holograme"] .vitals{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+/* Moniteur : les groupes comptent deux cartes au plus ; deux colonnes fixes évitent une colonne fantôme. */
+html[data-theme="holograme"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="holograme"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}

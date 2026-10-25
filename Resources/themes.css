@@ -34,36 +34,6 @@
   --radius:2px;
 }
 
-[data-theme="holograme"]{
-  --bg:#0A0F1C;--sidebar:#0A0F1C;--panel-bg:rgba(124,200,255,.07);--panel-bg-strong:rgba(10,15,28,.85);
-  --text:#E4E9FF;--muted:#8B93B8;
-  --hair:rgba(255,255,255,.1);--hair-strong:rgba(255,255,255,.16);
-  --soft:rgba(255,255,255,.05);--soft-hover:rgba(255,255,255,.09);
-  --blue:#7CC8FF;--blue-soft:rgba(124,200,255,.1);--purple:#E29AFF;--purple-soft:rgba(226,154,255,.1);
-  --green:#5EEAD4;--amber:#FBBF24;--danger:#FF9AB0;
-  --chart-a:#7CC8FF;--chart-b:#E29AFF;
-  --grid:transparent;
-  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  --radius:14px;
-  --bg-image:radial-gradient(55% 55% at 10% -10%,rgba(80,180,255,.2),transparent 60%),radial-gradient(60% 55% at 100% 20%,rgba(200,110,255,.18),transparent 60%),radial-gradient(60% 55% at 40% 120%,rgba(255,120,190,.14),transparent 60%);
-  --bg-size:auto;
-}
-
-[data-theme="ion"]{
-  --bg:#020306;--sidebar:#020306;--panel-bg:transparent;--panel-bg-strong:transparent;
-  --text:#CFEFFF;--muted:#4F7480;
-  --hair:rgba(120,225,255,.25);--hair-strong:rgba(120,225,255,.4);
-  --soft:transparent;--soft-hover:rgba(120,225,255,.06);
-  --blue:#78E1FF;--blue-soft:rgba(120,225,255,.08);--purple:#B98CFF;--purple-soft:rgba(185,140,255,.08);
-  --green:#78E1FF;--amber:#FBBF24;--danger:#FF5C5C;
-  --chart-a:#78E1FF;--chart-b:#B98CFF;
-  --grid:transparent;
-  --font:ui-monospace,"SF Mono","Menlo",monospace;
-  --radius:0px;
-  --bg-image:none;
-  --bg-size:auto;
-}
-
 /* ── Rendu dépendant de --provider ──────────────────────────────────────────
    --provider n'est jamais un jeton de thème : il n'est défini qu'en ligne, par
    instance (style="--provider:…" sur .provider / .quota-card). Une propriété
@@ -76,26 +46,6 @@
    élevée l'emporte sur les .rail i/.quota-track i déjà déclarés dans les
    <style> de menubar.html/dashboard.html, quel que soit l'ordre des feuilles. */
 
-/* blueprint et phosphore ont leur propre feuille (themes/blueprint.css, themes/phosphore.css) qui
-   restyle les jauges. Un futur thème qui n'override rien obtient la hachure de base posée en dur
-   dans les règles .rail i/.quota-track i de menubar.html/dashboard.html au lieu d'un rail
-   invisible ; synthwave/circuit/holograme/ion ci-dessous la remplacent explicitement. */
-
-html[data-theme="holograme"] .rail i, html[data-theme="holograme"] .quota-track i{
-  background:linear-gradient(90deg,color-mix(in srgb,var(--provider) 55%,white 45%),var(--provider));
-}
-
-html[data-theme="ion"] .rail i, html[data-theme="ion"] .quota-track i{
-  background:var(--provider);
-  box-shadow:0 0 12px color-mix(in srgb,var(--provider) 30%,transparent) inset;
-}
-html[data-theme="ion"] .name, html[data-theme="ion"] .value, html[data-theme="ion"] .subgauge-head strong,
-html[data-theme="ion"] .quota-top strong{
-  text-shadow:0 0 16px color-mix(in srgb,var(--provider) 70%,transparent);
-}
-html[data-theme="ion"] .hero{
-  box-shadow:0 0 12px color-mix(in srgb,var(--hero,var(--blue)) 30%,transparent) inset;
-}
-html[data-theme="ion"] .hero-value{
-  text-shadow:0 0 16px color-mix(in srgb,var(--hero,var(--blue)) 70%,transparent);
-}
+/* Tous les thèmes nommés ont leur propre feuille (themes/<id>.css) qui restyle les jauges. Un futur
+   thème qui n'override rien obtient la hachure de base posée en dur dans les règles
+   .rail i/.quota-track i de menubar.html/dashboard.html, au lieu d'un rail invisible. */
