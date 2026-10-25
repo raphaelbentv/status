@@ -134,6 +134,22 @@ function sandboxFor(htmlFile) {
 }
 
 // ── Formats ─────────────────────────────────────────────────────────────────
+section('Formes des widgets : un libellé court par forme, dans les quatre langues');
+{
+  const html = readFileSync(join(root, 'Resources', 'dashboard.html'), 'utf8');
+  const block = (html.match(/const WIDGET_SHAPES=\{([\s\S]*?)\};/) || [])[1] || '';
+  const shapes = [...new Set([...block.matchAll(/'(\w+)'/g)].map(m => m[1]))];
+  check(['ringValue', 'segments', 'dial', 'dualArc', 'hub', 'chip', 'chipBar'].every(s => shapes.includes(s)),
+    `WIDGET_SHAPES propose les nouvelles formes (${shapes.length} ids)`);
+  for (const lang of LANGS) {
+    const missing = shapes.filter(s => !dictionaries[lang]['shape.' + s]);
+    check(!missing.length, `${lang} : shape.<id> défini pour chaque forme`, missing.join(', '));
+    const long = shapes.filter(s => (dictionaries[lang]['shape.' + s] || '').length > 14);
+    check(!long.length, `${lang} : libellés de forme courts (≤ 14 caractères)`, long.join(', '));
+  }
+  check(LANGS.every(l => dictionaries[l]['shape.chipNet']), 'étiquette de puce réseau (shape.chipNet) dans chaque langue');
+}
+
 section('Formats de nombre, de pourcentage et de devise selon la langue');
 {
   const run = sandboxFor('widget.html');

@@ -1551,7 +1551,8 @@ static void TestMenuBarWidgets(void) {
     }
 
     // Le dessin ne doit pas planter, quelle que soit la forme, la couleur ou l'entrée (fumée).
-    NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery", @""];
+    NSArray *shapes = @[@"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery", @"ringValue", @"segments",
+                        @"dial", @"dualArc", @"hub", @"chip", @"chipBar", @"inconnue", @""];
     NSArray *colors = @[@"auto", @"blue", @"red", @"purple", @"inconnu"];
     for (NSString *wid in TMMenuBarWidgetIDs())
         for (NSString *shape in shapes)
@@ -1682,6 +1683,180 @@ static void TestWidgetStableWidth(void) {
 }
 
 #pragma mark - Écrans (luminosité)
+
+#pragma mark - Formes Anneaux et Console
+
+static NSDictionary *TMRamSnapshot(double usedPercent, NSDictionary *extra) {
+    NSMutableDictionary *now = [@{ @"usedPercent": @(usedPercent), @"pressureLevel": @1 } mutableCopy];
+    [now addEntriesFromDictionary:extra ?: @{}];
+    return TMSnapshotWith(@"ram", now);
+}
+
+static void TestWidgetNewShapes(void) {
+    Section(@"Formes Anneaux / Console — readout, résolution, signature, largeur");
+    NSDictionary *snap = TMFakeSnapshot();
+    NSDictionary *empty = @{ @"families": @[] };
+
+    // Échelle logarithmique des débits : bornée, monotone, nulle à l'arrêt.
+    CheckEqual(@(TMWidgetRateFraction(0)), @0.0, @"débit nul : fraction 0");
+    CheckEqual(@(TMWidgetRateFraction(-5)), @0.0, @"débit négatif : fraction 0");
+    CheckEqual(@(TMWidgetRateFraction(200.0 * 1024 * 1024)), @1.0, @"au-delà de 100 Mo/s : plafonné à 1");
+    Check(TMWidgetRateFraction(1024) < TMWidgetRateFraction(1048576)
+          && TMWidgetRateFraction(1048576) < TMWidgetRateFraction(50.0 * 1048576), @"débit : fraction croissante");
+    Check(TMWidgetRateFraction(75776) > 0.3, @"74 Ko/s se voit sur l'arc (échelle log, pas linéaire)");
+
+    // Champs de puce et d'anneau chiffré, tirés de valeurs réelles.
+    NSDictionary *cpu = TMWidgetReadout(@"cpu", snap);
+    CheckEqual(cpu[@"chipLabel"], @"CPU", @"CPU : étiquette de puce");
+    CheckEqual(cpu[@"chipValue"], @"43", @"CPU : chiffre seul");
+    CheckEqual(cpu[@"chipUnit"], @"%", @"CPU : unité");
+    CheckEqual(cpu[@"chipKind"], @"spark", @"CPU : puce à sparkline");
+    CheckEqual(cpu[@"numeric"], @YES, @"CPU : chiffre disponible");
+    NSDictionary *temp = TMWidgetReadout(@"temperature", snap);
+    CheckEqual(temp[@"chipUnit"], @"°C", @"Température : unité °C");
+    CheckEqual(temp[@"autoScale"], @YES, @"Température : sparkline à échelle ajustée");
+    CheckEqual(TMWidgetReadout(@"memory", snap)[@"chipKind"], @"reservoir", @"Mémoire : puce à réservoir");
+    CheckEqual(TMWidgetReadout(@"disk", snap)[@"chipLabel"], @"DSK", @"Disque : étiquette DSK");
+    CheckEqual(TMWidgetReadout(@"battery", snap)[@"chipLabel"], @"BAT", @"Batterie : étiquette BAT");
+    CheckEqual(TMWidgetReadout(@"network", snap)[@"chipLabel"], @"RÉS", @"Réseau : étiquette RÉS (français)");
+    CheckEqual(TMWidgetReadout(@"anthropicApi", snap)[@"numeric"], @NO, @"Crédit API : pas de chiffre seul (texte en dollars)");
+    CheckEqual(TMWidgetReadout(@"claudeWeek", @{ @"families": @[ @{ @"id": @"claudeWeek", @"now": @{ @"percent": @80 }, @"series": @{} } ] })[@"chipValue"],
+               @"20", @"quota : le chiffre est le restant");
+    CheckEqual(TMWidgetReadout(@"cpu", empty)[@"chipValue"], @"", @"sans donnée : pas de chiffre inventé");
+
+    // Réseau : arcs ↓/↑ depuis les débits réels, série ramenée à 0..100 sur la même échelle.
+    NSDictionary *net = TMWidgetReadout(@"network", snap);
+    CheckEqual(net[@"dual"], @YES, @"Réseau : double donnée");
+    Check([net[@"rxFraction"] doubleValue] > 0 && [net[@"rxFraction"] doubleValue] < 1, @"Réseau : arc ↓ entre 0 et 1");
+    Check([net[@"rxFraction"] doubleValue] >= [net[@"txFraction"] doubleValue], @"Réseau : 74 Ko/s ≥ 70 Ko/s sur l'arc");
+    NSDictionary *netSeries = TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @1048576, @"txBytesPerSec": @0 });
+    NSDictionary *withSeries = @{ @"families": @[ @{ @"id": @"network", @"now": @{ @"rxBytesPerSec": @1048576, @"txBytesPerSec": @0 },
+                                                      @"series": @{ @"rxBytesPerSec": @[@0, @1048576, @(1000.0 * 1048576)] } } ] };
+    NSArray *rxSeries = TMWidgetReadout(@"network", withSeries)[@"series"];
+    Check(rxSeries.count == 3 && [rxSeries[0] doubleValue] == 0 && [rxSeries[2] doubleValue] == 100, @"Réseau : série en échelle log 0..100");
+    CheckEqual(TMWidgetReadout(@"network", netSeries)[@"txFraction"], @0, @"Réseau : émission nulle → arc ↑ vide");
+    CheckEqual(TMWidgetReadout(@"network", empty)[@"hasValue"], @NO, @"Réseau sans donnée : tiret");
+    // Température : la série réelle des capteurs est transmise (sparkline de puce).
+    NSDictionary *tempSeries = @{ @"families": @[ @{ @"id": @"sensors", @"now": @{ @"tempC": @51 }, @"series": @{ @"tempC": @[@48, @50, @51] } } ] };
+    CheckEqual(TMWidgetReadout(@"temperature", tempSeries)[@"series"], (@[@48, @50, @51]), @"Température : série des capteurs transmise");
+
+    // Parts mémoire : champs réels du collecteur, arrondis, ordre app / système / compressée / cache.
+    double G = 1024.0 * 1024 * 1024;
+    NSDictionary *ram = TMRamSnapshot(68, @{ @"totalBytes": @(32 * G), @"appBytes": @(14.2 * G), @"wiredBytes": @(3.1 * G),
+                                             @"compressedBytes": @(2.4 * G), @"cachedBytes": @(6.0 * G) });
+    NSArray *parts = TMWidgetReadout(@"memory", ram)[@"parts"];
+    CheckEqual(@(parts.count), @4, @"Mémoire : quatre parts");
+    Check(fabs([parts[0] doubleValue] - 0.44) < 1e-9 && fabs([parts[1] doubleValue] - 0.10) < 1e-9
+          && fabs([parts[2] doubleValue] - 0.08) < 1e-9 && fabs([parts[3] doubleValue] - 0.19) < 1e-9,
+          @"Mémoire : parts = octets / total, arrondies au pour cent");
+    CheckEqual(@([TMWidgetReadout(@"memory", snap)[@"parts"] count]), @0, @"Mémoire sans détail d'octets : pas de parts (repli sur 10 segments)");
+    NSDictionary *partial = TMRamSnapshot(68, @{ @"totalBytes": @(32 * G), @"appBytes": @(14.2 * G) });
+    CheckEqual(@([TMWidgetReadout(@"memory", partial)[@"parts"] count]), @0, @"Mémoire : un champ manque → aucune part inventée");
+    NSDictionary *overflow = TMRamSnapshot(68, @{ @"totalBytes": @(32 * G), @"appBytes": @(30 * G), @"wiredBytes": @(30 * G),
+                                                  @"compressedBytes": @(1 * G), @"cachedBytes": @(1 * G) });
+    CheckEqual(@([TMWidgetReadout(@"memory", overflow)[@"parts"] count]), @0, @"Mémoire : parts incohérentes (somme > total) écartées");
+    CheckEqual(@([TMWidgetReadout(@"disk", ram)[@"parts"] count]), @0, @"Disque : jamais de parts");
+
+    // Résolution forme → dessin : une forme inconnue ou inadaptée retombe sur la forme naturelle.
+    CheckEqual(TMWidgetResolvedShape(cpu, nil), @"bars", @"forme vide → naturelle");
+    CheckEqual(TMWidgetResolvedShape(cpu, @"inconnue"), @"bars", @"forme inconnue → naturelle");
+    CheckEqual(TMWidgetResolvedShape(cpu, @"ringValue"), @"ringValue", @"CPU : anneau chiffré accepté");
+    CheckEqual(TMWidgetResolvedShape(cpu, @"dualArc"), @"bars", @"CPU : double arc impossible → naturelle");
+    CheckEqual(TMWidgetResolvedShape(net, @"dualArc"), @"dualArc", @"Réseau : double arc accepté");
+    CheckEqual(TMWidgetResolvedShape(net, @"segments"), @"twoLine", @"Réseau : pas de fraction → forme naturelle");
+    CheckEqual(TMWidgetResolvedShape(net, @"ringValue"), @"twoLine", @"Réseau : pas de chiffre seul → naturelle");
+    CheckEqual(TMWidgetResolvedShape(net, @"chip"), @"chip", @"Réseau : puce acceptée");
+    NSDictionary *api = TMWidgetReadout(@"anthropicApi", empty);
+    CheckEqual(TMWidgetResolvedShape(api, @"chip"), @"ring", @"Crédit API : pas de puce → naturelle");
+    CheckEqual(TMWidgetResolvedShape(api, @"ringValue"), @"ring", @"Crédit API : pas d'anneau chiffré → naturelle");
+    CheckEqual(TMWidgetResolvedShape(api, @"dial"), @"dial", @"Crédit API : cadran accepté");
+    CheckEqual(TMWidgetResolvedShape(TMWidgetReadout(@"memory", snap), @"hub"), @"hub", @"Mémoire : moyeu accepté");
+    for (NSString *legacy in @[@"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery"])
+        CheckEqual(TMWidgetResolvedShape(cpu, legacy), legacy, ([NSString stringWithFormat:@"forme historique « %@ » inchangée", legacy]));
+
+    // Titre système : absent dès que la forme dessine son texte.
+    Check(TMWidgetShapeCarriesText(cpu, @"ringValue"), @"anneau chiffré : porte son texte");
+    Check(TMWidgetShapeCarriesText(cpu, @"chip") && TMWidgetShapeCarriesText(cpu, @"chipBar"), @"puces : portent leur texte");
+    Check(TMWidgetShapeCarriesText(net, @"dualArc"), @"double arc : porte son texte");
+    Check(!TMWidgetShapeCarriesText(cpu, @"segments") && !TMWidgetShapeCarriesText(cpu, @"dial")
+          && !TMWidgetShapeCarriesText(cpu, @"ring") && !TMWidgetShapeCarriesText(cpu, nil),
+          @"segments, cadran, anneau, histogramme : le titre système reste à côté");
+    Check(TMWidgetShapeCarriesText(TMWidgetReadout(@"battery", snap), nil), @"batterie naturelle : texte dans l'image");
+    Check(!TMWidgetShapeCarriesText(cpu, @"dualArc"), @"forme rejetée (CPU) retombe sur les barres : titre système conservé");
+
+    // Signature : chaque champ de détail y entre quand la forme le dessine, et seulement alors.
+    NSMutableDictionary *ramMoved = [TMWidgetReadout(@"memory", ram) mutableCopy];
+    ramMoved[@"parts"] = @[@0.5, @0.1, @0.08, @0.19];
+    NSDictionary *ramNow = TMWidgetReadout(@"memory", ram);
+    Check(![TMWidgetRenderSignature(ramNow, @"segments", nil) isEqual:TMWidgetRenderSignature(ramMoved, @"segments", nil)],
+          @"segments : une part qui bouge change la signature");
+    CheckEqual(TMWidgetRenderSignature(ramNow, @"ring", nil), TMWidgetRenderSignature(ramMoved, @"ring", nil),
+               @"anneau : les parts mémoire ne changent pas la signature");
+    NSMutableDictionary *faster = [net mutableCopy];
+    faster[@"rxFraction"] = @0.9;
+    Check(![TMWidgetRenderSignature(net, @"dualArc", nil) isEqual:TMWidgetRenderSignature(faster, @"dualArc", nil)],
+          @"double arc : l'arc ↓ entre dans la signature");
+    CheckEqual(TMWidgetRenderSignature(net, @"twoLine", nil), TMWidgetRenderSignature(faster, @"twoLine", nil),
+               @"2 lignes : les fractions de débit n'y entrent pas");
+    NSMutableDictionary *shifted = [cpu mutableCopy];
+    shifted[@"series"] = @[@11, @22, @44];
+    Check(![TMWidgetRenderSignature(cpu, @"chip", nil) isEqual:TMWidgetRenderSignature(shifted, @"chip", nil)],
+          @"puce à sparkline : la série entre dans la signature");
+    CheckEqual(TMWidgetRenderSignature(cpu, @"chipBar", nil), TMWidgetRenderSignature(shifted, @"chipBar", nil),
+               @"puce + jauge : la série n'y entre pas");
+    CheckEqual(TMWidgetRenderSignature(cpu, @"ringValue", nil), TMWidgetRenderSignature(shifted, @"ringValue", nil),
+               @"anneau chiffré : la série n'y entre pas");
+    CheckEqual(TMWidgetRenderSignature(cpu, @"dualArc", nil)[@"shape"], @"bars", @"signature : forme rejetée résolue en forme naturelle");
+    NSMutableDictionary *louder = [cpu mutableCopy];
+    louder[@"chipValue"] = @"44"; louder[@"value"] = @"44 %";
+    Check(![TMWidgetRenderSignature(cpu, @"ringValue", nil) isEqual:TMWidgetRenderSignature(louder, @"ringValue", nil)],
+          @"anneau chiffré : un chiffre qui change redessine");
+
+    // Toutes les formes, tous les widgets, tous les états : hauteur ≤ 18 pt, template en auto,
+    // couleur imposée hors template, jamais nil, largeur indépendante de l'état (pas de saut).
+    NSArray *newShapes = @[@"ringValue", @"segments", @"dial", @"dualArc", @"hub", @"chip", @"chipBar"];
+    NSDictionary *states = @{ @"typique": snap, @"vide": empty };
+    for (NSString *wid in TMMenuBarWidgetIDs()) {
+        for (NSString *shape in newShapes) {
+            for (NSString *stateName in states) {
+                NSDictionary *readout = TMWidgetReadout(wid, states[stateName]);
+                NSImage *mono = TMWidgetImageStyled(readout, shape, nil);
+                NSImage *colored = TMWidgetImageStyled(readout, shape, @"blue");
+                NSString *tag = [NSString stringWithFormat:@"%@ / %@ / %@", wid, shape, stateName];
+                Check(mono != nil && mono.isTemplate, ([NSString stringWithFormat:@"%@ : image template sans couleur", tag]));
+                Check(colored != nil && !colored.isTemplate, ([NSString stringWithFormat:@"%@ : image colorée", tag]));
+                Check(mono.size.height <= 18 && mono.size.width > 0, ([NSString stringWithFormat:@"%@ : tient dans 18 pt de haut", tag]));
+                CheckEqual(@(mono.size.width), @(colored.size.width), ([NSString stringWithFormat:@"%@ : la couleur ne change pas la largeur", tag]));
+            }
+        }
+    }
+    NSDictionary *alert = @{ @"families": @[ @{ @"id": @"battery", @"now": @{ @"percent": @6, @"charging": @NO }, @"series": @{} } ] };
+    Check(!TMWidgetImageStyled(TMWidgetReadout(@"battery", alert), @"chipBar", nil).isTemplate, @"alerte : la puce est teintée même sans couleur choisie");
+
+    // Largeur réservée au pire cas : aucun saut entre une mesure basse et une mesure haute.
+    NSDictionary *calm = TMSnapshotWith(@"cpu", @{ @"total": @4 }), *loaded = TMSnapshotWith(@"cpu", @{ @"total": @100 });
+    for (NSString *shape in @[@"ringValue", @"segments", @"dial", @"hub", @"chip", @"chipBar"])
+        CheckEqual(@(TMImageWidth(@"cpu", calm, shape)), @(TMImageWidth(@"cpu", loaded, shape)),
+                   ([NSString stringWithFormat:@"CPU en %@ : même largeur à 4 %% et à 100 %%", shape]));
+    CheckEqual(@(TMImageWidth(@"cpu", empty, @"chip")), @(TMImageWidth(@"cpu", loaded, @"chip")), @"puce CPU sans donnée : largeur conservée");
+    NSDictionary *slow = TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @8, @"txBytesPerSec": @3 });
+    NSDictionary *fast = TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @1048000000, @"txBytesPerSec": @1048000000 });
+    for (NSString *shape in @[@"dualArc", @"chip"])
+        CheckEqual(@(TMImageWidth(@"network", slow, shape)), @(TMImageWidth(@"network", fast, shape)),
+                   ([NSString stringWithFormat:@"Réseau en %@ : même largeur à 8 o/s et à 999 Mo/s", shape]));
+    CheckEqual(@(TMImageWidth(@"network", empty, @"dualArc")), @(TMImageWidth(@"network", fast, @"dualArc")), @"double arc sans donnée : largeur conservée");
+    NSDictionary *full = TMSnapshotWith(@"battery", @{ @"percent": @100, @"fullyCharged": @YES });
+    NSDictionary *low = TMSnapshotWith(@"battery", @{ @"percent": @7, @"minutesRemaining": @620, @"charging": @YES });
+    CheckEqual(@(TMImageWidth(@"battery", full, @"chipBar")), @(TMImageWidth(@"battery", low, @"chipBar")), @"Batterie en puce : charge ou non, même largeur");
+    NSDictionary *coolT = TMSnapshotWith(@"sensors", @{ @"tempC": @5 }), *hotT = TMSnapshotWith(@"sensors", @{ @"tempC": @100 });
+    CheckEqual(@(TMImageWidth(@"temperature", coolT, @"chip")), @(TMImageWidth(@"temperature", hotT, @"chip")), @"Température en puce : même largeur à 5 ° et 100 °");
+    CheckEqual(@(TMImageWidth(@"cpu", calm, @"ringValue")), @18.0, @"anneau chiffré : cellule de 18 pt");
+
+    // Les formes inconnues dessinent la forme naturelle (même image qu'une forme vide).
+    NSImage *unknown = TMWidgetImageStyled(TMWidgetReadout(@"cpu", snap), @"inconnue", nil);
+    NSImage *natural = TMWidgetImageStyled(TMWidgetReadout(@"cpu", snap), nil, nil);
+    CheckEqual(@(unknown.size.width), @(natural.size.width), @"forme inconnue : même gabarit que la forme naturelle");
+}
 
 static void TestDisplayBrightnessClamp(void) {
     Section(@"TMClampBrightnessPercent / TMSteppedBrightness — bornes");
@@ -2388,6 +2563,7 @@ int main(void) {
         TestMenuBarWidgets();
         TestWidgetRenderSignature();
         TestWidgetStableWidth();
+        TestWidgetNewShapes();
         TestApiRegistry();
         TestApiBaseline();
         TestApiInputs();

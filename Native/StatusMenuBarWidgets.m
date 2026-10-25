@@ -180,11 +180,11 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         NSNumber *value = TMNum(TMFamilyNow(snapshot, fam)[key]);
         r[@"style"] = @"bars";
         r[@"numeric"] = @YES; r[@"chipKind"] = @"spark";
-        r[@"chipLabel"] = [widgetId isEqual:@"cpu"] ? @"CPU" : @"GPU";
+        r[@"chipLabel"] = [widgetId isEqual:@"cpu"] ? @"CPU" : @"GPU"; r[@"chipUnit"] = @"%";
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(value);
-            r[@"chipValue"] = TMPlain(value); r[@"chipUnit"] = @"%";
+            r[@"chipValue"] = TMPlain(value);
             r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
             r[@"series"] = TMFamilySeries(snapshot, fam, key);
         }
@@ -198,7 +198,7 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(@(100 - MIN(100, MAX(0, value.doubleValue))));
-            r[@"chipValue"] = TMPlain(@(100 - MIN(100, MAX(0, value.doubleValue)))); r[@"chipUnit"] = @"%";
+            r[@"chipValue"] = TMPlain(@(100 - MIN(100, MAX(0, value.doubleValue))));
             r[@"fraction"] = @(1 - MIN(MAX(value.doubleValue / 100.0, 0), 1));
             NSMutableArray *remainingSeries=[NSMutableArray array];
             for (NSNumber *used in TMFamilySeries(snapshot, widgetId, @"percent"))
@@ -224,11 +224,11 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         NSNumber *value = TMNum(famNow[@"usedPercent"]);
         r[@"style"] = @"pie";
         r[@"numeric"] = @YES;
-        r[@"chipLabel"] = [widgetId isEqual:@"memory"] ? @"MEM" : @"DSK";
+        r[@"chipLabel"] = [widgetId isEqual:@"memory"] ? @"MEM" : @"DSK"; r[@"chipUnit"] = @"%";
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(value);
-            r[@"chipValue"] = TMPlain(value); r[@"chipUnit"] = @"%";
+            r[@"chipValue"] = TMPlain(value);
             r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
             r[@"series"] = TMFamilySeries(snapshot, fam, @"usedPercent");
             if ([widgetId isEqual:@"memory"]) r[@"parts"] = TMMemoryParts(famNow);
@@ -254,10 +254,10 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
     } else if ([widgetId isEqual:@"temperature"]) {
         NSNumber *temp = TMNum(TMFamilyNow(snapshot, @"sensors")[@"tempC"]);
         r[@"style"] = @"twoLine";
-        r[@"numeric"] = @YES; r[@"chipLabel"] = @"TEMP"; r[@"chipKind"] = @"spark"; r[@"autoScale"] = @YES;
+        r[@"numeric"] = @YES; r[@"chipLabel"] = @"TEMP"; r[@"chipUnit"] = @"°C"; r[@"chipKind"] = @"spark"; r[@"autoScale"] = @YES;
         if (temp) {
             r[@"hasValue"] = @YES;
-            r[@"chipValue"] = TMPlain(temp); r[@"chipUnit"] = @"°C";
+            r[@"chipValue"] = TMPlain(temp);
             r[@"series"] = TMFamilySeries(snapshot, @"sensors", @"tempC");
             r[@"primary"] = r[@"value"] = [NSString stringWithFormat:@"%.0f°", round(temp.doubleValue)];
             r[@"fraction"] = @(MIN(MAX(temp.doubleValue / 100.0, 0), 1));  // 0-100 °C pour l'anneau
@@ -268,9 +268,9 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         NSDictionary *b = TMFamilyNow(snapshot, @"battery");
         NSNumber *pct = TMNum(b[@"percent"]);
         r[@"style"] = @"battery";
-        r[@"numeric"] = @YES; r[@"chipLabel"] = @"BAT";
+        r[@"numeric"] = @YES; r[@"chipLabel"] = @"BAT"; r[@"chipUnit"] = @"%";
         if (pct) {
-            r[@"chipValue"] = TMPlain(pct); r[@"chipUnit"] = @"%";
+            r[@"chipValue"] = TMPlain(pct);
             BOOL charging = [TMNum(b[@"charging"]) boolValue];
             BOOL full = [TMNum(b[@"fullyCharged"]) boolValue];
             long long remaining = TMNum(b[@"minutesRemaining"]).longLongValue;
