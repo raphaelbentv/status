@@ -1,0 +1,515 @@
+/* ion — habillage et mise en page, chargé par dashboard.html, menubar.html et widget.html.
+   Direction « Énergie froide » : le sujet est la tension. Un noir bleuté, des filets d'un pixel et
+   deux encres seulement — bleu électrique pour OpenAI, blanc glacé pour Claude. Chaque carte porte
+   un arc en tête (un éclat blanc qui s'éteint en dégradé) et une équerre dans l'angle ; chaque jauge
+   est une règle graduée dont le remplissage se termine par une étincelle. Chiffres en Geist Mono,
+   gros et nets ; micro-étiquettes en capitales espacées ; angles vifs. Sobre, technique, contrasté.
+   Tout est scopé html[data-theme="ion"]. Les couleurs d'état suivent data-level (ok / warn / crit),
+   calculé sur le RESTANT : ok = encre du fournisseur, warn = ambre, crit = rouge — le rouge et
+   l'ambre ne servent qu'à l'alerte. */
+
+/* ═══ 1. Jetons ═══════════════════════════════════════════════════════════════
+   --blue = OpenAI (bleu électrique), --purple = Claude (blanc glacé). Aussi lus par widget.html. */
+[data-theme="ion"]{
+  color-scheme:dark;
+  --bg:#03060d;--sidebar:#04080f;--panel-bg:rgba(7,14,28,.9);--panel-bg-strong:rgba(5,11,22,.97);
+  --text:#eaf5ff;--muted:#8fa7c2;
+  --hair:rgba(120,185,255,.17);--hair-strong:rgba(130,200,255,.36);
+  --soft:rgba(80,150,255,.06);--soft-hover:rgba(70,150,255,.15);
+  --blue:#3da5ff;--blue-soft:rgba(61,165,255,.1);--purple:#c4e8ff;--purple-soft:rgba(196,232,255,.1);
+  --green:#46f0c8;--amber:#ffb21f;--danger:#ff4a5c;
+  --chart-a:#3da5ff;--chart-b:#c4e8ff;
+  --grid:transparent;
+  --font:"Geist",-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --radius:2px;
+  /* Quadrillage de 48 px très discret + deux lueurs froides ; les tailles suivent l'ordre des couches. */
+  --bg-image:linear-gradient(rgba(120,180,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(120,180,255,.035) 1px,transparent 1px),radial-gradient(900px 520px at 88% -12%,rgba(38,118,255,.2),transparent 70%),radial-gradient(520px 420px at -4% 112%,rgba(38,98,255,.11),transparent 70%),linear-gradient(180deg,#040814,#02040a);
+  --bg-size:48px 48px,48px 48px,auto,auto,auto;
+  /* Jetons propres au thème */
+  --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --cyan:#52e6ff;--indigo:#7b8cff;--ink2:#c4d8ec;--ink3:#8fa7c2;--edge:rgba(130,200,255,.3);
+  --arc:linear-gradient(90deg,#fff 0,var(--ac,var(--blue)) 20px,color-mix(in srgb,var(--ac,var(--blue)) 30%,transparent) 55%,transparent 100%);
+}
+
+/* ═══ 2. Carte : filet, arc en tête, équerre ═════════════════════════════════
+   --ac = encre de la carte (fournisseur, ou niveau d'alerte). ::before dessine l'arc d'un pixel
+   (éclat blanc → encre → rien) et ::after l'équerre du coin bas-droit. */
+html[data-theme="ion"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.cost-total,.wk-svg,.account-menu-items,.quota-empty){
+  --ac:var(--blue);position:relative;border:1px solid var(--edge);border-radius:2px;background:linear-gradient(180deg,rgba(18,40,78,.34),rgba(7,14,28,.9) 46%),rgba(5,10,20,.94);box-shadow:none}
+html[data-theme="ion"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.cost-total,.account-menu-items)::before{
+  content:"";position:absolute;left:-1px;top:-1px;right:auto;bottom:auto;width:62%;height:1px;background:var(--arc);box-shadow:0 0 9px color-mix(in srgb,var(--ac) 60%,transparent);pointer-events:none}
+html[data-theme="ion"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting,.account-list,.api-credits,.api-foot,.bar-preview,.notice,.cost-total)::after{
+  content:"";position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-right:1px solid var(--ac);border-bottom:1px solid var(--ac);opacity:.85;pointer-events:none}
+html[data-theme="ion"] .quota-empty{border-style:dashed;background:transparent;color:var(--ink2)}
+
+/* ═══ 3. Coque : fenêtre, barre latérale, barre de titre ═════════════════════ */
+html[data-theme="ion"] body{font-size:13.5px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+html[data-theme="ion"] .shell,html[data-theme="ion"] .popover{--muted:#8fa7c2}
+
+html[data-theme="ion"] .sidebar{padding:20px 14px 16px;background:linear-gradient(180deg,rgba(14,32,66,.5),rgba(4,8,15,.96) 60%);border-right:1px solid var(--edge);position:relative;z-index:1}
+html[data-theme="ion"] .sidebar::after{content:"";position:absolute;right:-1px;top:0;width:1px;height:96px;background:linear-gradient(180deg,#fff,var(--blue) 40%,transparent);box-shadow:0 0 10px var(--blue)}
+html[data-theme="ion"] .product{font:600 13px/1 var(--mono);letter-spacing:.34em;text-transform:uppercase;color:#fff;margin:6px 10px 28px;text-shadow:0 0 14px rgba(61,165,255,.8)}
+html[data-theme="ion"] .product::before{content:"";display:inline-block;width:7px;height:7px;margin-right:11px;background:var(--blue);box-shadow:0 0 10px 1px var(--blue);transform:rotate(45deg) translateY(-1px)}
+
+html[data-theme="ion"] .nav button{padding:10px 12px 10px 38px;margin-bottom:3px;border:1px solid transparent;border-radius:2px;font-size:13.5px;font-weight:500;color:var(--ink2);transition:background .15s,border-color .15s,color .15s}
+html[data-theme="ion"] .nav button::before{left:12px;font:500 11px/1 var(--mono);opacity:.55;letter-spacing:.04em}
+html[data-theme="ion"] .nav button:hover{background:rgba(70,150,255,.08);border-color:var(--hair);color:#fff}
+html[data-theme="ion"] .nav button.active{color:#fff;font-weight:600;border-color:var(--edge);border-left:2px solid var(--blue);padding-left:37px;
+  background:linear-gradient(90deg,rgba(61,165,255,.24),rgba(61,165,255,.05) 70%,transparent);box-shadow:inset 0 0 18px -8px var(--blue)}
+html[data-theme="ion"] .nav button.active::before{opacity:1;color:var(--cyan);left:11px}
+
+html[data-theme="ion"] .sidebar-bottom{border-top:1px solid var(--hair);padding-top:12px}
+html[data-theme="ion"] .connection-state{gap:10px;padding:8px 12px;font:500 11px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+html[data-theme="ion"] .connection-state i{width:7px;height:7px;flex:none;background:#3a4a60}
+html[data-theme="ion"] .connection-state i.live{background:var(--green);box-shadow:0 0 9px 1px var(--green)}
+html[data-theme="ion"] .connection-state i.warn{background:var(--amber);box-shadow:0 0 9px 1px var(--amber)}
+
+html[data-theme="ion"] main{padding:0 32px 32px}
+html[data-theme="ion"] main::-webkit-scrollbar{width:10px}
+html[data-theme="ion"] main::-webkit-scrollbar-track{background:transparent}
+html[data-theme="ion"] main::-webkit-scrollbar-thumb{background:rgba(130,200,255,.22);border:2px solid transparent;background-clip:padding-box}
+
+html[data-theme="ion"] .toolbar{height:72px;border-bottom:1px solid var(--edge);gap:14px;position:relative}
+html[data-theme="ion"] .toolbar::after{content:"";position:absolute;left:0;bottom:-1px;width:120px;height:1px;background:linear-gradient(90deg,#fff,var(--blue) 30%,transparent);box-shadow:0 0 10px var(--blue)}
+html[data-theme="ion"] .toolbar h1{font:600 18px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:#fff}
+html[data-theme="ion"] .toolbar-meta{margin-left:auto;font:400 12px/1 var(--mono);color:var(--ink2);white-space:nowrap;padding:8px 12px;border:1px solid var(--hair);background:rgba(70,150,255,.05)}
+html[data-theme="ion"] .toolbar-warn{white-space:nowrap;font:600 12px/1 var(--mono)}
+
+/* Boutons : contour d'un pixel, angles vifs ; le primaire est un aplat bleu à texte sombre (≥ 7:1). */
+html[data-theme="ion"] .button,html[data-theme="ion"] .account-action,html[data-theme="ion"] .provider-manage{--c:var(--blue);font-weight:500;color:#fff;white-space:nowrap;border:1px solid var(--edge);border-radius:2px;padding:7px 14px;
+  background:rgba(61,165,255,.08);transition:background .15s,border-color .15s,box-shadow .15s}
+html[data-theme="ion"] .button:hover,html[data-theme="ion"] .account-action:hover,html[data-theme="ion"] .provider-manage:hover{background:rgba(61,165,255,.2);border-color:#9fd2ff;color:#fff;box-shadow:0 0 14px -4px var(--blue)}
+html[data-theme="ion"] .button.on{border-color:var(--green);color:var(--green);background:rgba(70,240,200,.08)}
+html[data-theme="ion"] .button[disabled],html[data-theme="ion"] .account-action[disabled]{opacity:.4;cursor:default;box-shadow:none}
+html[data-theme="ion"] .account-action{--c:var(--provider,var(--blue));padding:6px 12px;font-size:12.5px;border-color:color-mix(in srgb,var(--c) 55%,transparent)}
+html[data-theme="ion"] .account-action.primary{background:linear-gradient(180deg,color-mix(in srgb,var(--c) 70%,#fff),var(--c));border-color:color-mix(in srgb,var(--c) 70%,#fff);color:#02101f;font-weight:700}
+html[data-theme="ion"] .account-action.primary:hover{filter:brightness(1.12);box-shadow:0 0 16px -2px var(--c)}
+html[data-theme="ion"] .provider-manage{--c:var(--provider);padding:2px 9px;margin-left:10px;font:500 11px/1.5 var(--mono);letter-spacing:.06em;color:var(--ink2);text-transform:uppercase}
+
+/* Segmentés : une règle, des cases séparées par des filets ; l'actif s'allume. */
+html[data-theme="ion"] .segmented,html[data-theme="ion"] .view-toggle{border:1px solid var(--edge);border-radius:2px;background:rgba(5,10,20,.7);overflow:visible}
+html[data-theme="ion"] .segmented{flex-wrap:wrap;width:-webkit-fit-content;width:fit-content;max-width:100%}
+html[data-theme="ion"] .seg,html[data-theme="ion"] .view-toggle button{border:0;border-radius:0;padding:6px 12px;font:500 12px/1.3 var(--mono);color:var(--ink2);white-space:nowrap;transition:background .12s,color .12s}
+html[data-theme="ion"] .seg+.seg{border-left:1px solid var(--hair)}
+html[data-theme="ion"] .seg:hover,html[data-theme="ion"] .view-toggle button:hover{background:rgba(70,150,255,.12);color:#fff}
+html[data-theme="ion"] .seg.on,html[data-theme="ion"] .view-toggle button.on{color:#fff;font-weight:600;background:rgba(61,165,255,.28);box-shadow:inset 0 -2px 0 var(--blue),inset 0 0 14px -6px var(--blue)}
+html[data-theme="ion"] .seg[disabled]{opacity:.3}
+html[data-theme="ion"] .view-toggle{margin-left:0}
+html[data-theme="ion"] .seg-wrap .seg{border:1px solid var(--edge)}
+
+html[data-theme="ion"] select{background:#050b16;border:1px solid var(--edge);border-radius:2px;padding:7px 12px;color:#fff;font:500 12.5px var(--mono)}
+html[data-theme="ion"] input[type="number"]{background:#050b16;border:1px solid var(--edge);border-radius:2px;padding:5px 8px;color:#fff;font:500 12.5px var(--mono)}
+html[data-theme="ion"] button:focus-visible,html[data-theme="ion"] summary:focus-visible,html[data-theme="ion"] select:focus-visible,html[data-theme="ion"] input:focus-visible{outline:2px solid #fff;outline-offset:2px;box-shadow:0 0 0 5px rgba(61,165,255,.55)}
+html[data-theme="ion"] .notice{margin:16px 0}
+html[data-theme="ion"] .notice{--ac:var(--amber);border-color:color-mix(in srgb,var(--amber) 55%,transparent)}
+html[data-theme="ion"] .notice strong{color:var(--amber)}
+html[data-theme="ion"] .sort-row{margin:6px 0 18px;color:var(--ink2);font-size:12.5px}
+
+/* ═══ 4. Quotas (vue « Status ») ═════════════════════════════════════════════ */
+html[data-theme="ion"] .provider-blocks{gap:16px;margin-top:6px}
+html[data-theme="ion"] .provider-block{--ac:var(--provider);padding:18px 20px 20px;border-color:color-mix(in srgb,var(--provider) 40%,transparent)}
+html[data-theme="ion"] .provider-block-head{margin-bottom:14px}
+html[data-theme="ion"] .provider{gap:10px;font:600 15px/1 var(--mono);color:var(--provider);text-transform:uppercase;letter-spacing:.22em}
+html[data-theme="ion"] .provider-dot{width:8px;height:8px;background:var(--provider);box-shadow:0 0 10px 1px var(--provider)}
+html[data-theme="ion"] .provider-block-head .status-label{font:400 11.5px/1 var(--mono);color:var(--ink2);text-transform:uppercase;letter-spacing:.08em}
+html[data-theme="ion"] .provider-block-head .status-label i{display:none}
+
+html[data-theme="ion"] .account-block+.account-block{border-top:1px solid var(--hair);margin-top:18px;padding-top:18px}
+html[data-theme="ion"] .account-block-head{align-items:center;gap:12px;margin-bottom:8px}
+html[data-theme="ion"] .account-block-head strong,html[data-theme="ion"] .account-copy strong{font-size:14.5px;font-weight:600;color:#fff}
+html[data-theme="ion"] .account-identity{font-weight:400;color:var(--ink3);font-size:12.5px}
+html[data-theme="ion"] .account-block .status-label{--st:var(--green);flex:none;display:inline-flex;align-items:center;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--st);
+  padding:4px 9px;border:1px solid color-mix(in srgb,var(--st) 55%,transparent);background:color-mix(in srgb,var(--st) 9%,transparent)}
+html[data-theme="ion"] .account-block[data-connected="0"] .status-label{--st:#7d93ad}
+html[data-theme="ion"] .account-block[data-error="1"] .status-label{--st:var(--amber)}
+html[data-theme="ion"] .account-block .status-label i{width:6px;height:6px;margin-right:7px;background:var(--st);box-shadow:0 0 7px 1px var(--st)}
+html[data-theme="ion"] .freshness{margin:0 0 8px;font-size:12.5px}
+html[data-theme="ion"] .billing-line{margin:0 0 12px;font-size:12.5px}
+html[data-theme="ion"] .quota-error{color:var(--danger);font-size:12.5px;font-weight:500}
+html[data-theme="ion"] .quota-stale{font-size:12.5px}
+
+/* Carte de fenêtre : filet, arc, jauge et chiffre suivent le niveau (ok = encre du fournisseur). */
+html[data-theme="ion"] .quota-card{--lv:var(--provider,var(--blue));--ac:var(--lv);--lvt:#fff;padding:13px 16px 12px;border-color:color-mix(in srgb,var(--lv) 38%,transparent)}
+html[data-theme="ion"] .quota-card[data-level="warn"]{--lv:var(--amber);--lvt:var(--amber);background:linear-gradient(180deg,rgba(255,178,31,.12),rgba(7,14,28,.9) 55%),rgba(5,10,20,.94);border-color:color-mix(in srgb,var(--amber) 60%,transparent)}
+html[data-theme="ion"] .quota-card[data-level="crit"]{--lv:var(--danger);--lvt:var(--danger);background:linear-gradient(180deg,rgba(255,74,92,.16),rgba(7,14,28,.9) 55%),rgba(5,10,20,.94);border-color:color-mix(in srgb,var(--danger) 70%,transparent)}
+html[data-theme="ion"] .quota-grid{gap:12px}
+html[data-theme="ion"] .quota-top{align-items:baseline}
+html[data-theme="ion"] .quota-top span{font:500 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink2)}
+html[data-theme="ion"] .quota-top strong{font:500 22px/1.1 var(--mono);letter-spacing:-.03em;color:var(--lvt);white-space:nowrap;text-shadow:0 0 16px color-mix(in srgb,var(--lv) 40%,transparent)}
+html[data-theme="ion"] .quota-card small,html[data-theme="ion"] .quota-empty{font-size:12.5px}
+html[data-theme="ion"] .quota-foot{flex-wrap:wrap;align-items:center;gap:6px 10px}
+html[data-theme="ion"] .quota-foot small{flex:1 1 auto;color:var(--ink3);font-size:12.5px;line-height:1.45}
+html[data-theme="ion"] .spark{margin-left:auto}
+html[data-theme="ion"] .spark .area{fill:var(--c);opacity:.1}
+html[data-theme="ion"] .spark .line{stroke-width:1.3}
+html[data-theme="ion"] .spark .tip{fill:#fff;filter:drop-shadow(0 0 4px var(--c))}
+html[data-theme="ion"] .manual-reset{font-size:12.5px;color:var(--ink3)}
+html[data-theme="ion"] .manual-reset.available{color:var(--cyan);font-weight:500}
+html[data-theme="ion"] .reset-expiries li.soon{color:var(--amber)}
+html[data-theme="ion"] .extra-credits{border:1px solid var(--hair)!important;border-radius:2px!important;background:rgba(61,165,255,.05)!important}
+
+/* Jauge : règle graduée tous les 10 %, remplissage qui s'intensifie vers sa pointe, étincelle
+   blanche au bout. Sert aux deux pages (.quota-track du tableau de bord, .rail du popover). Les
+   couleurs inline du JS sont écrasées (!important) ; celles d'alerte sont relues plus bas. */
+html[data-theme="ion"] .quota-track,html[data-theme="ion"] .rail{--tc:var(--lv,var(--provider,var(--blue)));position:relative;height:7px;margin:12px 0 9px;overflow:visible;border:0;border-radius:0;
+  background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),rgba(160,210,255,.28) calc(10% - 1px),rgba(160,210,255,.28) 10%),rgba(100,165,255,.09);
+  box-shadow:inset 0 0 0 1px rgba(130,195,255,.22)}
+html[data-theme="ion"] .quota-track i,html[data-theme="ion"] .rail i{position:relative;display:block;border-radius:0;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--tc) 22%,transparent),color-mix(in srgb,var(--tc) 70%,transparent) 70%,var(--tc))!important;
+  box-shadow:0 0 14px -2px var(--tc)}
+html[data-theme="ion"] .quota-track i::after,html[data-theme="ion"] .rail i::after{content:"";position:absolute;right:-1px;top:-3px;bottom:-3px;width:2px;background:#fff;box-shadow:0 0 8px 1px var(--tc)}
+html[data-theme="ion"] .quota-track i[style*="width:0%"],html[data-theme="ion"] .rail i[style*="width:0%"]{display:none}
+html[data-theme="ion"] .rail i[style*="--danger"]{background:linear-gradient(90deg,rgba(255,74,92,.25),var(--danger))!important;box-shadow:0 0 14px -2px var(--danger)}
+html[data-theme="ion"] .rail i[style*="--danger"]::after{box-shadow:0 0 8px 1px var(--danger)}
+html[data-theme="ion"] .rail i[style*="--amber"]{background:linear-gradient(90deg,rgba(255,178,31,.25),var(--amber))!important;box-shadow:0 0 14px -2px var(--amber)}
+html[data-theme="ion"] .rail i[style*="--amber"]::after{box-shadow:0 0 8px 1px var(--amber)}
+html[data-theme="ion"] .api-rail{height:6px;margin-top:12px;border-radius:0;background:rgba(100,165,255,.09);box-shadow:inset 0 0 0 1px rgba(130,195,255,.22);overflow:visible}
+html[data-theme="ion"] .api-rail i{border-radius:0;background:linear-gradient(90deg,color-mix(in srgb,var(--provider) 25%,transparent),var(--provider));box-shadow:0 0 12px -2px var(--provider)}
+html[data-theme="ion"] .api-rail.warning i{background:linear-gradient(90deg,rgba(255,178,31,.25),var(--amber));box-shadow:0 0 12px -2px var(--amber)}
+html[data-theme="ion"] .api-rail.critical i{background:linear-gradient(90deg,rgba(255,74,92,.25),var(--danger));box-shadow:0 0 12px -2px var(--danger)}
+
+/* Coût équivalent API */
+html[data-theme="ion"] .cost-total{--ac:var(--cyan);margin-top:16px;padding:13px 16px;border-color:color-mix(in srgb,var(--cyan) 40%,transparent)}
+html[data-theme="ion"] .cost-total.scanning{--ac:var(--blue);border-color:var(--hair);font-size:12.5px;color:var(--ink2)}
+html[data-theme="ion"] .cost-total-label{font:500 12px/1.35 var(--font);letter-spacing:.02em;text-transform:none;color:var(--cyan);margin-bottom:6px}
+html[data-theme="ion"] .cost-total-head{align-items:flex-start}
+html[data-theme="ion"] .cost-period{margin-bottom:6px}
+html[data-theme="ion"] .cost-total-amount{font:500 27px/1 var(--mono);color:#fff;white-space:nowrap;letter-spacing:-.04em;text-shadow:0 0 16px rgba(82,230,255,.4)}
+html[data-theme="ion"] .cost-warn{color:var(--amber)}
+html[data-theme="ion"] .summary-note{margin-top:6px;font-size:12px;color:var(--ink3);line-height:1.45}
+html[data-theme="ion"] .model-table{font:400 12px/1.4 var(--mono)}
+html[data-theme="ion"] .model-table th{color:var(--ink3);letter-spacing:.1em;font-weight:500;border-bottom:1px solid var(--edge)}
+html[data-theme="ion"] .model-table td{border-bottom:1px solid var(--hair);padding:5px 0}
+html[data-theme="ion"] .model-table td:first-child{overflow-wrap:anywhere}
+html[data-theme="ion"] .model-table .num{white-space:nowrap;padding-left:10px}
+
+/* Consommation 7 jours */
+html[data-theme="ion"] .section-head h2{font:500 11px/1 var(--mono);letter-spacing:.2em;color:var(--cyan)}
+html[data-theme="ion"] .section-head p{color:var(--ink3)}
+html[data-theme="ion"] .wk-svg{--ac:var(--blue)}
+html[data-theme="ion"] .wk-legend{color:var(--ink2);font-size:12px}
+html[data-theme="ion"] .wk-leg i{height:3px}
+
+/* ═══ 5. Moniteur ════════════════════════════════════════════════════════════ */
+/* Bandeau de signes vitaux : une rangée de cellules à filet ; le trait inférieur
+   de chaque cellule porte la teinte (ambre / rouge selon .warn / .crit). */
+html[data-theme="ion"] .vitals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;background:transparent;border:0;border-radius:0;overflow:visible;margin-top:6px}
+html[data-theme="ion"] .vital{--c:var(--blue);gap:4px;padding:11px 14px 10px;border-radius:2px;border:1px solid var(--edge);background:linear-gradient(180deg,rgba(18,40,78,.4),rgba(5,11,22,.97));box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--c) 70%,transparent)}
+html[data-theme="ion"] .vital:nth-child(2n){--c:var(--purple)}
+html[data-theme="ion"] .vital:nth-child(3){--c:var(--cyan)}
+html[data-theme="ion"] .vital:nth-child(4){--c:var(--indigo)}
+html[data-theme="ion"] .vital.warn{--c:var(--amber);background:linear-gradient(180deg,rgba(255,178,31,.14),rgba(5,11,22,.97))}
+html[data-theme="ion"] .vital.crit{--c:var(--danger);background:linear-gradient(180deg,rgba(255,74,92,.18),rgba(5,11,22,.97))}
+html[data-theme="ion"] .vital:hover{background:linear-gradient(180deg,rgba(40,90,180,.4),rgba(5,11,22,.97))}
+html[data-theme="ion"] .vital-label{font:500 10.5px/1 var(--mono);letter-spacing:.14em;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+html[data-theme="ion"] .vital .vital-value{font:500 21px/1.15 var(--mono);color:#fff;letter-spacing:-.03em}
+html[data-theme="ion"] .vital.warn .vital-value{color:var(--amber)}
+html[data-theme="ion"] .vital.crit .vital-value{color:var(--danger)}
+html[data-theme="ion"] .vital-value small{font-size:11px;color:var(--ink3)}
+html[data-theme="ion"] .vital svg path{stroke:var(--c);stroke-width:1.3;stroke-linejoin:round}
+html[data-theme="ion"] .vital.boost .vital-value{color:var(--cyan)}
+
+html[data-theme="ion"] .monitor-section{--c:var(--blue);--chart-a:var(--blue);--chart-b:var(--purple);margin-top:24px}
+html[data-theme="ion"] .monitor-section:nth-of-type(2){--c:var(--amber);--chart-a:var(--amber);--chart-b:var(--blue)}
+html[data-theme="ion"] .monitor-section:nth-of-type(3){--c:var(--cyan);--chart-a:var(--cyan);--chart-b:var(--blue)}
+html[data-theme="ion"] .monitor-section:nth-of-type(4){--c:var(--indigo);--chart-a:var(--blue);--chart-b:var(--purple)}
+html[data-theme="ion"] .monitor-section>h2{font:500 11px/1 var(--mono);letter-spacing:.2em;color:var(--c);margin-bottom:12px}
+html[data-theme="ion"] .monitor-section>h2::before{content:"";display:inline-block;width:14px;height:1px;background:var(--c);box-shadow:0 0 6px var(--c);vertical-align:middle;margin-right:10px}
+html[data-theme="ion"] .monitor-section .metric-grid{gap:14px}
+html[data-theme="ion"] .metric-card,html[data-theme="ion"] .day-card{--ac:var(--chart-a,var(--blue));padding:15px 18px;border-color:color-mix(in srgb,var(--chart-a,var(--blue)) 38%,transparent)}
+html[data-theme="ion"] .monitor-section .metric-card{padding:15px 18px;background:linear-gradient(180deg,rgba(18,40,78,.34),rgba(7,14,28,.9) 46%),rgba(5,10,20,.94)}
+html[data-theme="ion"] .metric-card.expandable:hover{border-color:var(--ac)}
+html[data-theme="ion"] .metric-head{align-items:center;margin-bottom:4px}
+html[data-theme="ion"] .metric-head h3{font:600 12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#fff}
+html[data-theme="ion"] .metric-value{font:500 32px/1 var(--mono);color:#fff;letter-spacing:-.05em;white-space:nowrap;text-shadow:0 0 18px color-mix(in srgb,var(--chart-a,var(--blue)) 45%,transparent)}
+html[data-theme="ion"] .metric-value .unit{font-size:13px;font-weight:400;color:var(--ink2);letter-spacing:0;text-shadow:none}
+html[data-theme="ion"] .metric-head .unit{font-size:12px;color:var(--ink2)}
+html[data-theme="ion"] .metric-readout{font-size:12px;line-height:1.3;color:var(--ink3);font-variant-numeric:tabular-nums}
+html[data-theme="ion"] .metric-badge{border-radius:0;padding:2px 8px;border:1px solid var(--edge);color:var(--ink2);font:500 11px/1.4 var(--mono);text-transform:uppercase;letter-spacing:.06em}
+html[data-theme="ion"] .metric-badge.warn{color:var(--amber);border-color:var(--amber);background:rgba(255,178,31,.1)}
+html[data-theme="ion"] .metric-badge.crit{color:var(--danger);border-color:var(--danger);background:rgba(255,74,92,.12)}
+html[data-theme="ion"] .metric-card .chevron{color:var(--chart-a,var(--blue))}
+
+html[data-theme="ion"] .metric-chart .line{stroke-width:1.7;stroke-linejoin:miter;stroke-linecap:butt;filter:drop-shadow(0 0 2px color-mix(in srgb,var(--chart-a) 60%,transparent))}
+html[data-theme="ion"] .metric-chart .area{opacity:.1}
+html[data-theme="ion"] .metric-chart .baseline{stroke:var(--edge)}
+html[data-theme="ion"] .metric-chart .gridline{stroke:rgba(150,205,255,.22)}
+html[data-theme="ion"] .detail-cell .metric-chart .line{filter:none;stroke-width:1.4}
+html[data-theme="ion"] .metric-legend{color:var(--ink2);font-size:12px}
+html[data-theme="ion"] .metric-legend i{height:3px}
+html[data-theme="ion"] .metric-detail{border-top:1px solid var(--hair)}
+html[data-theme="ion"] .detail-label,html[data-theme="ion"] .core-group-label{color:var(--ink3);font-family:var(--mono);letter-spacing:.1em}
+html[data-theme="ion"] .day-chart path{stroke-width:1.5}
+html[data-theme="ion"] .day-head strong{font:600 11.5px/1 var(--mono);color:var(--chart-a,var(--blue));letter-spacing:.16em}
+html[data-theme="ion"] .day-stats{font-family:var(--mono)}
+html[data-theme="ion"] .day-stats b{color:#fff}
+html[data-theme="ion"] .core-bars{gap:3px}
+html[data-theme="ion"] .core-bars i{border-radius:0;background:linear-gradient(180deg,#fff,var(--chart-a) 22%,color-mix(in srgb,var(--chart-a) 45%,transparent))}
+html[data-theme="ion"] .core-schematic .core-bars i{width:7px}
+html[data-theme="ion"] .stat-row{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;background:transparent;border:0}
+html[data-theme="ion"] .stat-cell{background:linear-gradient(180deg,rgba(18,40,78,.34),rgba(5,11,22,.97));border:1px solid var(--edge);border-radius:2px;padding:8px 12px}
+html[data-theme="ion"] .stat-cell b{font:500 15.5px/1.15 var(--mono);color:#fff;white-space:nowrap}
+html[data-theme="ion"] .stat-cell span{font:500 10.5px/1.2 var(--mono);color:var(--ink3);letter-spacing:.1em}
+html[data-theme="ion"] .stat-cell.warn b{color:var(--amber)}
+html[data-theme="ion"] .fan-panel{border-top:1px solid var(--hair)}
+html[data-theme="ion"] .fan-meter{font-family:var(--mono)}
+html[data-theme="ion"] .fan-meter .quota-track{height:5px;margin:2px 0 0}
+html[data-theme="ion"] .fan-meter .quota-track i::after{top:-2px;bottom:-2px}
+html[data-theme="ion"] .fan-meter b{color:#fff;white-space:nowrap}
+html[data-theme="ion"] .fan-actions strong{color:var(--cyan);font-family:var(--mono)}
+html[data-theme="ion"] .proc-head{letter-spacing:.12em;color:var(--ink3);font-family:var(--mono);font-size:11px}
+html[data-theme="ion"] .proc-head .sorted,html[data-theme="ion"] .proc-val.sorted{color:var(--cyan);font-weight:600}
+html[data-theme="ion"] .proc-row{border-top:1px solid var(--hair);padding:6px 0}
+html[data-theme="ion"] .proc-cpu,html[data-theme="ion"] .proc-mem,html[data-theme="ion"] .proc-energy{font-family:var(--mono);font-size:12px}
+html[data-theme="ion"] .proc-cpu{font-weight:600;color:#fff}
+html[data-theme="ion"] .metric-table{font-family:var(--mono)}
+html[data-theme="ion"] .metric-table th{color:var(--ink3);letter-spacing:.1em;border-bottom:1px solid var(--edge)}
+html[data-theme="ion"] .metric-table td{border-bottom:1px solid var(--hair);color:#fff}
+html[data-theme="ion"] .metric-table td:first-child{color:var(--ink2)}
+html[data-theme="ion"] .metric-empty{color:var(--ink2)}
+html[data-theme="ion"] .day-axis{color:var(--ink3);font-family:var(--mono)}
+
+/* ═══ 6. Écrans ══════════════════════════════════════════════════════════════ */
+html[data-theme="ion"] .display-grid{grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;margin-top:16px}
+html[data-theme="ion"] .display-card{--ac:var(--blue);padding:16px 20px 18px}
+html[data-theme="ion"] .display-card:nth-child(2n){--ac:var(--purple)}
+html[data-theme="ion"] .display-card:nth-child(3n){--ac:var(--cyan)}
+html[data-theme="ion"] .display-head{margin-bottom:16px}
+html[data-theme="ion"] .display-name{font-size:15px;font-weight:600;color:#fff;overflow-wrap:anywhere}
+html[data-theme="ion"] .display-badge{flex:none;font:500 10.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink2);border:1px solid var(--edge);border-radius:0;padding:4px 8px}
+html[data-theme="ion"] .display-badge.builtin{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 60%,transparent)}
+html[data-theme="ion"] .display-unavailable{color:var(--ink3);font-size:12.5px}
+html[data-theme="ion"] .brightness-row{gap:16px}
+html[data-theme="ion"] .brightness-value{width:auto;min-width:68px;font:500 26px/1 var(--mono);letter-spacing:-.04em;color:#fff;white-space:nowrap}
+
+/* Curseurs : règle graduée ; la partie gauche est remplie par l'ombre géante du pouce (l'input
+   clippe en overflow:hidden), le pouce est une aiguille blanche d'un trait. */
+html[data-theme="ion"] .brightness-slider,html[data-theme="ion"] .b-slider{--c:var(--blue);height:14px;border-radius:0;overflow:hidden;border:0;
+  background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),rgba(160,210,255,.28) calc(10% - 1px),rgba(160,210,255,.28) 10%),rgba(100,165,255,.09);
+  box-shadow:inset 0 0 0 1px rgba(130,195,255,.22)}
+html[data-theme="ion"] .display-card .brightness-slider{--c:var(--ac)}
+html[data-theme="ion"] .brightness-slider::-webkit-slider-thumb,html[data-theme="ion"] .b-slider::-webkit-slider-thumb{-webkit-appearance:none;width:3px;height:14px;border-radius:0;background:#fff;border:0;
+  box-shadow:-1200px 0 0 1200px color-mix(in srgb,var(--c) 60%,transparent),0 0 8px 1px #fff}
+html[data-theme="ion"] .brightness-slider:disabled,html[data-theme="ion"] .b-slider:disabled{opacity:.4}
+
+/* ═══ 7. Réglages ════════════════════════════════════════════════════════════ */
+html[data-theme="ion"] .settings-layout{gap:30px;margin-top:6px;grid-template-columns:176px minmax(0,1fr)}
+html[data-theme="ion"] .settings-nav{gap:2px;top:6px}
+html[data-theme="ion"] .settings-nav button{padding:9px 12px 9px 14px;border:1px solid transparent;border-radius:2px;font-size:13.5px;font-weight:500;color:var(--ink2)}
+html[data-theme="ion"] .settings-nav button:hover{background:rgba(70,150,255,.08);border-color:var(--hair);color:#fff}
+html[data-theme="ion"] .settings-nav button.on{color:#fff;font-weight:600;border-color:var(--edge);background:linear-gradient(90deg,rgba(61,165,255,.24),rgba(61,165,255,.04) 80%,transparent)}
+html[data-theme="ion"] .settings-nav button.on::before{top:0;bottom:0;width:2px;background:var(--blue);box-shadow:0 0 10px var(--blue)}
+html[data-theme="ion"] .settings-pane-head{margin-bottom:16px;align-items:center}
+html[data-theme="ion"] .settings-pane-head h2{font:600 16px/1.2 var(--font);letter-spacing:.1em;text-transform:uppercase;color:#fff;margin-bottom:6px}
+html[data-theme="ion"] .settings-pane-head p{font-size:12.5px;color:var(--ink3)}
+
+html[data-theme="ion"] .settings-pane .settings{gap:12px}
+html[data-theme="ion"] .settings-pane .setting{padding:16px 20px;gap:20px}
+html[data-theme="ion"] .settings-pane .setting:nth-child(4n+2){--ac:var(--purple)}
+html[data-theme="ion"] .settings-pane .setting:nth-child(4n+3){--ac:var(--cyan)}
+html[data-theme="ion"] .settings-pane .setting:nth-child(4n+4){--ac:var(--indigo)}
+html[data-theme="ion"] .settings-pane .setting-copy strong{font-size:14px;font-weight:600;color:#fff;margin-bottom:4px}
+html[data-theme="ion"] .settings-pane .setting-copy small{font-size:12.5px;color:var(--ink2);line-height:1.5}
+html[data-theme="ion"] .setting-state{font:400 12px/1.3 var(--mono);color:var(--ink2)}
+html[data-theme="ion"] .setting-state.ok{color:var(--green);font-weight:500}
+html[data-theme="ion"] .settings-pane .setting>.button.on{--c:var(--green)}
+html[data-theme="ion"] .settings-pane .setting>.button:not(.on){color:var(--ink2);background:transparent;border-color:var(--hair-strong)}
+html[data-theme="ion"] .settings-pane .setting>.button:not(.on):hover{color:#fff;border-color:#9fd2ff}
+html[data-theme="ion"] .connection-note{color:var(--ink2)}
+
+html[data-theme="ion"] .widget-config{gap:10px}
+html[data-theme="ion"] .wc-toggle{min-width:118px;padding:5px 12px;border:1px solid var(--edge);color:var(--ink2);font-family:var(--mono);font-size:12px}
+html[data-theme="ion"] .wc-toggle.on{color:#fff;border-color:var(--green);background:rgba(70,240,200,.1);box-shadow:inset 0 -2px 0 var(--green)}
+html[data-theme="ion"] .wc-toggle.on:hover{background:rgba(70,240,200,.18)}
+html[data-theme="ion"] .wc-dot{width:8px;height:8px;border-radius:0;border-width:1px}
+html[data-theme="ion"] .wc-toggle.on .wc-dot{box-shadow:0 0 8px 1px var(--green);color:var(--green)}
+html[data-theme="ion"] .wc-move{border:1px solid var(--edge);border-radius:0;gap:0}
+html[data-theme="ion"] .wc-move .seg{padding:4px 10px}
+html[data-theme="ion"] .wc-shapes .seg{padding:4px 11px;font-size:12px}
+html[data-theme="ion"] .wc-swatch{width:16px;height:16px;border-radius:0;border:1px solid rgba(255,255,255,.45)}
+html[data-theme="ion"] .wc-swatch.on{box-shadow:0 0 0 2px #03060d,0 0 0 3px #fff,0 0 12px 2px rgba(255,255,255,.4)}
+html[data-theme="ion"] .wc-sub{border-left:2px solid var(--blue)}
+html[data-theme="ion"] .wc-sublabel{color:var(--ink3);font-family:var(--mono);letter-spacing:.14em}
+
+html[data-theme="ion"] .theme-swatch{border:1px solid var(--edge);border-radius:2px;background:rgba(61,165,255,.05);padding:8px 12px;color:var(--ink2);font-size:13px}
+html[data-theme="ion"] .theme-swatch:hover{background:rgba(61,165,255,.14);border-color:#9fd2ff;color:#fff}
+html[data-theme="ion"] .theme-swatch.on{color:#fff;font-weight:600;border-color:var(--blue);background:rgba(61,165,255,.22);box-shadow:inset 0 -2px 0 var(--blue)}
+html[data-theme="ion"] .theme-swatch .dot{width:8px;height:8px;border-radius:0}
+
+html[data-theme="ion"] .connections{gap:14px}
+html[data-theme="ion"] .connection-panel{--ac:var(--provider);padding:18px 20px 20px;border-color:color-mix(in srgb,var(--provider) 40%,transparent)}
+html[data-theme="ion"] .connection-panel h3,html[data-theme="ion"] .connection-panel:nth-child(2) h3{font:600 14px/1 var(--mono);text-transform:uppercase;letter-spacing:.22em;color:var(--provider)}
+html[data-theme="ion"] .connection-panel>p{color:var(--ink2);font-size:12.5px}
+html[data-theme="ion"] .quota-block{border-top:1px solid var(--hair)}
+html[data-theme="ion"] .account-copy small{color:var(--ink3);font-size:12.5px}
+html[data-theme="ion"] .account-add{border-top:1px solid var(--hair)}
+html[data-theme="ion"] .account-add small{color:var(--ink2);font-family:var(--mono)}
+html[data-theme="ion"] .account-menu summary{border:1px solid var(--edge);border-radius:2px;padding:3px 12px;font-size:16px;line-height:1.2}
+html[data-theme="ion"] .account-menu-items{padding:8px;border-radius:2px;background:#050b16;box-shadow:0 16px 36px rgba(0,0,0,.7)}
+html[data-theme="ion"] .account-menu-items .account-action{text-align:center}
+html[data-theme="ion"] .api-figures strong{color:#fff;font:500 16px/1.2 var(--mono);letter-spacing:-.02em}
+html[data-theme="ion"] .api-figures small{font:500 10.5px/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}
+html[data-theme="ion"] .api-figures strong.warning{color:var(--amber)}
+html[data-theme="ion"] .api-figures strong.critical{color:var(--danger)}
+html[data-theme="ion"] .shortcut-row kbd{background:rgba(61,165,255,.08);border:1px solid var(--edge);border-radius:2px;color:#fff;font-family:var(--mono);box-shadow:0 2px 0 rgba(130,200,255,.18)}
+html[data-theme="ion"] .storage-summary strong{color:#fff}
+html[data-theme="ion"] .bar-preview{padding:12px 16px}
+html[data-theme="ion"] .bar-chip{border-radius:0;border-color:var(--edge);font-family:var(--mono);font-size:11.5px}
+html[data-theme="ion"] .bar-sep{background:var(--edge)}
+html[data-theme="ion"] .field-select{border-radius:2px}
+html[data-theme="ion"] .icon-style{border-radius:2px;border:1px solid var(--hair-strong);background:rgba(61,165,255,.05)}
+html[data-theme="ion"] .icon-style:hover{border-color:#9fd2ff;background:rgba(61,165,255,.15)}
+html[data-theme="ion"] .icon-style.on{border-color:var(--blue);background:rgba(61,165,255,.24);box-shadow:inset 0 -2px 0 var(--blue)}
+
+/* ═══ 8. Popover (480 × 640) ═════════════════════════════════════════════════ */
+html[data-theme="ion"] .popover{box-shadow:inset 0 0 0 1px var(--edge)}
+html[data-theme="ion"] .popover::before{content:"";position:absolute;left:0;top:0;width:150px;height:1px;background:linear-gradient(90deg,#fff,var(--blue) 30%,transparent);box-shadow:0 0 10px var(--blue);z-index:3;pointer-events:none}
+html[data-theme="ion"] .popover{position:relative}
+html[data-theme="ion"] .providers{gap:10px;padding:12px 12px 8px}
+html[data-theme="ion"] .providers::-webkit-scrollbar{width:0}
+
+html[data-theme="ion"] #providers .quota-card{padding:11px 14px 10px}
+html[data-theme="ion"] #providers .quota-main{gap:3px}
+html[data-theme="ion"] #providers .quota-main .value{font-size:46px}
+html[data-theme="ion"] #providers .quota-card footer{padding-top:6px}
+html[data-theme="ion"] #providers .quota-card header{margin-bottom:5px;gap:5px}
+html[data-theme="ion"] .provider-name{font:600 12px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;color:var(--provider);display:flex;align-items:center;gap:9px}
+html[data-theme="ion"] .provider-name::before{content:"";width:7px;height:7px;flex:none;background:var(--provider);box-shadow:0 0 9px 1px var(--provider)}
+html[data-theme="ion"] .account-name{font:400 12px var(--mono);color:var(--ink3)}
+html[data-theme="ion"] .provider-picker{background:#050b16;border:1px solid var(--edge);border-radius:2px;padding:4px 8px;color:#fff;font:500 11.5px var(--mono)}
+html[data-theme="ion"] .value{font-family:var(--mono);font-weight:500;color:var(--lvt,#fff);letter-spacing:-.06em;white-space:nowrap;text-shadow:0 0 22px color-mix(in srgb,var(--lv,var(--provider)) 45%,transparent)}
+html[data-theme="ion"] .value.critical,html[data-theme="ion"] .value.warning{color:var(--lvt,#fff)}
+html[data-theme="ion"] .value .unit{font-size:.36em;font-weight:500;opacity:1;margin-left:.2em;letter-spacing:0;color:var(--lv,var(--provider));text-shadow:none;vertical-align:.7em}
+html[data-theme="ion"] .value.empty-value{opacity:.5;color:#fff}
+html[data-theme="ion"] .quota-label{font:500 10.5px/1.3 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+html[data-theme="ion"] .quota-side .primary-rail{margin-top:8px;margin-bottom:8px;height:8px}
+html[data-theme="ion"] .reset{font-size:12px;line-height:1.3;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-theme="ion"] .session-row{--lv:var(--provider);gap:6px 8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--hair);color:var(--ink2)}
+html[data-theme="ion"] .session-row[data-level="warn"]{--lv:var(--amber)}
+html[data-theme="ion"] .session-row[data-level="crit"]{--lv:var(--danger)}
+html[data-theme="ion"] .session-row>b{color:#fff;font-weight:600;font-family:var(--mono)}
+html[data-theme="ion"] .session-row>small{color:var(--ink3);white-space:nowrap}
+html[data-theme="ion"] .rail.thin{height:5px;margin:0}
+html[data-theme="ion"] .rail.thin i::after{top:-2px;bottom:-2px}
+html[data-theme="ion"] .account-note{color:var(--ink3);font-size:12px;line-height:1.3}
+html[data-theme="ion"] .account-note.stale{color:var(--amber);font-weight:600}
+html[data-theme="ion"] .account-note.live{color:var(--green)}
+html[data-theme="ion"] .quota-card .who{color:#fff;font-weight:600}
+html[data-theme="ion"] .quota-card .extra-credits{border:0!important;border-top:1px solid var(--hair)!important;border-radius:0!important;background:transparent!important;padding:7px 0}
+html[data-theme="ion"] .extra-credits span,html[data-theme="ion"] .extra-credits small{color:var(--ink3)}
+html[data-theme="ion"] .extra-credits strong{font-family:var(--mono);font-weight:500}
+html[data-theme="ion"] .popup-notice{border-bottom:1px solid var(--amber);background:rgba(255,178,31,.08)}
+html[data-theme="ion"] .popup-notice button{border:1px solid var(--amber);border-radius:2px;padding:3px 10px;color:#fff;background:rgba(255,178,31,.1)}
+
+html[data-theme="ion"] .account-list,html[data-theme="ion"] .api-credits{padding:10px 14px 6px}
+html[data-theme="ion"] .account-list>header,html[data-theme="ion"] .api-credits>header{font:500 10.5px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--cyan);margin-bottom:4px}
+html[data-theme="ion"] .al-row{border-top:1px solid var(--hair);padding:6px 0;font-family:var(--mono)}
+html[data-theme="ion"] .al-row>i{border-radius:0;width:7px;height:7px;box-shadow:0 0 8px var(--provider)}
+html[data-theme="ion"] .al-row>span{color:#fff;font-family:var(--font)}
+html[data-theme="ion"] .al-row>small{color:var(--ink3)}
+html[data-theme="ion"] .al-row>b{font-weight:600}
+html[data-theme="ion"] .api-row{border-top:1px solid var(--hair);font-family:var(--mono)}
+html[data-theme="ion"] .api-row>span{font-family:var(--font)}
+html[data-theme="ion"] .api-row>small{color:var(--ink3)}
+html[data-theme="ion"] .api-row>small.error{color:var(--amber)}
+
+/* Ventilateurs */
+html[data-theme="ion"] .fans{padding:9px 14px 10px;border-top:1px solid var(--edge);background:rgba(4,9,18,.9)}
+html[data-theme="ion"] .fan-head strong{font:500 10.5px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--amber)}
+html[data-theme="ion"] .fan-head span{color:var(--ink2);font-family:var(--mono)}
+html[data-theme="ion"] .fan-row .account-action{--c:var(--blue);padding:5px 14px}
+html[data-theme="ion"] .fan-state{color:var(--ink2);font-family:var(--mono)}
+html[data-theme="ion"] .fan-state.on{color:var(--cyan)}
+html[data-theme="ion"] .fan-note{color:var(--ink3)}
+html[data-theme="ion"] .fan-row .seg{padding:4px 9px;overflow:visible}
+
+/* Outils du Mac : en-tête repliable, tuiles de mesure, luminosité, boutons. */
+html[data-theme="ion"] .mac-tools{background:rgba(4,9,18,.9);border-top:1px solid var(--edge)}
+html[data-theme="ion"] .mac-tools>summary{padding:8px 14px;font:500 10.5px/1.2 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--cyan)}
+html[data-theme="ion"] .metrics{gap:1px;padding:0;background:var(--edge);border-top:1px solid var(--edge)}
+html[data-theme="ion"] .mtile{--c:var(--blue);padding:7px 10px 6px;border-radius:0;background:linear-gradient(180deg,rgba(18,40,78,.4),rgba(5,11,22,.98));box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--c) 70%,transparent)}
+html[data-theme="ion"] .mtile:nth-child(2){--c:var(--purple)}
+html[data-theme="ion"] .mtile:nth-child(3){--c:var(--cyan)}
+html[data-theme="ion"] .mtile:nth-child(4){--c:var(--blue)}
+html[data-theme="ion"] .mtile:nth-child(5){--c:var(--indigo)}
+html[data-theme="ion"] .mtile .mlabel{font:500 10px/1 var(--mono);letter-spacing:.12em;color:var(--ink2);white-space:nowrap}
+html[data-theme="ion"] .mtile .mvalue{font:500 15px/1.2 var(--mono);color:#fff;margin:3px 0 4px;letter-spacing:-.03em}
+html[data-theme="ion"] .mtile .line{stroke:var(--c);stroke-width:1.3}
+html[data-theme="ion"] .mtile .line:nth-of-type(2){stroke:var(--purple)}
+
+html[data-theme="ion"] .brightness{gap:0;padding:0;background:var(--hair);border-top:1px solid var(--edge)}
+html[data-theme="ion"] .b-row{gap:10px;padding:7px 12px;background:rgba(4,9,18,.96)}
+html[data-theme="ion"] .b-sun{color:var(--amber);filter:drop-shadow(0 0 4px var(--amber))}
+html[data-theme="ion"] .b-label{color:var(--ink2)}
+html[data-theme="ion"] .b-slider{height:12px;--c:var(--blue)}
+html[data-theme="ion"] .b-slider::-webkit-slider-thumb{height:12px}
+html[data-theme="ion"] .b-value{color:#fff;width:40px;font-family:var(--mono)}
+
+html[data-theme="ion"] .tools{gap:1px;padding:0;background:var(--edge);border-top:1px solid var(--edge)}
+html[data-theme="ion"] .tool{--ic:var(--blue);flex-direction:row;justify-content:center;gap:8px;padding:9px 6px;border-radius:0;color:var(--ink2);border:0;background:rgba(4,9,18,.96);
+  letter-spacing:.02em;font-size:12.5px;white-space:nowrap;text-transform:lowercase;transition:background .12s,color .12s}
+html[data-theme="ion"] .tool:nth-child(2){--ic:var(--purple)}
+html[data-theme="ion"] .tool:nth-child(3){--ic:var(--cyan)}
+html[data-theme="ion"] .tool .glyph{color:var(--ic);flex:none;width:auto}
+html[data-theme="ion"] .tool:hover{background:rgba(40,90,180,.3);color:#fff}
+html[data-theme="ion"] .tool.on{color:#fff;font-weight:600;background:linear-gradient(180deg,color-mix(in srgb,var(--ic) 22%,transparent),rgba(4,9,18,.96));box-shadow:inset 0 -2px 0 var(--ic)}
+
+/* Pied */
+html[data-theme="ion"] .footer{border-top:1px solid var(--edge);background:rgba(3,7,14,.97);padding:6px 12px}
+html[data-theme="ion"] .footer-row > button.sync{color:var(--ink2);font:400 12px/1.3 var(--mono)}
+html[data-theme="ion"] .footer-row > button{border:1px solid transparent;border-radius:2px;padding:5px 12px;color:var(--ink2)}
+html[data-theme="ion"] .footer-row > button:hover{background:rgba(70,150,255,.12);border-color:var(--hair-strong);color:#fff}
+html[data-theme="ion"] .footer-row > button.go{color:#fff;font-weight:600;border-color:var(--blue);background:rgba(61,165,255,.2);box-shadow:inset 0 -2px 0 var(--blue)}
+html[data-theme="ion"] .footer-row > button[title^="Quitter"]{color:var(--danger)!important}
+
+/* ═══ 9. Panneaux de widgets (264 px) : jetons et classes existantes seulement ═══ */
+html[data-theme="ion"] .head{border-bottom:1px solid var(--edge);position:relative}
+html[data-theme="ion"] .head::after{content:"";position:absolute;left:0;bottom:-1px;width:70px;height:1px;background:linear-gradient(90deg,#fff,var(--blue) 40%,transparent);box-shadow:0 0 8px var(--blue)}
+html[data-theme="ion"] .head h1{font:600 11.5px/1 var(--mono);letter-spacing:.22em;color:var(--cyan)}
+html[data-theme="ion"] .big{font-family:var(--mono);font-weight:500;letter-spacing:-.05em;color:#fff;text-shadow:0 0 16px rgba(61,165,255,.5)}
+html[data-theme="ion"] .big .u{font-weight:500;color:var(--ink2);letter-spacing:0;text-shadow:none}
+html[data-theme="ion"] .big .sub,html[data-theme="ion"] .dual b{text-shadow:none;font-family:var(--mono)}
+html[data-theme="ion"] .badge{border-radius:0;font-family:var(--mono);color:var(--ink2);border-color:var(--edge)}
+html[data-theme="ion"] .badge.warn{background:rgba(255,178,31,.1)}
+html[data-theme="ion"] .badge.crit{background:rgba(255,74,92,.12)}
+html[data-theme="ion"] .chart .line{stroke-linejoin:miter}
+html[data-theme="ion"] .stat-row{gap:1px;background:var(--edge);border:1px solid var(--edge)}
+html[data-theme="ion"] .stat{background:rgba(5,11,22,.97)}
+html[data-theme="ion"] .stat b{font-family:var(--mono);font-weight:500}
+html[data-theme="ion"] .stat span{color:var(--ink3);font-family:var(--mono)}
+html[data-theme="ion"] .stat.warn b{color:var(--amber)}
+html[data-theme="ion"] .stat.crit b{color:var(--danger)}
+html[data-theme="ion"] .track{height:7px;border:0;margin:4px 0 9px;overflow:visible;background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),rgba(160,210,255,.28) calc(10% - 1px),rgba(160,210,255,.28) 10%),rgba(100,165,255,.09);box-shadow:inset 0 0 0 1px rgba(130,195,255,.22)}
+html[data-theme="ion"] .track i{position:relative;background:linear-gradient(90deg,color-mix(in srgb,var(--chart-a) 22%,transparent),var(--chart-a));box-shadow:0 0 12px -2px var(--chart-a)}
+html[data-theme="ion"] .track i::after{content:"";position:absolute;right:-1px;top:-3px;bottom:-3px;width:2px;background:#fff;box-shadow:0 0 8px 1px var(--chart-a)}
+html[data-theme="ion"] .section{color:var(--ink3);font-family:var(--mono);letter-spacing:.16em;border-top:1px solid var(--hair)}
+html[data-theme="ion"] .split{border:1px solid var(--edge);background:rgba(100,165,255,.09)}
+html[data-theme="ion"] .legend .lg{color:var(--ink2)}
+html[data-theme="ion"] .legend .lg b{color:#fff;font-family:var(--mono)}
+html[data-theme="ion"] .p .pbar{background:rgba(130,195,255,.16)}
+html[data-theme="ion"] .p .pbar i{background:linear-gradient(90deg,color-mix(in srgb,var(--chart-a) 30%,transparent),var(--chart-a))}
+html[data-theme="ion"] .p .vv,html[data-theme="ion"] .row .k,html[data-theme="ion"] .vol .vh .vf{color:var(--ink2)}
+html[data-theme="ion"] .row .v,html[data-theme="ion"] .p .vv{font-family:var(--mono)}
+html[data-theme="ion"] .bars i{background:linear-gradient(180deg,#fff,var(--chart-a) 22%,color-mix(in srgb,var(--chart-a) 45%,transparent))}
+html[data-theme="ion"] .empty{color:var(--ink2)}
+
+/* ═══ 10. Mouvement et accessibilité ═════════════════════════════════════════ */
+@media (prefers-reduced-motion:reduce){
+  html[data-theme="ion"] *,html[data-theme="ion"] *::before,html[data-theme="ion"] *::after{transition:none!important;animation:none!important}
+}
+@media (prefers-contrast:more){
+  html[data-theme="ion"] .seg,html[data-theme="ion"] .button,html[data-theme="ion"] .account-action{border-color:#fff}
+  html[data-theme="ion"] :is(.provider-block,.connection-panel,.quota-card,.metric-card,.day-card,.display-card,.settings-pane .setting){border-color:#fff}
+}
+
+/* ═══ 11. Étroit (fenêtre mini 940) ═══════════════════════════════════════════ */
+@media (max-width:970px){
+  html[data-theme="ion"] .shell{grid-template-columns:184px 1fr}
+  html[data-theme="ion"] .settings-layout{grid-template-columns:1fr;gap:14px}
+  html[data-theme="ion"] .settings-nav{flex-direction:row;flex-wrap:wrap}
+  html[data-theme="ion"] .settings-nav button.on::before{left:0;right:0;top:auto;bottom:0;width:auto;height:2px}
+  html[data-theme="ion"] main{padding:0 22px 24px}
+}
+/* Moniteur : les groupes comptent deux cartes au plus ; deux colonnes fixes évitent une colonne fantôme. */
+html[data-theme="ion"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="ion"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}
