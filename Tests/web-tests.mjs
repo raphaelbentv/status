@@ -762,6 +762,45 @@ section('dashboard.html — palette élargie, couleur personnalisée, couleurs d
   check(/@"elementColors": \[self widgetElementColorsPayload\]/.test(nativeSource) && /@"widgetElementColors": \[self widgetElementColorsPayload\]/.test(nativeSource), 'natif : le panneau widget ET le dashboard reçoivent les couleurs');
 }
 
+// Icône et valeur indépendantes : un sélecteur à segments par widget affiché.
+section('dashboard.html — Affichage du widget (icône / valeur)');
+{
+  const rows = (cfg, widgets = ['cpu', 'memory'], evalIn = dashboard) =>
+    plain(evalIn(`widgetConfigRows(${JSON.stringify({ menuBarWidgets: widgets, menuBarWidgetConfig: cfg })})`));
+  const displayBlock = (html, index = 0) => (html.split('class="wc-sub wc-display"')[index + 1] || '').split('</div>')[0];
+  const active = block => [...block.matchAll(/class="seg on"[^>]*>([^<]*)</g)].map(m => m[1]);
+  checkEqual(dashboard('WIDGET_DISPLAYS'), ['auto', 'both', 'icon', 'value'], 'affichage : auto, icône + valeur, icône seule, valeur seule');
+  const defaults = rows({});
+  check(count(defaults, /class="wc-sub wc-display"/g) === 2, 'affichage : un sélecteur par widget affiché (cpu, memory)');
+  const first = displayBlock(defaults, 0);
+  checkEqual([...first.matchAll(/<button class="seg[^"]*"[^>]*>([^<]*)</g)].map(m => m[1]), ['Auto', 'Icône + valeur', 'Icône seule', 'Valeur seule'], 'affichage : quatre segments, en français');
+  check(/class="wc-sublabel">Affichage</.test(first), 'affichage : libellé « Affichage »');
+  checkEqual(active(first), ['Auto'], 'affichage : « Auto » actif par défaut');
+  check(/segmented" role="group"/.test(first) && count(first, /aria-pressed="(true|false)"/g) === 4, 'affichage : réutilise .segmented / .seg, état exposé (aria-pressed)');
+  check(!/#[0-9a-fA-F]{3,6}/.test(first), 'affichage : aucune couleur en dur dans le sélecteur');
+  check(/onclick="send\('setMenuBarWidgetStyle',\{id:'cpu',display:'icon'\}\)"/.test(first), 'affichage : le clic envoie setMenuBarWidgetStyle {id, display}');
+  for (const [value, label] of [['both', 'Icône + valeur'], ['icon', 'Icône seule'], ['value', 'Valeur seule'], ['auto', 'Auto']]) {
+    const html = rows({ cpu: { display: value } });
+    checkEqual(active(displayBlock(html, 0)), [label], `affichage : « ${value} » → segment « ${label} » actif`);
+    checkEqual(active(displayBlock(html, 1)), ['Auto'], `affichage : l’autre widget reste sur Auto (cpu = ${value})`);
+  }
+  for (const bad of ['bogus', '', 'ICON', 7, null, ['icon'], { x: 1 }, '"><img src=x onerror=1>'])
+    checkEqual(active(displayBlock(rows({ cpu: { display: bad } }), 0)), ['Auto'], `affichage : valeur inconnue ${JSON.stringify(bad)} → Auto`);
+  check(!rows({ cpu: { display: '"><img src=x onerror=1>' } }).includes('onerror'), 'affichage : valeur piégée jamais recopiée');
+  check(!/wc-display/.test(rows({}, [])) && count(rows({}, ['cpu']), /wc-display/g) === 1, 'affichage : rien pour un widget masqué');
+  check(dashboard('displayValue("both")') === 'both' && dashboard('displayValue("x")') === 'auto' && dashboard('displayValue(undefined)') === 'auto', 'displayValue : liste blanche, repli sur auto');
+  const enHtml = rows({ cpu: { display: 'icon' } }, ['cpu'], sandboxFor('dashboard.html', 'en'));
+  checkEqual(active(displayBlock(enHtml, 0)), ['Icon only'], 'affichage : anglais');
+  check(/class="wc-sublabel">Display</.test(displayBlock(enHtml, 0)), 'affichage : libellé anglais');
+  // Le natif reste la dernière barrière : liste blanche, redessin immédiat, même liste des deux côtés.
+  const native = readFileSync(join(root, 'Native', 'Status.m'), 'utf8');
+  const style = native.slice(native.indexOf('[action isEqualToString:@"setMenuBarWidgetStyle"]'));
+  check(/TMWidgetDisplayIsAllowed\(body\[@"display"\]\)\) one\[@"display"\]/.test(style.slice(0, 1500)), 'natif : setMenuBarWidgetStyle valide « display » contre la liste blanche');
+  check(/widgetSignatures removeObjectForKey:wid/.test(style.slice(0, 1800)), 'natif : le changement invalide la signature du widget (redessin immédiat)');
+  const lib = readFileSync(join(root, 'Native', 'StatusMenuBarWidgets.m'), 'utf8');
+  check(lib.includes('TMWidgetDisplayModes(void) { return @[@"auto", @"both", @"icon", @"value"]; }'), 'natif : mêmes modes que WIDGET_DISPLAYS');
+}
+
 // Échelle auto : la crête ne doit pas toucher le bord haut, sinon la courbe se lit comme saturée.
 section('widget.html — échelle des courbes sans pourcentage');
 const autoScale = widget('chart([{values:[10,50],color:"var(--chart-a)"}],{percent:false})');

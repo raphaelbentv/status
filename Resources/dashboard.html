@@ -475,6 +475,10 @@ const WIDGET_SHAPES={
 // Formes de la jauge des consommations (ids alignés sur updateStatusMenu côté natif). Les quatre
 // dernières viennent du moteur des widgets : une forme ajoutée là profite aux deux.
 const ICON_DESIGNS=['doubleRing','capsules','doubleArc','boldRing','reservoir','segments','hairline','thinRing','tube','grid','squircle'];
+// Icône et valeur d'un widget : auto (historique), icône + valeur, icône seule, valeur seule. Même liste que
+// TMWidgetDisplayModes côté natif ; une valeur inconnue s'affiche comme « auto ».
+const WIDGET_DISPLAYS=['auto','both','icon','value'];
+const displayValue=v=>WIDGET_DISPLAYS.includes(v)?v:'auto';
 // Palette (même liste, mêmes valeurs que TMWidgetPaletteTable côté natif et WIDGET_PALETTE de widget.html :
 // un test vérifie la concordance). « auto » = neutre adaptatif + alerte. Les dix noms historiques restent valides.
 const WIDGET_COLORS=[['auto','var(--muted)'],['blue','#4C90FF'],['sky','#66C2FF'],['cyan','#4CCCE6'],['teal','#2EC4B6'],
@@ -590,7 +594,9 @@ function widgetConfigRows(p){
     const secSel=secs.length?`<div class="wc-sub"><span class="wc-sublabel">${t('widget.panel')}</span><span class="segmented">${secs.map(key=>{const sOn=pcfg[key]!==false;return `<button class="seg ${sOn?'on':''}" onclick="send('setWidgetPanelSection',{id:'${id}',section:'${key}',on:${!sOn}})">${t('panel.'+id+'.'+key)}</button>`}).join('')}</span></div>`:'';
     // Déplacement dans la barre des menus : ← vers la gauche, → vers la droite. Désactivés en butée.
     const move=`<span class="wc-move"><button class="seg" ${index===0?'disabled':''} title="${t('widget.left')}" onclick="send('moveMenuBarWidget',{id:'${id}',delta:-1})">←</button><button class="seg" ${index===enabled.length-1?'disabled':''} title="${t('widget.right')}" onclick="send('moveMenuBarWidget',{id:'${id}',delta:1})">→</button></span>`;
-    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}${elementColorRows(id,p.widgetElementColors)}${apiWidgetAccountRow(id,cfg)}`;
+    const disp=displayValue(cfg.display);
+    const dispSel=`<div class="wc-sub wc-display"><span class="wc-sublabel">${t('wc.display.label')}</span><span class="segmented" role="group" aria-label="${t('wc.display.label')}">${WIDGET_DISPLAYS.map(m=>`<button class="seg ${disp===m?'on':''}" aria-pressed="${disp===m}"${m==='auto'?` title="${t('wc.display.autoHint')}"`:''} onclick="send('setMenuBarWidgetStyle',{id:'${id}',display:'${m}'})">${t('wc.display.'+m)}</button>`).join('')}</span></div>`;
+    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${dispSel}${secSel}${elementColorRows(id,p.widgetElementColors)}${apiWidgetAccountRow(id,cfg)}`;
   }).join('');
 }
 let appData=null,currentView='overview';
