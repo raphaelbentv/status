@@ -1,5 +1,5 @@
 /* Status — jetons de thème.
-   Un seul bloc de base (:root, thème « blueprint », identique à l'apparence historique de
+   Un seul bloc de base (:root, valeurs de repli héritées de l'ancien « blueprint » : le thème, désormais refondu dans themes/blueprint.css, les redéfinit tous ; identique à l'apparence historique de
    l'app) puis un bloc [data-theme="…"] par thème qui ne redéfinit que ce qui change. L'ordre
    des blocs compte : à spécificité égale avec :root, un bloc [data-theme] placé après lui
    l'emporte dans la cascade — ne réordonnez pas ces blocs sans le garder en tête. */
@@ -32,20 +32,6 @@
   --grid:rgba(103,232,249,.045);
   --font:ui-monospace,"SF Mono","Menlo",monospace;
   --radius:2px;
-}
-
-[data-theme="phosphore"]{
-  --bg:#050B06;--sidebar:#020503;--panel-bg:rgba(89,255,176,.04);--panel-bg-strong:rgba(2,5,3,.9);
-  --text:#59FFB0;--muted:#2E8F5E;
-  --hair:rgba(89,255,176,.18);--hair-strong:rgba(89,255,176,.28);
-  --soft:rgba(89,255,176,.05);--soft-hover:rgba(89,255,176,.1);
-  --blue:#59FFB0;--blue-soft:rgba(89,255,176,.08);--purple:#2E8F5E;--purple-soft:rgba(46,143,94,.12);
-  --green:#59FFB0;--amber:#FBBF24;--danger:#FF6B6B;
-  --chart-a:#59FFB0;--chart-b:#2E8F5E;
-  --grid:rgba(89,255,176,.035);
-  --font:ui-monospace,"SF Mono","Menlo",monospace;
-  --radius:0px;
-  --bg-image:repeating-linear-gradient(0deg,rgba(89,255,176,.035) 0 1px,transparent 1px 3px);
 }
 
 [data-theme="synthwave"]{
@@ -117,34 +103,10 @@
    élevée l'emporte sur les .rail i/.quota-track i déjà déclarés dans les
    <style> de menubar.html/dashboard.html, quel que soit l'ordre des feuilles. */
 
-/* blueprint et phosphore veulent la même hachure que celle désormais posée en dur dans les
-   règles de base .rail i/.quota-track i de menubar.html/dashboard.html — pas besoin d'override
-   ici. Un futur thème qui l'oublierait obtient donc ce rendu par défaut au lieu d'un rail
-   invisible ; synthwave/circuit/holograme/ion ci-dessous le remplacent explicitement. */
-
-/* ── Parité pixel du popover en blueprint ───────────────────────────────────
-   Resources/menubar.html avait ses propres littéraux de fond de panneau,
-   différents de ceux de dashboard.html. Le passage aux jetons partagés
-   --panel-bg/--panel-bg-strong leur a donné les valeurs du tableau de bord
-   (qui, elles, correspondaient déjà à l'historique). Pour que le popover en
-   blueprint reste identique au pixel près à son apparence pré-branche, on
-   restaure ici ses littéraux d'origine. dashboard.html a sa propre classe
-   .provider (l'étiquette nom+pastille dans .provider-block-head) : cibler
-   #providers .provider (l'identifiant du conteneur n'existe que dans
-   menubar.html) évite qu'un fond de panneau ne s'affiche par erreur
-   derrière cette étiquette dans le tableau de bord. On inclut
-   html:not([data-theme]) pour couvrir la fenêtre avant la première peinture
-   JS, comme pour le correctif --rail-fill ci-dessus. */
-html[data-theme="blueprint"] #providers .provider, html:not([data-theme]) #providers .provider{
-  background:rgba(18,22,28,.55);
-}
-html[data-theme="blueprint"] .mtile, html[data-theme="blueprint"] .tool,
-html:not([data-theme]) .mtile, html:not([data-theme]) .tool{
-  background:rgba(18,22,28,.85);
-}
-html[data-theme="blueprint"] .footer, html:not([data-theme]) .footer{
-  background:rgba(14,18,23,.9);
-}
+/* blueprint et phosphore ont leur propre feuille (themes/blueprint.css, themes/phosphore.css) qui
+   restyle les jauges. Un futur thème qui n'override rien obtient la hachure de base posée en dur
+   dans les règles .rail i/.quota-track i de menubar.html/dashboard.html au lieu d'un rail
+   invisible ; synthwave/circuit/holograme/ion ci-dessous la remplacent explicitement. */
 
 html[data-theme="synthwave"] .rail i, html[data-theme="synthwave"] .quota-track i{
   background:linear-gradient(90deg,var(--provider),color-mix(in srgb,var(--provider) 55%,#FF9E5C 45%));
