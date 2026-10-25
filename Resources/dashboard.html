@@ -871,11 +871,15 @@ function iconLayoutRow(kind,options,current,field){
 function iconLayoutSettings(p){
   const scale=Number.isFinite(p.menuBarIconScale)?p.menuBarIconScale:1,spacing=Number.isFinite(p.menuBarIconSpacing)?p.menuBarIconSpacing:0;
   return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.layout.title')}</strong><small>${t('bar.layout.desc')}</small></div><div class="layout-rows">${iconLayoutRow('size',ICON_SCALES,scale,'scale')}${iconLayoutRow('space',ICON_SPACINGS,spacing,'spacing')}</div></section>`;
+// Popups des widgets : un panneau par widget (défaut) ou un seul popup regroupant tous les widgets activés.
+function widgetPopupModeRow(p){
+  const mode=p.widgetPopupMode==='grouped'?'grouped':'separate';
+  return `<div class="wc-popup-mode" style="margin-bottom:14px"><div class="setting-copy" style="margin-bottom:8px"><strong>${t('w.group.title')}</strong><small>${t('w.group.desc')}</small></div><span class="segmented" style="display:inline-flex" role="group" aria-label="${t('w.group.aria')}">${['separate','grouped'].map(m=>`<button class="seg ${mode===m?'on':''}" aria-pressed="${mode===m}" title="${t('w.group.'+m+'Desc')}" onclick="send('setWidgetPopupMode',{mode:'${m}'})">${t('w.group.'+m)}</button>`).join('')}</span><small class="wc-popup-hint" style="display:block;margin-top:6px;color:var(--muted);font-size:12px;line-height:1.45">${t('w.group.'+mode+'Desc')}</small></div>`;
 }
 function menuBarSettings(data,p){
   return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.title')}</strong><small>${t('bar.desc')}</small></div>${barPreview(data,p)}</section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('sg.quotas')}</strong><small>${t('bar.quotasDesc')}</small></div><div class="quota-icon-rows">${['openai','claude'].map(pr=>quotaIconRow(data,p,pr)).join('')}</div><div class="quota-icon-actions"><button class="button" onclick="send('previewMenuIcons',{provider:'openai'})">${t('bar.compare',{name:'OpenAI'})}</button><button class="button" onclick="send('previewMenuIcons',{provider:'claude'})">${t('bar.compare',{name:'Claude'})}</button><button class="button" onclick="send('closeMenuIconPreviews')">${t('set.icons.close')}</button></div></section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div>${widgetPopupModeRow(p)}<div class="widget-config">${widgetConfigRows(p)}</div></section>
   ${iconLayoutSettings(p)}`;
 }
 // Mises à jour (Sparkle). Sans flux ni clé (build de développement), la section n'a rien à proposer :

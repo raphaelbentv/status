@@ -27,6 +27,9 @@
      un panneau plus haut que l'écran — le natif borne déjà la hauteur demandée. */
   *{box-sizing:border-box}html,body{margin:0;width:100%;min-height:100%;overflow-x:hidden;overflow-y:auto;background:var(--bg);color:var(--text);font:11.5px/20px var(--font);font-variant-numeric:tabular-nums}
   html[data-theme="neon"] body{background:var(--bg-image),var(--bg)}
+  /* Regroupé : c'est la fenêtre (html) qui défile, pas le body — un body à overflow non visible devient
+     son propre conteneur de défilement et l'en-tête « sticky » ne collerait plus à rien. */
+  html[data-mode="grouped"] body{overflow:visible}
   .panel{padding:12px 14px 14px;width:100%}
   .w-hd{display:flex;align-items:center;gap:8px;height:24px}
   .w-gl{width:24px;height:24px;border-radius:min(var(--radius),8px);display:grid;place-items:center;color:var(--k);flex:none;
@@ -127,21 +130,48 @@
   .w-mam .l{display:flex;align-items:center;gap:6px;color:var(--muted);line-height:20px}
   .w-mam b{font-weight:500;color:var(--text);text-align:right;white-space:nowrap;line-height:20px;font-size:11px}
   .w-empty{color:var(--muted);padding:14px 0;text-align:center}
+  /* Popup « Regroupé » : tous les widgets activés dans un seul panneau de 300 px. L'en-tête (titre +
+     sélecteur global) reste collé en haut pendant que le corps défile ; chaque widget est une carte
+     compacte au niveau Résumé, une section empilée aux niveaux Détaillé et Hyper détaillé. */
+  .panel.grouped #w-top{position:sticky;top:0;z-index:2;margin:-12px -14px 0;padding:12px 14px 10px;background:var(--bg);border-bottom:1px solid var(--hair)}
+  html[data-theme="neon"] .panel.grouped #w-top{background:var(--bg-image),var(--bg);background-attachment:fixed}
+  .panel.grouped #w-top .w-seg{margin-top:8px}
+  .w-gcs{display:flex;flex-direction:column;gap:6px;padding-top:10px}
+  .w-gc{display:grid;grid-template-columns:24px minmax(0,1fr) 96px;grid-template-rows:34px 16px;column-gap:10px;align-items:center;
+    background:var(--soft);border:1px solid var(--hair);border-radius:min(var(--radius),10px);padding:6px 10px 6px;min-height:64px}
+  .w-gc .w-gl{align-self:center}
+  .w-gm{min-width:0;display:flex;flex-direction:column;justify-content:center}
+  .w-gn{font:600 9.5px/12px var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-gv{font:300 22px/24px var(--font);letter-spacing:-.01em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-gv small{font:400 11px/14px var(--font);color:var(--muted);margin-left:2px;letter-spacing:0}
+  .w-gc[data-state=warn] .w-gv{color:var(--amber)}.w-gc[data-state=crit] .w-gv{color:var(--danger)}
+  .w-gcv{min-width:0;align-self:stretch;display:flex;align-items:center}
+  .w-gk{grid-column:2/-1;font-size:10.5px;line-height:16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-gs+.w-gs{border-top:1px solid var(--hair-strong);margin-top:16px;padding-top:16px}
+  .w-gs:first-child{padding-top:10px}
+  .w-gs .w-hero{margin-top:10px}
 </style>
 </head>
 <body>
 <div class="panel" id="panel"><div class="w-empty">…</div></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
-let widgetId=null,metrics=null;
+// widgetId = identité du panneau : un id de widget, ou « grouped » pour le popup regroupé. Dans ce
+// dernier, secId désigne le widget en cours de rendu : les renderers lisent ses interrupteurs de section
+// (on) et sa couleur via cur(), alors que le niveau de détail reste celui du panneau (« grouped »).
+let widgetId=null,metrics=null,secId=null;
+const GROUPED='grouped';
+const isGrouped=()=>widgetId===GROUPED;
+const cur=()=>secId||widgetId;
 const famGet=id=>metrics?.families?.find(f=>f.id===id);
 const sysNow=()=>famGet('system')?.now||{};
 const procs=()=>metrics?.processes||[];
 // Sections activables par panneau (prefs.panels[widgetId][section]). Absent = affiché (défaut on).
-const on=section=>(metrics?.prefs?.panels?.[widgetId]||{})[section]!==false;
+const on=section=>(metrics?.prefs?.panels?.[cur()]||{})[section]!==false;
 // Niveau de détail du panneau : 0 résumé, 1 détaillé (défaut — le contenu historique), 2 hyper
-// détaillé. Mémorisé par widget côté natif (prefs.detail[widgetId]).
-const level=()=>{const v=metrics?.prefs?.detail?.[widgetId];return v===0||v===2?v:1};
+// détaillé. Mémorisé par widget côté natif (prefs.detail[widgetId]) ; « grouped » porte le niveau global
+// du popup regroupé (défaut : Résumé).
+const level=()=>{const v=metrics?.prefs?.detail?.[widgetId];return v===0||v===1||v===2?v:isGrouped()?0:1};
 // Une section s'affiche si le niveau atteint son minimum ET qu'aucun interrupteur explicite des
 // Réglages ne la coupe : « off » l'emporte toujours, quel que soit le niveau.
 const vis=(key,min)=>level()>=min&&(!key||on(key));
@@ -199,8 +229,9 @@ function setDetail(l){
 // Un panneau = en-tête fixe (pastille, titre, sélecteur) + corps vivant. render() ne remplace que
 // le corps à chaque tick : le sélecteur survit, son infobulle et le clic ne se perdent pas.
 const MARK='<!--w-body-->';
-const topHTML=title=>`<div class="w-hd" style="--k:${KEYC[widgetId]||'var(--blue)'}"><span class="w-gl">${GLYPH[widgetId]||''}</span><h1>${title}</h1></div>${levelSel()}`;
-const popup=(title,state,body)=>`${topHTML(title)}${MARK}<div class="w-b" data-state="${state||'ok'}" data-lv="${level()}" style="--k:${KEYC[widgetId]||'var(--blue)'}">${body}</div>`;
+// En mode regroupé, le sélecteur de niveau est celui de l'en-tête global : la section d'un widget n'a que sa pastille et son nom.
+const topHTML=title=>`<div class="w-hd" style="--k:${KEYC[cur()]||'var(--blue)'}"><span class="w-gl">${GLYPH[cur()]||''}</span><h1>${title}</h1></div>${isGrouped()?'':levelSel()}`;
+const popup=(title,state,body)=>`${topHTML(title)}${MARK}<div class="w-b" data-state="${state||'ok'}" data-lv="${level()}" style="--k:${KEYC[cur()]||'var(--blue)'}">${body}</div>`;
 const hero=(val,unit,side)=>`<div class="w-hero"><div class="w-hv">${val}${unit?`<small>${unit}</small>`:''}</div>${side||''}</div>`;
 // Deux lignes « pastille · libellé · valeur » à droite de la valeur héros.
 const facts=list=>`<div class="w-facts">${list.map(([c,l,v])=>`<i class="w-dot" style="background:${c}"></i><span>${l}</span><b>${v}</b>`).join('')}</div>`;
@@ -217,10 +248,13 @@ const heightFor=()=>[44,56,64][level()];
 // remplie : elle donne le niveau d'un coup d'œil et occupe le cadre. Sans elle, une série plate
 // (batterie pleine, CPU au repos) laissait un grand rectangle vide qui se lisait comme une zone morte.
 let chartUid=0;
-function chart(list,{percent=true,h=heightFor()}={}){
+// Largeur utile d'un graphique : celle du contenu du panneau (264 − 2×14, ou 300 − 2×14 en regroupé).
+// `mini` : version de carte (pas de repères ni de halo), pour la ligne de résumé du popup regroupé.
+const chartWidth=()=>isGrouped()?272:236;
+function chart(list,{percent=true,h=heightFor(),w=chartWidth(),mini=false}={}){
   const drawn=list.map(s=>({...s,values:(s.values||[]).filter(fin)})).filter(s=>s.values.length>1);
   if(!drawn.length)return '';
-  const w=236,pw=w-6,y0=5,bot=h-2,span=bot-y0,len=Math.max(...drawn.map(s=>s.values.length)),uid=++chartUid;
+  const pw=w-6,y0=5,bot=h-2,span=bot-y0,len=Math.max(...drawn.map(s=>s.values.length)),uid=++chartUid;
   // Échelle auto : 12 % d'air au-dessus de la crête. Calée pile sur le maximum, la courbe collait
   // au bord haut du cadre et se lisait comme saturée en permanence.
   const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values))*1.12;
@@ -231,10 +265,10 @@ function chart(list,{percent=true,h=heightFor()}={}){
     defs+=`<linearGradient id="wg${uid}_${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${c};stop-opacity:.34"/><stop offset="1" style="stop-color:${c};stop-opacity:.02"/></linearGradient>`;
     shapes+=`<path d="${d} L${X(off,last).toFixed(1)},${bot} L${X(off,0).toFixed(1)},${bot} Z" style="fill:url(#wg${uid}_${i})"/><path class="w-line" d="${d}" style="stroke:${c}"/>`;
     const cx=X(off,last).toFixed(1),cy=Y(s.values[last]).toFixed(1);
-    dots+=`<circle cx="${cx}" cy="${cy}" r="4.5" style="fill:none;stroke:${c};stroke-opacity:.35"/><circle cx="${cx}" cy="${cy}" r="2.4" style="fill:${c}"/>`;
+    dots+=(mini?'':`<circle cx="${cx}" cy="${cy}" r="4.5" style="fill:none;stroke:${c};stroke-opacity:.35"/>`)+`<circle cx="${cx}" cy="${cy}" r="${mini?2:2.4}" style="fill:${c}"/>`;
   });
-  const grid=[.25,.5,.75].map(f=>`<line class="w-g" x1="0" x2="${w}" y1="${(bot-f*span).toFixed(1)}" y2="${(bot-f*span).toFixed(1)}"/>`).join('');
-  return `<svg class="w-chart" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true"><defs>${defs}</defs>${grid}<line class="w-gb" x1="0" x2="${w}" y1="${bot+.5}" y2="${bot+.5}"/>${shapes}${dots}</svg>`;
+  const grid=mini?'':[.25,.5,.75].map(f=>`<line class="w-g" x1="0" x2="${w}" y1="${(bot-f*span).toFixed(1)}" y2="${(bot-f*span).toFixed(1)}"/>`).join('');
+  return `<svg class="w-chart" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true"><defs>${defs}</defs>${grid}${mini?'':`<line class="w-gb" x1="0" x2="${w}" y1="${bot+.5}" y2="${bot+.5}"/>`}${shapes}${dots}</svg>`;
 }
 const series=(fam,key,color)=>({values:(fam?.series?.[key])||[],color});
 // Graduations temporelles sous la courbe (niveau hyper détaillé) : la fenêtre = nombre de points ×
@@ -295,6 +329,15 @@ function coresBlock(n){
   return `<div class="w-cores" style="${side?'':'flex-direction:column;align-items:stretch;gap:12px'}">${grp(t('w.cores.performance'),P,false)}${grp(t('w.cores.efficiency'),E,true)}</div>`;
 }
 
+// Libellés partagés entre les panneaux détaillés et les cartes du résumé regroupé.
+const pressureLabel=lv=>({1:t('w.mem.pressure.normal'),2:t('w.mem.pressure.high'),4:t('w.mem.pressure.critical')}[lv]||'');
+const thermalLabel=th=>[[t('w.temp.normal'),''],[t('w.temp.high'),'warn'],[t('w.temp.serious'),'warn'],[t('w.temp.throttled'),'crit']][th]||[t('w.temp.normal'),''];
+const batteryState=n=>n.charging?t('w.bat.charging'):n.externalConnected?(n.fullyCharged?t('w.bat.pluggedFull'):t('w.bat.plugged')):t('w.bat.onBattery');
+const batteryRemain=n=>n.minutesRemaining!=null?`${fmtMin(n.minutesRemaining)} · ${n.charging?t('w.bat.untilFull'):t('w.bat.runtime')}`:'';
+const batteryLow=n=>n.percent!=null&&!n.charging&&!n.externalConnected?(n.percent<=10?'crit':n.percent<=20?'warn':'ok'):'ok';
+const tempState=(th,c)=>['ok','warn','crit'][Math.max(th>=3?2:th>=1?1:0,fin(c)?(c>=95?2:c>=85?1:0):0)];
+const memState=lv=>lv===4?'crit':lv===2?'warn':'ok';
+
 function renderCPU(){
   const f=famGet('cpu');if(!f)return empty(t('w.cpu'));const n=f.now,s=sysNow(),L=level();
   // Découpe utilisateur/système à droite de la valeur héros (au lieu d'une barre séparée : la courbe
@@ -314,7 +357,7 @@ function renderCPU(){
 function renderMemory(){
   const f=famGet('ram');if(!f)return empty(t('w.memory'));const n=f.now,L=level();
   const lv=n.pressureLevel,pcol=lv===4?'var(--danger)':lv===2?'var(--amber)':'var(--green)',pcls=lv===4?'crit':lv===2?'warn':'';
-  const P={1:t('w.mem.pressure.normal'),2:t('w.mem.pressure.high'),4:t('w.mem.pressure.critical')}[lv]||'';
+  const P=pressureLabel(lv);
   // Pression : l'indicateur qui compte sur macOS (un pourcentage utilisé élevé est normal, le cache
   // se remplit). Trois crans : vert, ambre, rouge.
   const swapLine=L>=2&&n.swapUsedBytes!=null?`<div class="w-kv sw"><span class="k">${t('w.mem.swap')}</span><span class="v">${n.swapTotalBytes!=null?`${fmtSize(n.swapUsedBytes)} / ${fmtSize(n.swapTotalBytes)}`:fmtSize(n.swapUsedBytes)}</span></div>`:'';
@@ -336,7 +379,7 @@ function renderMemory(){
   if(n.freeBytes!=null)stats.push(tile(t('w.mem.freeLower'),fmtGo(n.freeBytes)));
   if(n.cachedBytes!=null)stats.push(tile(t('w.mem.cacheLower'),fmtGo(n.cachedBytes)));
   if(n.swapUsedBytes!=null)stats.push(tile(t('w.mem.swap'),fmtSize(n.swapUsedBytes),n.swapUsedBytes>2147483648?'warn':''));
-  return popup(t('w.memory'),lv===4?'crit':lv===2?'warn':'ok',
+  return popup(t('w.memory'),memState(lv),
     hero(pctN(n.usedPercent),'%',n.totalBytes?f1(`<b>${fmtGo(n.totalBytes)}</b><span>${t('w.total',{v:''}).trim()}</span>`):'')
     +plot([series(f,'usedPercent','var(--chart-a)')],pct)
     +sec('',pressure)
@@ -384,7 +427,7 @@ function renderNetwork(){
 }
 function renderTemperature(){
   const f=famGet('sensors');if(!f)return empty(t('w.sensors'));const n=f.now,L=level();
-  const th=n.thermalState,T=[[t('w.temp.normal'),''],[t('w.temp.high'),'warn'],[t('w.temp.serious'),'warn'],[t('w.temp.throttled'),'crit']][th]||[t('w.temp.normal'),''];
+  const th=n.thermalState,T=thermalLabel(th);
   const fans=Object.keys(n).filter(k=>/^fan\d+$/.test(k)).sort();
   // Détail par famille. Les noms de capteurs Apple Silicon sont opaques (« PMU tdie3 ») : on ne
   // peut pas honnêtement étiqueter « CPU » ou « GPU », d'où « SoC » / « périphériques ».
@@ -398,9 +441,8 @@ function renderTemperature(){
     if(n.deviceCount!=null)det.push(kv(t('w.detail.temp.deviceCount'),n.deviceCount));
   }
   const fanRows=fans.length?fans.map((k,i)=>kv(fans.length>1?t('w.temp.fanN',{n:i+1}):t('w.temp.fan'),I.num(Math.round(n[k]),0)+' '+t('unit.rpm'))).join(''):kv(t('w.temp.fans'),t('w.temp.noFans'));
-  const state=Math.max(th>=3?2:th>=1?1:0,fin(n.tempC)?(n.tempC>=95?2:n.tempC>=85?1:0):0);
   const list=[series(f,'tempC','var(--amber)')];
-  return popup(t('w.sensors'),['ok','warn','crit'][state],
+  return popup(t('w.sensors'),tempState(th,n.tempC),
     hero(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?f1(`<span>${t('w.temp.hotspot')}</span>`):'')
     +(vis('chart',0)?chart(list,{percent:false})+(L>=2?ticks(list)+`<div style="margin-top:8px">${winTable(list,fmtDeg)}</div>`:''):'')
     +sec('',kv(t('w.temp.state'),`<span class="w-ok ${T[1]}"><i class="w-dot rd" style="background:${T[1]==='crit'?'var(--danger)':T[1]==='warn'?'var(--amber)':'var(--green)'}"></i>${T[0]}</span>`))
@@ -409,7 +451,7 @@ function renderTemperature(){
 }
 function renderBattery(){
   const f=famGet('battery');if(!f)return empty(t('w.battery'));const n=f.now,L=level();
-  const state=n.charging?t('w.bat.charging'):n.externalConnected?(n.fullyCharged?t('w.bat.pluggedFull'):t('w.bat.plugged')):t('w.bat.onBattery');
+  const state=batteryState(n);
   const stats=[];
   if(n.healthPercent!=null)stats.push(tile(t('w.bat.health'),I.pct(Math.round(n.healthPercent)),n.healthPercent<80?'warn':''));
   if(n.cycleCount!=null)stats.push(tile(t('w.bat.cycles'),n.cycleCount));
@@ -427,8 +469,8 @@ function renderBattery(){
   if(n.charging!=null)raw.push(kv(t('w.detail.bat.charging'),yn(n.charging)));
   if(n.externalConnected!=null)raw.push(kv(t('w.detail.bat.plugged'),yn(n.externalConnected)));
   if(n.fullyCharged!=null)raw.push(kv(t('w.detail.bat.full'),yn(n.fullyCharged)));
-  const low=n.percent!=null&&!n.charging&&!n.externalConnected?(n.percent<=10?'crit':n.percent<=20?'warn':'ok'):'ok';
-  const remain=n.minutesRemaining!=null?`<span>${fmtMin(n.minutesRemaining)} · ${n.charging?t('w.bat.untilFull'):t('w.bat.runtime')}</span>`:'';
+  const low=batteryLow(n);
+  const remain=n.minutesRemaining!=null?`<span>${batteryRemain(n)}</span>`:'';
   // Pas de barre de niveau ici : le grand pourcentage la double déjà, et la courbe en donne
   // l'historique. (Sans courbe — réglage « historique » coupé — la barre reprend ce rôle.)
   const list=[series(f,'percent','var(--green)')];
@@ -465,6 +507,70 @@ function renderDisk(){
 }
 function empty(title){return popup(title,'ok',`<div class="w-empty">${t('w.measuring')}</div>`)}
 const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};
+
+// ── Popup regroupé ─────────────────────────────────────────────────────────────
+// Un seul panneau pour tous les widgets activés dans la barre des menus (prefs.widgets : ids système,
+// dans leur ordre d'affichage, fournis par le natif). Le niveau est global (prefs.detail.grouped) :
+//   · Résumé (0)            une carte compacte par widget : nom, valeur, mini-courbe, une ligne clé ;
+//   · Détaillé / Hyper (1,2) les renderers existants, empilés — mêmes sections, mêmes interrupteurs.
+// Rien n'est calculé ici : tout vient du snapshot moniteur déjà fourni.
+const groupedIds=()=>(Array.isArray(metrics?.prefs?.widgets)?metrics.prefs.widgets:[]).filter((id,i,a)=>RENDERERS[id]&&a.indexOf(id)===i);
+const GL_ALL=GL('<rect x="2" y="2" width="5" height="5" rx="1.2"/><rect x="9" y="2" width="5" height="5" rx="1.2"/><rect x="2" y="9" width="5" height="5" rx="1.2"/><rect x="9" y="9" width="5" height="5" rx="1.2"/>');
+const splitUnit=str=>{const i=str.lastIndexOf(' ');return i<0?[str,'']:[str.slice(0,i),str.slice(i+1)]};
+// Données d'une carte de résumé, par widget : {title, state, val, unit, list, percent, line}. Les
+// interrupteurs de section restent respectés (split du CPU, courbe de la température/batterie/disque).
+const SUMMARY={
+  cpu(){const f=famGet('cpu');if(!f)return {title:t('w.cpu')};const n=f.now;
+    const sysSeries=on('split')&&(f.series?.systemPercent||[]).length>1?[series(f,'systemPercent','var(--amber)')]:[];
+    return {title:t('w.cpu'),state:sev(n.total),val:pctN(n.total),unit:'%',list:[series(f,'total','var(--chart-a)'),...sysSeries],
+      line:on('split')&&n.userPercent!=null?`${t('w.cpu.user')} ${I.pct(Math.round(n.userPercent))} · ${t('w.cpu.system')} ${I.pct(Math.round(n.systemPercent||0))}`:''}},
+  memory(){const f=famGet('ram');if(!f)return {title:t('w.memory')};const n=f.now,P=pressureLabel(n.pressureLevel);
+    const used=n.usedBytes!=null&&n.totalBytes?`${fmtGo(n.usedBytes)} / ${fmtGo(n.totalBytes)}`:'';
+    return {title:t('w.memory'),state:memState(n.pressureLevel),val:pctN(n.usedPercent),unit:'%',list:[series(f,'usedPercent','var(--chart-a)')],
+      line:[used,P?`${t('w.mem.pressure')} ${P}`:''].filter(Boolean).join(' · ')}},
+  gpu(){const f=famGet('gpu');if(!f)return {title:t('w.gpu')};const n=f.now;
+    return {title:t('w.gpu'),state:sev(n.usage),val:pctN(n.usage),unit:'%',list:[series(f,'usage','var(--chart-a)')],
+      line:n.memInUse!=null?`${t('w.gpu.memory')} ${fmtSize(n.memInUse)}`:''}},
+  network(){const f=famGet('network');if(!f)return {title:t('w.network')};const n=f.now,[x,u]=splitUnit(fmtRate(n.rxBytesPerSec));
+    return {title:t('w.network'),val:fin(n.rxBytesPerSec)?`↓ ${x}`:null,unit:u,percent:false,list:[series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')],
+      line:n.txBytesPerSec!=null?`↑ ${fmtRate(n.txBytesPerSec)}`+(n.rxSessionBytes!=null?` · ${t('w.net.session')} ↓ ${fmtSize(n.rxSessionBytes)} ↑ ${fmtSize(n.txSessionBytes)}`:''):''}},
+  temperature(){const f=famGet('sensors');if(!f)return {title:t('w.sensors')};const n=f.now,fans=Object.keys(n).filter(k=>/^fan\d+$/.test(k)).sort();
+    const rpm=fans.length?`${I.num(Math.round(n[fans[0]]),0)} ${t('unit.rpm')}`:'';
+    return {title:t('w.sensors'),state:tempState(n.thermalState,n.tempC),val:n.tempC==null?'—':Math.round(n.tempC),unit:'°C',percent:false,
+      list:on('chart')?[series(f,'tempC','var(--amber)')]:[],line:[thermalLabel(n.thermalState)[0],rpm].filter(Boolean).join(' · ')}},
+  battery(){const f=famGet('battery');if(!f)return {title:t('w.battery')};const n=f.now;
+    return {title:t('w.battery'),state:batteryLow(n),val:n.percent==null?'—':Math.round(n.percent),unit:'%',list:on('chart')?[series(f,'percent','var(--green)')]:[],
+      line:[batteryState(n),batteryRemain(n)].filter(Boolean).join(' · ')}},
+  disk(){const f=famGet('disk');if(!f)return {title:t('w.disk')};const n=f.now;
+    return {title:t('w.disk'),state:sev(n.usedPercent,80,90),val:pctN(n.usedPercent),unit:'%',percent:false,
+      list:on('chart')?[series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')]:[],
+      line:n.freeBytes!=null&&n.totalBytes?`${fmtSize(n.freeBytes)} ${t('w.mem.freeLower')} / ${fmtSize(n.totalBytes)}`:''}}
+};
+function summaryCard(id){
+  secId=id;
+  try{
+    const c=SUMMARY[id]();
+    // Sans aucune donnée mesurée : tiret et « mesure en cours », jamais de valeur inventée.
+    const waiting=c.val==null;
+    return `<div class="w-gc" id="g-${id}" data-state="${c.state||'ok'}" style="--k:${KEYC[id]||'var(--blue)'}"><span class="w-gl">${GLYPH[id]||''}</span>`
+      +`<div class="w-gm"><span class="w-gn">${c.title}</span><span class="w-gv">${waiting?'—':c.val}${!waiting&&c.unit?`<small>${c.unit}</small>`:''}</span></div>`
+      +`<div class="w-gcv">${chart(c.list||[],{percent:c.percent!==false,h:34,w:96,mini:true})}</div>`
+      +`<div class="w-gk">${waiting?t('w.measuring'):c.line||''}</div></div>`;
+  }finally{secId=null}
+}
+function groupedSection(id){
+  secId=id;
+  try{const [top,body]=RENDERERS[id]().split(MARK);return `<section class="w-gs" id="g-${id}">${top}${body||''}</section>`}
+  finally{secId=null}
+}
+// En-tête fixe : titre + sélecteur global. Le corps suit le niveau : cartes ou sections empilées.
+function renderGrouped(){
+  const ids=groupedIds(),L=level();
+  const top=`<div class="w-hd" style="--k:var(--blue)"><span class="w-gl">${GL_ALL}</span><h1>${t('w.group.all')}</h1></div>${levelSel()}`;
+  const body=!ids.length?`<div class="w-empty">${t('w.group.empty')}</div>`
+    :L===0?`<div class="w-gcs">${ids.map(summaryCard).join('')}</div>`:ids.map(groupedSection).join('');
+  return `${top}${MARK}${body}`;
+}
 // Le panneau se dimensionne sur son contenu : niveau de détail, sections activables, nombre
 // d'interfaces réseau ou de volumes, liste de processus… d'un widget à l'autre la hauteur va du
 // simple au triple. Une taille figée côté natif coupait net les panneaux longs. On mesure donc après
@@ -480,10 +586,13 @@ function syncPanelHeight(){
 }
 function render(){
   if(metrics?.prefs?.theme)document.documentElement.dataset.theme=metrics.prefs.theme;
-  const r=RENDERERS[widgetId];
+  const r=isGrouped()?renderGrouped:RENDERERS[widgetId];
   const panel=document.querySelector('#panel');
-  // Changement de niveau (clic ici ou réglage poussé par le natif) : l'ancienne mesure ne vaut plus.
-  const key=widgetId+':'+level();
+  panel.className=isGrouped()?'panel grouped':'panel';
+  document.documentElement.dataset.mode=isGrouped()?'grouped':'separate';
+  // Changement de niveau (clic ici ou réglage poussé par le natif) ou de liste de widgets
+  // (regroupé) : l'ancienne mesure ne vaut plus.
+  const key=widgetId+':'+level()+(isGrouped()?':'+groupedIds().join(','):'');
   if(key!==renderedKey){pushedHeight=0;renderedKey=key}
   const [top,body]=(r?r():`<div class="w-empty">—</div>`).split(MARK);
   if(body===undefined){panel.innerHTML=top;renderedTop=null}
@@ -492,8 +601,22 @@ function render(){
     document.querySelector('#w-body').innerHTML=body;
   }
   // Après le calcul de mise en page, sinon on mesure la hauteur d'avant.
-  if(typeof requestAnimationFrame==='function')requestAnimationFrame(syncPanelHeight);else syncPanelHeight();
+  const after=()=>{syncPanelHeight();applyFocus()};
+  if(typeof requestAnimationFrame==='function')requestAnimationFrame(after);else after();
 }
+// Popup regroupé : le clic sur l'icône d'un widget amène sa section sous l'en-tête fixe. Le focus est
+// consommé une fois (un tick ou un changement de niveau ne fait pas re-défiler) ; il reste armé un
+// instant pour résister au redimensionnement du popover qui suit la première mesure.
+let focusId=null,focusUntil=0;
+function applyFocus(){
+  if(focusId&&Date.now()>focusUntil)focusId=null;
+  if(!focusId||!isGrouped())return;
+  const el=document.querySelector('#g-'+focusId),head=document.querySelector('#w-top');
+  if(!el||typeof window.scrollTo!=='function')return;
+  const top=el.getBoundingClientRect().top+(window.scrollY||0)-(head?.offsetHeight||0)-10;
+  window.scrollTo(0,Math.max(0,Math.round(top)));
+}
+function setFocus(id){focusId=id&&RENDERERS[id]?id:null;focusUntil=Date.now()+700}
 // Tick incrémental : même mécanique que dashboard.html — le natif n'envoie les séries qu'à
 // l'ouverture, ensuite `now` seul et la série glisse ici (plafond 300, comme l'anneau natif).
 const METRICS_RING=300;
@@ -515,9 +638,11 @@ function mergeMetricsDelta(state,payload){
   return merged;
 }
 StatusI18n.onChange(()=>{pushedHeight=0;renderedTop=null;if(metrics)render()});
+window.addEventListener?.('resize',applyFocus);
 window.StatusWidget={
   // Changement de widget : la hauteur précédente n'a plus de sens, on force une remesure.
-  show(id,data){if(id!==widgetId){pushedHeight=0;renderedTop=null}widgetId=id;metrics=mergeMetricsDelta(metrics,data)||metrics;render()},
+  // `focus` (popup regroupé seulement) : id du widget dont l'icône vient d'être cliquée.
+  show(id,data,focus){if(id!==widgetId){pushedHeight=0;renderedTop=null;if(id!==GROUPED)focusId=null}widgetId=id;if(focus)setFocus(focus);metrics=mergeMetricsDelta(metrics,data)||metrics;render()},
   updateMetrics(data){const m=mergeMetricsDelta(metrics,data);if(m){metrics=m;render()}}
 };
 </script>

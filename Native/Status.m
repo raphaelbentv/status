@@ -396,6 +396,9 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property WKWebView *widgetWebView;
 @property BOOL widgetWebReady;
 @property (copy) NSString *currentWidgetId;
+// Popup regroupé : icône cliquée, à transmettre une fois à la page pour qu'elle défile jusqu'à sa section.
+@property (copy) NSString *pendingWidgetFocus;
+@property (copy) NSString *groupedFocusId;  // dernière icône cliquée dans le popup regroupé (pour distinguer reclic et changement d'icône)
 @property NSMutableDictionary<NSString *, NSNumber *> *widgetPanelHeights;  // widgetId → hauteur mesurée
 @property BOOL refreshing;
 @property NSTimer *refreshTimer;
@@ -767,6 +770,39 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 // Largeur du panneau d'info : fixe (le contenu est calibré dessus), contrairement à la hauteur.
 static const CGFloat TMWidgetPanelWidth = 264;
 static const CGFloat TMWidgetPanelDefaultHeight = 220;
+// Popup regroupé (réglage « Popups des widgets » = Regroupé) : un seul panneau, un peu plus large,
+// pour les cartes de résumé de tous les widgets activés.
+static const CGFloat TMWidgetGroupedPanelWidth = 300;
+static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du panneau regroupé (affichage, niveau de détail)
+
+- (BOOL)widgetPopupGrouped {
+    return [[NSUserDefaults.standardUserDefaults stringForKey:@"widgetPopupMode"] isEqualToString:@"grouped"];
+}
+
+// Widgets présentés par le popup regroupé : ceux de la barre des menus qui ont un panneau moniteur
+// (les widgets de quotas/API ouvrent le popover des comptes), dans leur ordre d'affichage.
+- (NSArray<NSString *> *)groupedWidgetIds {
+    NSMutableArray *ids = [NSMutableArray array];
+    for (NSString *wid in [self enabledWidgets])
+        if (!TMWidgetUsesAccounts(wid)) [ids addObject:wid];
+    return ids;
+}
+
+- (NSInteger)groupedDetailLevel {
+    id level = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"][TMGroupedWidgetId];
+    return [level isKindOfClass:NSNumber.class] ? MAX(0, MIN(2, [level integerValue])) : 0;  // défaut : Résumé
+}
+
+- (CGFloat)widgetPanelWidthFor:(NSString *)wid {
+    return [wid isEqualToString:TMGroupedWidgetId] ? TMWidgetGroupedPanelWidth : TMWidgetPanelWidth;
+}
+
+// Clé de mémorisation de la hauteur d'un panneau. Celle du regroupé dépend du niveau et du nombre
+// de widgets : une hauteur mesurée au niveau Résumé ne vaut rien pour l'Hyper détaillé.
+- (NSString *)panelHeightKeyFor:(NSString *)wid {
+    if (![wid isEqualToString:TMGroupedWidgetId]) return wid;
+    return [NSString stringWithFormat:@"%@.%ld.%lu", TMGroupedWidgetId, (long)[self groupedDetailLevel], (unsigned long)[self groupedWidgetIds].count];
+}
 
 - (void)ensureWidgetPopover {
     if (self.widgetPopover) return;
@@ -798,14 +834,15 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     if (height < 80) return;  // mesure aberrante (page pas encore rendue) : on garde l'existante
     CGFloat maxHeight = MAX(240, NSScreen.mainScreen.visibleFrame.size.height - 40);
     height = ceil(MIN(height, maxHeight));
-    if (wid) {
-        self.widgetPanelHeights[wid] = @(height);
+    NSString *heightKey = wid ? [self panelHeightKeyFor:wid] : nil;
+    if (heightKey) {
+        self.widgetPanelHeights[heightKey] = @(height);
         // Persistées : au relancement, le premier affichage de chaque panneau part déjà de la
         // bonne taille au lieu de s'ouvrir puis de se redimensionner sous le curseur.
         [NSUserDefaults.standardUserDefaults setObject:self.widgetPanelHeights forKey:@"widgetPanelHeights"];
     }
     if (!self.widgetPopover || fabs(self.widgetPopover.contentSize.height - height) < 1) return;
-    NSSize size = NSMakeSize(TMWidgetPanelWidth, height);
+    NSSize size = NSMakeSize([self widgetPanelWidthFor:self.currentWidgetId], height);
     // Les deux, et dans cet ordre : NSPopover se cale sur la taille préférée de son
     // contentViewController dès qu'elle est renseignée, et ignore alors contentSize seul.
     self.widgetPopover.contentViewController.preferredContentSize = size;
@@ -817,7 +854,10 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
                            @"panels": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
                            // widgetId → niveau de détail du panneau (0 résumé, 1 détaillé, 2 hyper détaillé).
-                           @"detail": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{} };
+                           @"detail": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{},
+                           // Popups séparés ou regroupé ; en regroupé, ids des widgets système activés, dans l'ordre d'affichage.
+                           @"popupMode": [self widgetPopupGrouped] ? @"grouped" : @"separate",
+                           @"widgets": [self groupedWidgetIds] };
     payload[@"processes"] = self.topProcesses ?: @[];  // top consommateurs, pour les panneaux CPU/Mémoire
     payload[@"intervalSeconds"] = @([self metricsInterval]);  // cadence des séries : graduations du niveau « hyper détaillé »
     return payload;
@@ -829,7 +869,15 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     if (!self.widgetWebReady || !self.currentWidgetId) return;
     NSData *data = [NSJSONSerialization dataWithJSONObject:[self widgetMetricsPayload] options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    NSString *script = [NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.show('%@', %@);", self.currentWidgetId, json];
+    // Popup regroupé : l'icône cliquée n'est transmise qu'une fois (3e argument), pour que la page défile
+    // jusqu'à sa section — un rafraîchissement dû à un réglage ne doit pas la faire re-défiler.
+    NSString *focusArg = @"";
+    if ([self.currentWidgetId isEqualToString:TMGroupedWidgetId] && self.pendingWidgetFocus
+        && [TMMenuBarWidgetIDs() containsObject:self.pendingWidgetFocus]) {
+        focusArg = [NSString stringWithFormat:@", '%@'", self.pendingWidgetFocus];
+    }
+    self.pendingWidgetFocus = nil;
+    NSString *script = [NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.show('%@', %@%@);", self.currentWidgetId, json, focusArg];
     [self.widgetWebView evaluateJavaScript:script completionHandler:nil];
     self.widgetMetricsPrimed = YES;  // payload complet envoyé : les ticks peuvent passer au delta
 }
@@ -843,18 +891,28 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         [self showPopoverFromButton:sender];
         return;
     }
-    // Reclic sur le même widget déjà ouvert : on ferme (bascule).
-    if (self.widgetPopover.shown && [self.currentWidgetId isEqual:wid]) { [self.widgetPopover close]; return; }
-    [self ensureWidgetPopover];
-    self.currentWidgetId = wid;
-    // Hauteur déjà mesurée pour ce widget : la poser avant l'affichage évite le saut du premier
-    // frame, le temps que la page remesure et confirme.
-    NSNumber *known = self.widgetPanelHeights[wid];
-    if (known) {
-        NSSize size = NSMakeSize(TMWidgetPanelWidth, known.doubleValue);
-        self.widgetPopover.contentViewController.preferredContentSize = size;
-        self.widgetPopover.contentSize = size;
+    // Réglage « Popups des widgets » = Regroupé : toutes les icônes ouvrent le même popup. Reclic sur
+    // l'icône déjà au premier plan : il se ferme ; clic sur une autre icône pendant qu'il est ouvert :
+    // il reste ouvert et défile jusqu'à la section de ce widget.
+    BOOL grouped = [self widgetPopupGrouped];
+    NSString *panelId = grouped ? TMGroupedWidgetId : wid;
+    if (self.widgetPopover.shown && [self.currentWidgetId isEqual:panelId]) {
+        if (!grouped || [self.groupedFocusId isEqual:wid]) { [self.widgetPopover close]; return; }  // reclic : bascule
+        self.groupedFocusId = wid;
+        self.pendingWidgetFocus = wid;
+        [self pushWidgetMetrics];
+        return;
     }
+    [self ensureWidgetPopover];
+    self.currentWidgetId = panelId;
+    self.groupedFocusId = grouped ? wid : nil;
+    self.pendingWidgetFocus = grouped ? wid : nil;
+    // Largeur propre au panneau, et hauteur déjà mesurée si on la connaît : les poser avant
+    // l'affichage évite le saut du premier frame, le temps que la page remesure et confirme.
+    NSNumber *known = self.widgetPanelHeights[[self panelHeightKeyFor:panelId]];
+    NSSize size = NSMakeSize([self widgetPanelWidthFor:panelId], known ? known.doubleValue : self.widgetPopover.contentSize.height);
+    self.widgetPopover.contentViewController.preferredContentSize = size;
+    self.widgetPopover.contentSize = size;
     [self pushWidgetMetrics];  // remplit avant l'affichage si le web est prêt
     [self.widgetPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMinY];
 }
@@ -1567,13 +1625,24 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
     // widget dans widgetDetail. Identifiant limité aux widgets système, niveau borné à 0…2.
     if ([action isEqualToString:@"setWidgetDetail"]) {
         NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
-        if (wid && [TMMenuBarWidgetIDs() containsObject:wid] && !TMWidgetUsesAccounts(wid)
+        // « grouped » : niveau global du popup regroupé, en plus des ids de widgets.
+        if (wid && ([wid isEqualToString:TMGroupedWidgetId] || ([TMMenuBarWidgetIDs() containsObject:wid] && !TMWidgetUsesAccounts(wid)))
             && [body[@"level"] isKindOfClass:NSNumber.class]) {
             NSInteger level = MAX(0, MIN(2, [body[@"level"] integerValue]));
             NSMutableDictionary *detail = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{}) mutableCopy];
             detail[wid] = @(level);
             [NSUserDefaults.standardUserDefaults setObject:detail forKey:@"widgetDetail"];
             [self pushWidgetMetrics];  // rafraîchit le panneau ouvert au nouveau niveau
+        }
+    }
+    // Popups des widgets : « separate » (un panneau par widget, défaut) ou « grouped » (un seul popup).
+    // Un popup ouvert dans l'ancien mode est fermé : sa largeur et son contenu n'ont plus de sens.
+    if ([action isEqualToString:@"setWidgetPopupMode"]) {
+        NSString *mode = [body[@"mode"] isKindOfClass:NSString.class] ? body[@"mode"] : nil;
+        if ([mode isEqualToString:@"separate"] || [mode isEqualToString:@"grouped"]) {
+            [NSUserDefaults.standardUserDefaults setObject:mode forKey:@"widgetPopupMode"];
+            [self.widgetPopover close];
+            [self pushData];
         }
     }
     // Alerte système : activation et/ou seuil. Le seuil est borné pour rester utile — une alerte
@@ -1751,6 +1820,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
             @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},
             @"widgetPanelConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
+            @"widgetPopupMode": [self widgetPopupGrouped] ? @"grouped" : @"separate",
             @"alerts": [self alertsPayload],
             @"notificationsAuthorized": @(self.notificationsAuthorized),
             @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
