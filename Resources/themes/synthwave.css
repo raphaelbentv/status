@@ -1,0 +1,525 @@
+/* synthwave — habillage et mise en page, chargé par dashboard.html, menubar.html et widget.html.
+   Direction « Coucher de soleil » : un crépuscule rétro-futuriste sous contrôle. Fond indigo profond,
+   horizon et grille en perspective à peine visibles tout en bas, cartes de verre sombre cerclées d'un
+   filet dégradé rose → violet → cyan, chiffres héros « chrome » (moitié haute claire, moitié basse
+   teintée) avec un halo mesuré. Les teintes du soleil (orange, rose) ne servent qu'au décor : les états
+   gardent leurs propres couleurs — jaune pour l'avertissement, rouge franc pour le critique — et
+   s'accompagnent d'un symbole (▲ / ◆), de sorte qu'aucune alerte ne repose sur la seule couleur.
+   Tout est scopé html[data-theme="synthwave"] : la spécificité l'emporte sur les <style> en ligne.
+   Les états suivent data-level (ok / warn / crit), calculé sur le RESTANT. */
+
+/* ═══ 1. Jetons ═══════════════════════════════════════════════════════════════
+   --blue = OpenAI (cyan électrique), --purple = Claude (rose chaud). Lus aussi par widget.html. */
+[data-theme="synthwave"]{
+  color-scheme:dark;
+  --bg:#0b0520;--sidebar:rgba(10,4,26,.74);--panel-bg:rgba(32,13,70,.6);--panel-bg-strong:rgba(17,7,41,.95);
+  --text:#f6ecff;--muted:#b9a6e0;
+  --hair:rgba(255,113,206,.2);--hair-strong:rgba(255,113,206,.4);
+  --soft:rgba(255,255,255,.045);--soft-hover:rgba(255,113,206,.14);
+  --blue:#3fe6ff;--blue-soft:rgba(63,230,255,.1);--purple:#ff72d6;--purple-soft:rgba(255,114,214,.1);
+  --green:#47f2c4;--amber:#ffd84a;--danger:#ff4b5f;
+  --chart-a:#3fe6ff;--chart-b:#ff72d6;
+  --grid:transparent;
+  --font:"Figtree",-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --radius:10px;--clip:none;
+  --bg-image:radial-gradient(ellipse 70% 42% at 50% 112%,rgba(255,92,200,.34),rgba(255,140,70,.12) 48%,transparent 72%),radial-gradient(ellipse 60% 40% at 12% -8%,rgba(138,98,255,.26),transparent 70%),linear-gradient(180deg,#0b0520 0%,#12072f 58%,#1a0a3d 100%);
+  --bg-size:auto;
+  /* Jetons propres au thème */
+  --disp:"Outfit","Figtree",ui-rounded,-apple-system,system-ui,sans-serif;
+  --sun:#ff9a4a;--violet:#a58aff;--ink2:#d9c8f5;--ink3:#b9a6e0;
+  --card:linear-gradient(180deg,#1d0c42,#150833);
+  --edge:linear-gradient(135deg,rgba(255,114,214,.75),rgba(165,138,255,.32) 48%,rgba(63,230,255,.6));
+  --lv:var(--provider,var(--blue));
+}
+html[data-theme="synthwave"] [data-level="warn"]{--lv:var(--amber);--edge:linear-gradient(135deg,rgba(255,216,74,.85),rgba(255,216,74,.22) 55%,rgba(255,216,74,.5))}
+html[data-theme="synthwave"] [data-level="crit"]{--lv:var(--danger);--edge:linear-gradient(135deg,rgba(255,75,95,.9),rgba(255,75,95,.25) 55%,rgba(255,75,95,.55))}
+
+/* ═══ 2. Coque : fenêtre, barre latérale, barre de titre ═════════════════════ */
+html[data-theme="synthwave"] body{font-size:13.5px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+html[data-theme="synthwave"] .shell,html[data-theme="synthwave"] .popover{--muted:#b9a6e0;position:relative;isolation:isolate}
+html[data-theme="synthwave"] ::selection{background:rgba(255,114,214,.35)}
+
+/* Horizon : une ligne lumineuse et une grille en perspective, très en retrait, ancrées en bas. */
+html[data-theme="synthwave"] .shell::before,html[data-theme="synthwave"] .popover::before{content:"";position:absolute;left:-60%;right:-60%;bottom:0;height:34%;z-index:-1;pointer-events:none;
+  background:repeating-linear-gradient(90deg,rgba(255,114,214,.22) 0 1px,transparent 1px 56px),repeating-linear-gradient(0deg,rgba(255,114,214,.22) 0 1px,transparent 1px 34px);
+  transform:perspective(260px) rotateX(58deg);transform-origin:50% 100%;
+  -webkit-mask-image:linear-gradient(0deg,transparent,#000 65%);mask-image:linear-gradient(0deg,transparent,#000 65%);opacity:.5}
+html[data-theme="synthwave"] .shell::after,html[data-theme="synthwave"] .popover::after{content:"";position:absolute;left:0;right:0;bottom:0;height:46%;z-index:-1;pointer-events:none;
+  background:radial-gradient(ellipse 52% 100% at 50% 100%,rgba(255,154,74,.14),transparent 70%)}
+html[data-theme="synthwave"] .popover::before{height:22%}
+
+html[data-theme="synthwave"] .sidebar{padding:20px 14px 18px;background:rgba(10,4,26,.74);border-right:1px solid rgba(255,114,214,.28);
+  box-shadow:inset -1px 0 0 rgba(63,230,255,.06),8px 0 30px -18px rgba(255,114,214,.5)}
+html[data-theme="synthwave"] .product{font:800 25px/1 var(--disp);font-style:italic;letter-spacing:.04em;text-transform:uppercase;margin:4px 8px 26px;
+  background:linear-gradient(180deg,#fff 0 46%,#ff9a4a 54%,#ff5cc8 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px rgba(255,92,200,.45))}
+
+html[data-theme="synthwave"] .nav button{padding:10px 12px 10px 38px;margin-bottom:5px;border:1px solid transparent;border-radius:10px;font-size:14px;font-weight:500;color:var(--ink2);transition:background .15s,border-color .15s,color .15s}
+html[data-theme="synthwave"] .nav button::before{left:14px;opacity:1;font:700 11px/1 var(--disp);letter-spacing:.06em;color:var(--sun)}
+html[data-theme="synthwave"] .nav button:hover{background:rgba(255,114,214,.09);border-color:rgba(255,114,214,.22);color:#fff}
+html[data-theme="synthwave"] .nav button.active{color:#fff;font-weight:600;border-color:rgba(255,114,214,.5);
+  background:linear-gradient(90deg,rgba(255,114,214,.26),rgba(138,98,255,.1) 70%,transparent);box-shadow:inset 3px 0 0 var(--purple),0 0 22px -10px var(--purple)}
+html[data-theme="synthwave"] .nav button.active::before{color:#fff}
+html[data-theme="synthwave"] .sidebar-bottom{border-top:1px solid rgba(255,114,214,.2)}
+html[data-theme="synthwave"] .connection-state{padding:9px 12px;font-size:12.5px;color:var(--ink2)}
+html[data-theme="synthwave"] .connection-state i{width:8px;height:8px;border-radius:50%;background:#6a5a96}
+html[data-theme="synthwave"] .connection-state i.live{background:var(--green);box-shadow:0 0 0 3px rgba(71,242,196,.16),0 0 10px var(--green)}
+html[data-theme="synthwave"] .connection-state i.warn{background:var(--amber);box-shadow:0 0 0 3px rgba(255,216,74,.16),0 0 10px var(--amber)}
+
+html[data-theme="synthwave"] main{padding:0 32px 36px}
+html[data-theme="synthwave"] main::-webkit-scrollbar{width:10px}
+html[data-theme="synthwave"] main::-webkit-scrollbar-thumb{background:rgba(255,114,214,.28);border-radius:99px;border:2px solid transparent;background-clip:padding-box}
+
+/* Barre de titre : titre italique à reflet chrome, filet d'horizon dégradé dessous. */
+html[data-theme="synthwave"] .toolbar{height:76px;border-bottom:0;gap:14px;position:relative}
+html[data-theme="synthwave"] .toolbar::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,#ff72d6,rgba(165,138,255,.5) 40%,rgba(63,230,255,.35) 75%,transparent);box-shadow:0 0 12px rgba(255,114,214,.5)}
+html[data-theme="synthwave"] .toolbar h1{font:800 26px/1 var(--disp);font-style:italic;letter-spacing:.05em;text-transform:uppercase;
+  background:linear-gradient(180deg,#fff 0 46%,#ffb36b 54%,#ff5cc8 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 12px rgba(255,92,200,.4))}
+html[data-theme="synthwave"] .toolbar-meta{margin-left:auto;font-size:12.5px;color:var(--ink2);white-space:nowrap}
+html[data-theme="synthwave"] .toolbar-warn{white-space:nowrap;font-weight:600}
+
+html[data-theme="synthwave"] .button,html[data-theme="synthwave"] .account-action,html[data-theme="synthwave"] .provider-manage{
+  --c:var(--purple);font-weight:600;letter-spacing:.02em;color:#fff;white-space:nowrap;border:1px solid transparent;border-radius:9px;padding:7px 15px;cursor:pointer;
+  background:linear-gradient(#1c0b40,#1c0b40) padding-box,linear-gradient(135deg,var(--c),rgba(165,138,255,.55)) border-box;
+  box-shadow:0 0 16px -8px var(--c);transition:box-shadow .15s,filter .15s}
+html[data-theme="synthwave"] .button:hover,html[data-theme="synthwave"] .account-action:hover,html[data-theme="synthwave"] .provider-manage:hover{
+  background:linear-gradient(rgba(255,114,214,.18),rgba(255,114,214,.18)),linear-gradient(#1c0b40,#1c0b40) padding-box,linear-gradient(135deg,var(--c),rgba(165,138,255,.55)) border-box;background-clip:border-box,padding-box,border-box;box-shadow:0 0 20px -4px var(--c);color:#fff}
+html[data-theme="synthwave"] .button:active,html[data-theme="synthwave"] .account-action:active{filter:brightness(1.2)}
+html[data-theme="synthwave"] .button.on{--c:var(--green)}
+html[data-theme="synthwave"] .button[disabled],html[data-theme="synthwave"] .account-action[disabled]{opacity:.42;box-shadow:none;cursor:default;filter:saturate(.5)}
+html[data-theme="synthwave"] .account-action{--c:var(--provider,var(--purple));padding:6px 13px;font-size:12.5px}
+html[data-theme="synthwave"] .account-action.primary{color:#14052e;font-weight:700;border:0;
+  background:linear-gradient(135deg,var(--provider,#ff72d6),color-mix(in srgb,var(--provider,#ff72d6) 55%,#ff9a4a));box-shadow:0 0 18px -6px var(--provider,#ff72d6)}
+html[data-theme="synthwave"] .account-action.primary:hover{background:linear-gradient(135deg,var(--provider,#ff72d6),color-mix(in srgb,var(--provider,#ff72d6) 55%,#ff9a4a));filter:brightness(1.12);color:#14052e}
+html[data-theme="synthwave"] .provider-manage{--c:var(--provider);padding:2px 11px;margin-left:10px;font-size:12px;font-weight:500}
+
+/* Segmentés : rail sombre, élément actif en dégradé crépusculaire. */
+html[data-theme="synthwave"] .segmented,html[data-theme="synthwave"] .view-toggle{border:1px solid rgba(255,114,214,.34);border-radius:10px;padding:2px;gap:2px;overflow:visible;background:rgba(10,4,26,.5)}
+html[data-theme="synthwave"] .segmented{flex-wrap:wrap;width:-webkit-fit-content;width:fit-content;max-width:100%}
+html[data-theme="synthwave"] .seg,html[data-theme="synthwave"] .view-toggle button{border:0;border-radius:8px;padding:5px 12px;font-size:12.5px;font-weight:500;color:var(--ink2);white-space:nowrap;transition:background .15s,color .15s}
+html[data-theme="synthwave"] .seg+.seg{border-left:0}
+html[data-theme="synthwave"] .seg:hover,html[data-theme="synthwave"] .view-toggle button:hover{background:rgba(255,114,214,.14);color:#fff}
+html[data-theme="synthwave"] .seg.on,html[data-theme="synthwave"] .view-toggle button.on{color:#fff;font-weight:700;background:linear-gradient(135deg,rgba(255,114,214,.5),rgba(138,98,255,.5));box-shadow:0 0 14px -4px var(--purple),inset 0 0 0 1px rgba(255,255,255,.14)}
+html[data-theme="synthwave"] .seg[disabled]{opacity:.35}
+html[data-theme="synthwave"] .view-toggle{margin-left:0}
+html[data-theme="synthwave"] .view-toggle button{padding:5px 13px}
+
+html[data-theme="synthwave"] select{background:#150833;border:1px solid rgba(255,114,214,.4);border-radius:9px;padding:7px 12px;color:#fff;font-size:13px}
+html[data-theme="synthwave"] select:hover{border-color:rgba(255,114,214,.7)}
+html[data-theme="synthwave"] input[type="number"]{background:#150833;border:1px solid rgba(255,114,214,.4);border-radius:8px;padding:5px 8px;color:#fff;font:inherit}
+html[data-theme="synthwave"] button:focus-visible,html[data-theme="synthwave"] summary:focus-visible,html[data-theme="synthwave"] select:focus-visible,html[data-theme="synthwave"] input:focus-visible{outline:2px solid #fff;outline-offset:2px;box-shadow:0 0 0 5px rgba(63,230,255,.55)}
+html[data-theme="synthwave"] .notice{border:1px solid rgba(255,216,74,.6);border-left:4px solid var(--amber);border-radius:12px;background:linear-gradient(90deg,rgba(255,216,74,.1),rgba(255,216,74,.03))}
+html[data-theme="synthwave"] .notice strong{color:var(--amber)}
+html[data-theme="synthwave"] .notice p{color:var(--ink2)}
+html[data-theme="synthwave"] .sort-row{margin:6px 0 14px;color:var(--ink2)}
+
+/* ═══ 3. Quotas (vue « Status ») ═════════════════════════════════════════════ */
+html[data-theme="synthwave"] .provider-blocks{gap:18px;margin-top:6px}
+html[data-theme="synthwave"] .provider-block{padding:20px 20px 22px;border-radius:16px;border:1px solid transparent;
+  background:radial-gradient(120% 60% at 50% -10%,color-mix(in srgb,var(--provider) 14%,transparent),transparent 60%) padding-box,linear-gradient(180deg,#1b0b3e,#12072d) padding-box,linear-gradient(160deg,color-mix(in srgb,var(--provider) 85%,transparent),rgba(165,138,255,.2) 45%,rgba(255,154,74,.35)) border-box;
+  box-shadow:0 18px 40px -22px rgba(0,0,0,.8),0 0 36px -22px var(--provider)}
+html[data-theme="synthwave"] .provider-block:before{left:22px;right:22px;top:-1px;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,var(--provider) 30%,var(--sun) 70%,transparent);box-shadow:0 0 14px var(--provider)}
+html[data-theme="synthwave"] .provider-block-head{margin-bottom:14px}
+html[data-theme="synthwave"] .provider{gap:10px;font:800 17px/1 var(--disp);font-style:italic;letter-spacing:.1em;text-transform:uppercase;color:#fff}
+html[data-theme="synthwave"] .provider-dot{width:11px;height:11px;border-radius:50%;background:var(--provider);box-shadow:0 0 0 3px color-mix(in srgb,var(--provider) 24%,transparent),0 0 14px var(--provider)}
+html[data-theme="synthwave"] .provider-block-head .status-label{font-size:12.5px;color:var(--ink2)}
+html[data-theme="synthwave"] .provider-block-head .status-label i{display:none}
+
+/* Un compte : nom, pastille d'état (vert connecté / jaune erreur / grise sans session). */
+html[data-theme="synthwave"] .account-block+.account-block{border-top:1px solid rgba(255,114,214,.18);margin-top:18px;padding-top:18px}
+html[data-theme="synthwave"] .account-block-head{align-items:center;gap:12px;margin-bottom:6px}
+html[data-theme="synthwave"] .account-block-head strong,html[data-theme="synthwave"] .account-copy strong{font-size:15px;font-weight:700;color:#fff}
+html[data-theme="synthwave"] .account-identity{font-weight:400;color:var(--ink3);font-size:12.5px}
+html[data-theme="synthwave"] .account-block .status-label{--st:var(--green);flex:none;display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:var(--ink2);
+  padding:3px 11px 3px 9px;border-radius:99px;border:1px solid color-mix(in srgb,var(--st) 55%,transparent);background:color-mix(in srgb,var(--st) 10%,transparent)}
+html[data-theme="synthwave"] .account-block[data-connected="0"] .status-label{--st:#8f7fb8;color:var(--ink3)}
+html[data-theme="synthwave"] .account-block[data-error="1"] .status-label{--st:var(--amber);color:var(--amber)}
+html[data-theme="synthwave"] .account-block .status-label i{width:7px;height:7px;border-radius:50%;margin-right:7px;background:var(--st);box-shadow:0 0 8px var(--st)}
+html[data-theme="synthwave"] .freshness{margin:0 0 10px;font-size:12.5px;color:var(--ink3)}
+html[data-theme="synthwave"] .freshness.stale{color:var(--amber)}
+html[data-theme="synthwave"] .billing-line{margin:0 0 12px;font-size:12.5px;color:var(--ink3)}
+html[data-theme="synthwave"] .billing-line.soon{color:var(--amber)}
+html[data-theme="synthwave"] .quota-error{display:flex;gap:8px;color:#ff8c98;font-weight:500}
+html[data-theme="synthwave"] .quota-error::before{content:"◆";color:var(--danger);flex:none}
+html[data-theme="synthwave"] .quota-empty{border:1px dashed rgba(255,114,214,.4);border-radius:12px;color:var(--ink2)}
+
+/* Carte de fenêtre : filet dégradé, niveau d'état en couleur + symbole, jauge en parallélogramme. */
+html[data-theme="synthwave"] .quota-card{padding:14px 16px 14px;border-radius:13px;border:1px solid transparent;
+  background:var(--card) padding-box,var(--edge) border-box;box-shadow:0 10px 24px -16px rgba(0,0,0,.9)}
+html[data-theme="synthwave"] .quota-grid{gap:11px}
+html[data-theme="synthwave"] .quota-top{align-items:baseline}
+html[data-theme="synthwave"] .quota-top span{font:700 12px/1.2 var(--disp);letter-spacing:.16em;text-transform:uppercase;color:var(--ink2)}
+html[data-theme="synthwave"] .quota-top strong{font:700 21px/1.1 var(--disp);font-style:italic;letter-spacing:.01em;white-space:nowrap;padding-right:2px;
+  background:linear-gradient(180deg,#fff 0 46%,var(--lv) 54%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--lv) 38%,transparent))}
+html[data-theme="synthwave"] .quota-card[data-level="warn"] .quota-top strong::before{content:"▲ ";font-style:normal;font-size:.7em;vertical-align:.08em}
+html[data-theme="synthwave"] .quota-card[data-level="crit"] .quota-top strong::before{content:"◆ ";font-style:normal;font-size:.7em;vertical-align:.08em}
+html[data-theme="synthwave"] .quota-card small,html[data-theme="synthwave"] .quota-empty{font-size:12.5px}
+html[data-theme="synthwave"] .quota-foot{flex-wrap:wrap;align-items:center;gap:6px 10px}
+html[data-theme="synthwave"] .quota-foot small{flex:1 1 auto;white-space:nowrap;color:var(--ink3)}
+html[data-theme="synthwave"] .spark{margin-left:auto}
+html[data-theme="synthwave"] .spark .area{fill:var(--c);opacity:.14}
+html[data-theme="synthwave"] .spark .line{stroke-width:1.6;filter:drop-shadow(0 0 3px var(--c))}
+html[data-theme="synthwave"] .spark .tip{filter:drop-shadow(0 0 3px #fff)}
+html[data-theme="synthwave"] .manual-reset{font-size:12px;color:var(--ink3)}
+html[data-theme="synthwave"] .manual-reset.available{color:var(--green);font-weight:700}
+html[data-theme="synthwave"] .reset-expiries li.soon{color:var(--amber)}
+html[data-theme="synthwave"] .extra-credits{border:1px solid rgba(255,114,214,.28)!important;border-radius:12px!important;background:rgba(255,255,255,.035)!important}
+
+/* Jauge : parallélogramme évidé, remplissage dégradé (sombre → couleur), pointe lumineuse. Le niveau
+   (data-level du conteneur) colore le remplissage ; hors carte (listes, API), la couleur en ligne reste. */
+html[data-theme="synthwave"] .quota-track,html[data-theme="synthwave"] .rail{position:relative;height:11px;margin:10px 4px 8px 0;overflow:hidden;border-radius:3px;transform:skewX(-20deg);
+  background:rgba(255,255,255,.055);border:1px solid rgba(255,114,214,.3)}
+html[data-theme="synthwave"] .quota-track i,html[data-theme="synthwave"] .rail i{position:relative;height:100%;border-radius:2px 0 0 2px;
+  background-color:var(--provider,var(--chart-a));background-image:linear-gradient(90deg,rgba(11,5,32,.62),rgba(11,5,32,0) 78%)!important;box-shadow:0 0 12px -1px color-mix(in srgb,var(--lv) 80%,transparent)}
+html[data-theme="synthwave"] .quota-track i::after,html[data-theme="synthwave"] .rail i::after{content:"";position:absolute;right:0;top:0;bottom:0;width:3px;background:#fff;opacity:.85;box-shadow:0 0 8px #fff}
+html[data-theme="synthwave"] .quota-card[data-level="crit"] .quota-track i,html[data-theme="synthwave"] .quota-card[data-level="crit"] .rail i{
+  background-image:repeating-linear-gradient(115deg,rgba(11,5,32,.38) 0 3px,transparent 3px 7px),linear-gradient(90deg,rgba(11,5,32,.4),rgba(11,5,32,0) 78%)!important}
+html[data-theme="synthwave"] .quota-track i[style*="width:0%"],html[data-theme="synthwave"] .rail i[style*="width:0%"]{display:none}
+html[data-theme="synthwave"] .quota-card .quota-track i,html[data-theme="synthwave"] .quota-card .rail i{background-color:var(--lv)!important}
+
+/* Coût équivalent API : encart soleil couchant. */
+html[data-theme="synthwave"] .cost-total{margin-top:16px;padding:14px 16px;border:1px solid transparent;border-radius:13px;
+  background:linear-gradient(135deg,rgba(255,114,214,.1),rgba(255,154,74,.05)),linear-gradient(#170a38,#170a38) padding-box,linear-gradient(135deg,rgba(255,154,74,.7),rgba(255,114,214,.4),rgba(165,138,255,.3)) border-box}
+html[data-theme="synthwave"] .cost-total.scanning{border-color:rgba(255,114,214,.3);background:rgba(255,255,255,.04);font-size:12.5px;color:var(--ink2)}
+html[data-theme="synthwave"] .cost-total-label{font:700 11.5px/1.3 var(--disp);letter-spacing:.14em;color:var(--sun);margin-bottom:6px}
+html[data-theme="synthwave"] .cost-total-head{align-items:flex-start}
+html[data-theme="synthwave"] .cost-period{margin-bottom:6px}
+html[data-theme="synthwave"] .cost-total-amount{font:800 28px/1.1 var(--disp);font-style:italic;white-space:nowrap;padding-right:2px;
+  background:linear-gradient(180deg,#fff 0 46%,#ffb36b 54%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px rgba(255,154,74,.35))}
+html[data-theme="synthwave"] .cost-warn{color:var(--amber)}
+html[data-theme="synthwave"] .summary-note{margin-top:6px;font-size:12px;color:var(--ink3);line-height:1.5}
+html[data-theme="synthwave"] .model-table{font-size:12.5px}
+html[data-theme="synthwave"] .model-table th{color:var(--ink3);letter-spacing:.1em;border-bottom:1px solid rgba(255,114,214,.3)}
+html[data-theme="synthwave"] .model-table td{border-bottom:1px solid rgba(255,114,214,.14);padding:5px 0}
+html[data-theme="synthwave"] .model-table td:first-child{overflow-wrap:anywhere}
+html[data-theme="synthwave"] .model-table .num{white-space:nowrap;padding-left:10px}
+
+/* Consommation 7 jours */
+html[data-theme="synthwave"] .section-head h2{font:700 12px/1.3 var(--disp);letter-spacing:.18em;color:var(--sun)}
+html[data-theme="synthwave"] .wk-svg{border:1px solid rgba(255,114,214,.3);border-radius:14px;background:linear-gradient(180deg,#1a0b3c,#120730)}
+html[data-theme="synthwave"] .wk-legend{color:var(--ink2)}
+html[data-theme="synthwave"] .wk-leg i{height:3px;border-radius:2px}
+
+/* ═══ 4. Moniteur ════════════════════════════════════════════════════════════ */
+html[data-theme="synthwave"] .vitals{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px;background:transparent;border:0;border-radius:0;overflow:visible;margin-top:6px}
+html[data-theme="synthwave"] .vital{--c:var(--blue);gap:4px;padding:11px 13px 9px;border-radius:12px;border:1px solid transparent;
+  background:var(--card) padding-box,linear-gradient(160deg,color-mix(in srgb,var(--c) 75%,transparent),rgba(165,138,255,.18) 60%) border-box;box-shadow:0 10px 22px -18px #000}
+html[data-theme="synthwave"] .vital:nth-child(2n){--c:var(--purple)}
+html[data-theme="synthwave"] .vital:nth-child(3n){--c:var(--violet)}
+html[data-theme="synthwave"] .vital:nth-child(5n){--c:var(--green)}
+html[data-theme="synthwave"] .vital.warn{--c:var(--amber)}
+html[data-theme="synthwave"] .vital.crit{--c:var(--danger)}
+html[data-theme="synthwave"] .vital:hover{filter:brightness(1.18)}
+html[data-theme="synthwave"] .vital-label{font:700 10.5px/1.2 var(--disp);letter-spacing:.16em;color:var(--ink2)}
+html[data-theme="synthwave"] .vital .vital-value{font:800 19px/1.15 var(--disp);font-style:italic;color:#fff;letter-spacing:0;padding-right:2px}
+html[data-theme="synthwave"] .vital.warn .vital-value{color:var(--amber)}
+html[data-theme="synthwave"] .vital.crit .vital-value{color:#ff8592}
+html[data-theme="synthwave"] .vital.warn .vital-label::before{content:"▲ ";color:var(--amber)}
+html[data-theme="synthwave"] .vital.crit .vital-label::before{content:"◆ ";color:var(--danger)}
+html[data-theme="synthwave"] .vital-value small{font:500 12px/1 var(--font);font-style:normal;color:var(--ink2)}
+html[data-theme="synthwave"] .vital svg path{stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;filter:drop-shadow(0 0 3px var(--c))}
+html[data-theme="synthwave"] .vital.boost .vital-value{color:var(--blue)}
+
+html[data-theme="synthwave"] .monitor-section{--c:var(--blue);--chart-a:var(--blue);--chart-b:var(--purple);margin-top:24px}
+html[data-theme="synthwave"] .monitor-section:nth-of-type(2){--c:var(--sun);--chart-a:var(--sun);--chart-b:var(--purple)}
+html[data-theme="synthwave"] .monitor-section:nth-of-type(3){--c:var(--violet);--chart-a:var(--blue);--chart-b:var(--purple)}
+html[data-theme="synthwave"] .monitor-section:nth-of-type(4){--c:var(--green);--chart-a:var(--green);--chart-b:var(--blue)}
+html[data-theme="synthwave"] .monitor-section>h2{font:700 12px/1.3 var(--disp);letter-spacing:.18em;color:var(--ink2);margin-bottom:12px;display:flex;align-items:center;gap:10px}
+html[data-theme="synthwave"] .monitor-section>h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 70%,transparent),transparent)}
+html[data-theme="synthwave"] .monitor-section>h2::before{content:"";width:8px;height:8px;border-radius:2px;transform:rotate(45deg);background:var(--c);box-shadow:0 0 10px var(--c)}
+html[data-theme="synthwave"] .monitor-section .metric-grid{gap:16px}
+html[data-theme="synthwave"] .metric-card,html[data-theme="synthwave"] .day-card{--c:var(--blue);border-radius:14px;padding:16px 18px;border:1px solid transparent;
+  background:var(--card) padding-box,linear-gradient(160deg,color-mix(in srgb,var(--c) 60%,transparent),rgba(165,138,255,.2) 50%,rgba(255,114,214,.28)) border-box;box-shadow:0 12px 26px -20px #000}
+html[data-theme="synthwave"] .monitor-section .metric-card{--c:inherit}
+html[data-theme="synthwave"] .metric-card.expandable:hover{filter:brightness(1.1)}
+html[data-theme="synthwave"] .metric-head{align-items:center;margin-bottom:4px}
+html[data-theme="synthwave"] .metric-head h3{font:700 12.5px/1.2 var(--disp);letter-spacing:.16em;color:var(--ink2)}
+html[data-theme="synthwave"] .metric-value{font:800 30px/1 var(--disp);font-style:italic;color:#fff;letter-spacing:0;white-space:nowrap;padding-right:3px;
+  background:linear-gradient(180deg,#fff 0 46%,var(--chart-a) 54%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--chart-a) 36%,transparent))}
+html[data-theme="synthwave"] .metric-value .unit{font:600 13px/1 var(--font);font-style:normal;color:var(--ink2);-webkit-text-fill-color:var(--ink2)}
+html[data-theme="synthwave"] .metric-head .unit{font-size:12.5px;color:var(--ink2)}
+html[data-theme="synthwave"] .metric-readout{font-size:12px;color:var(--ink3)}
+html[data-theme="synthwave"] .metric-badge{border-radius:99px;padding:2px 10px;border:1px solid rgba(255,114,214,.35);color:var(--ink2)}
+html[data-theme="synthwave"] .metric-badge.warn{color:var(--amber);border-color:var(--amber);background:rgba(255,216,74,.08)}
+html[data-theme="synthwave"] .metric-badge.crit{color:#ff8592;border-color:var(--danger);background:rgba(255,75,95,.1)}
+html[data-theme="synthwave"] .metric-badge.warn::before{content:"▲ "}
+html[data-theme="synthwave"] .metric-badge.crit::before{content:"◆ "}
+html[data-theme="synthwave"] .metric-card .chevron{color:var(--ink2)}
+
+html[data-theme="synthwave"] .metric-chart .line{stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 0 4px var(--chart-a))}
+html[data-theme="synthwave"] .metric-chart path.line:nth-of-type(4){filter:drop-shadow(0 0 4px var(--chart-b))}
+html[data-theme="synthwave"] .metric-chart .area{opacity:.16}
+html[data-theme="synthwave"] .metric-chart .baseline{stroke:rgba(255,114,214,.35)}
+html[data-theme="synthwave"] .metric-chart .gridline{stroke:rgba(255,114,214,.2)}
+html[data-theme="synthwave"] .metric-legend{color:var(--ink2)}
+html[data-theme="synthwave"] .metric-legend i{height:3px;border-radius:2px;box-shadow:0 0 6px currentColor}
+html[data-theme="synthwave"] .metric-detail{border-top:1px solid rgba(255,114,214,.2)}
+html[data-theme="synthwave"] .detail-label,html[data-theme="synthwave"] .core-group-label{color:var(--ink3);letter-spacing:.1em}
+html[data-theme="synthwave"] .day-chart path{filter:drop-shadow(0 0 4px var(--chart-a))}
+html[data-theme="synthwave"] .day-head strong{font:700 12px/1.2 var(--disp);color:var(--c);letter-spacing:.16em}
+html[data-theme="synthwave"] .day-stats b{color:#fff}
+
+html[data-theme="synthwave"] .core-bars{gap:3px}
+html[data-theme="synthwave"] .core-bars i{border-radius:2px 2px 0 0;background:linear-gradient(0deg,rgba(11,5,32,.5),var(--chart-a));box-shadow:0 0 8px -1px var(--chart-a)}
+html[data-theme="synthwave"] .core-schematic .core-bars i{width:8px}
+
+html[data-theme="synthwave"] .metric-card .stat-row{gap:8px;background:transparent;border:0}
+html[data-theme="synthwave"] .stat-cell{background:rgba(255,255,255,.04);border:1px solid rgba(255,114,214,.22);border-radius:10px;padding:8px 12px}
+html[data-theme="synthwave"] .stat-cell b{font:800 17px/1.2 var(--disp);font-style:italic;color:#fff;white-space:nowrap}
+html[data-theme="synthwave"] .stat-cell span{color:var(--ink3);letter-spacing:.1em}
+html[data-theme="synthwave"] .stat-cell.warn b{color:var(--amber)}
+
+html[data-theme="synthwave"] .fan-panel{border-top:1px solid rgba(255,114,214,.2)}
+html[data-theme="synthwave"] .fan-meter .quota-track{height:8px;margin:2px 4px 0 0}
+html[data-theme="synthwave"] .fan-meter b{color:#fff;white-space:nowrap}
+html[data-theme="synthwave"] .fan-actions strong{color:var(--blue)}
+
+html[data-theme="synthwave"] .proc-head{letter-spacing:.1em;color:var(--ink3)}
+html[data-theme="synthwave"] .proc-head .sorted,html[data-theme="synthwave"] .proc-val.sorted{color:#fff;font-weight:700}
+html[data-theme="synthwave"] .proc-row{border-top:1px solid rgba(255,114,214,.14);padding:6px 0}
+html[data-theme="synthwave"] .proc-cpu{font-weight:700;color:#fff}
+html[data-theme="synthwave"] .metric-table th{color:var(--ink3);letter-spacing:.1em;border-bottom:1px solid rgba(255,114,214,.3)}
+html[data-theme="synthwave"] .metric-table td{border-bottom:1px solid rgba(255,114,214,.14);color:#fff}
+html[data-theme="synthwave"] .metric-table td:first-child{color:var(--ink2)}
+html[data-theme="synthwave"] .metric-empty{color:var(--ink2)}
+html[data-theme="synthwave"] .day-axis{color:var(--ink3)}
+
+/* ═══ 5. Écrans ══════════════════════════════════════════════════════════════ */
+html[data-theme="synthwave"] .display-grid{grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;margin-top:16px}
+html[data-theme="synthwave"] .display-card{--c:var(--blue);padding:18px 20px 20px;border-radius:15px;border:1px solid transparent;
+  background:var(--card) padding-box,linear-gradient(160deg,color-mix(in srgb,var(--c) 70%,transparent),rgba(165,138,255,.2) 55%,rgba(255,154,74,.3)) border-box;box-shadow:0 14px 30px -22px #000}
+html[data-theme="synthwave"] .display-card:nth-child(2n){--c:var(--purple)}
+html[data-theme="synthwave"] .display-card:nth-child(3n){--c:var(--sun)}
+html[data-theme="synthwave"] .display-head{margin-bottom:16px}
+html[data-theme="synthwave"] .display-name{font-size:15.5px;font-weight:700;color:#fff;overflow-wrap:anywhere}
+html[data-theme="synthwave"] .display-badge{flex:none;font:700 10.5px/1 var(--disp);letter-spacing:.14em;color:#fff;border:1px solid var(--c);border-radius:99px;padding:4px 11px;background:color-mix(in srgb,var(--c) 14%,transparent)}
+html[data-theme="synthwave"] .display-badge.builtin{color:#fff;border-color:var(--c)}
+html[data-theme="synthwave"] .display-unavailable{color:var(--ink3);font-size:12.5px}
+html[data-theme="synthwave"] .brightness-row{gap:16px}
+html[data-theme="synthwave"] .brightness-value{width:auto;min-width:64px;font:800 22px/1 var(--disp);font-style:italic;color:#fff;white-space:nowrap}
+
+/* Curseurs : rail évidé, remplissage par l'ombre géante du pouce (l'input clippe en overflow:hidden),
+   pouce en losange clair. */
+html[data-theme="synthwave"] .brightness-slider,html[data-theme="synthwave"] .b-slider{--c:var(--blue);height:12px;border-radius:99px;overflow:hidden;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,114,214,.3)}
+html[data-theme="synthwave"] .display-card .brightness-slider{--c:inherit}
+html[data-theme="synthwave"] .brightness-slider::-webkit-slider-thumb,html[data-theme="synthwave"] .b-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:12px;height:12px;margin-top:-1px;border-radius:50%;background:#fff;border:0;box-shadow:-1200px 0 0 1194px var(--c),0 0 10px 1px #fff}
+html[data-theme="synthwave"] .brightness-slider:disabled,html[data-theme="synthwave"] .b-slider:disabled{opacity:.4}
+
+/* ═══ 6. Réglages ════════════════════════════════════════════════════════════ */
+html[data-theme="synthwave"] .settings-layout{gap:28px;margin-top:22px;grid-template-columns:178px minmax(0,1fr)}
+html[data-theme="synthwave"] .settings-nav{gap:4px;top:6px}
+html[data-theme="synthwave"] .settings-nav button{padding:9px 14px;border:1px solid transparent;border-radius:10px;font-size:14px;font-weight:500;color:var(--ink2)}
+html[data-theme="synthwave"] .settings-nav button:hover{background:rgba(255,114,214,.09);border-color:rgba(255,114,214,.22);color:#fff}
+html[data-theme="synthwave"] .settings-nav button.on{color:#fff;font-weight:700;border-color:rgba(255,114,214,.5);background:linear-gradient(90deg,rgba(255,114,214,.24),rgba(138,98,255,.08) 75%,transparent);box-shadow:inset 3px 0 0 var(--purple)}
+html[data-theme="synthwave"] .settings-nav button.on::before{display:none}
+html[data-theme="synthwave"] .settings-pane-head{margin-bottom:16px;align-items:center}
+html[data-theme="synthwave"] .settings-pane-head h2{font:800 22px/1.15 var(--disp);font-style:italic;letter-spacing:.03em;text-transform:uppercase;color:#fff;margin-bottom:4px}
+html[data-theme="synthwave"] .settings-pane-head p{font-size:12.5px;color:var(--ink2)}
+
+html[data-theme="synthwave"] .settings-pane .settings{gap:14px}
+html[data-theme="synthwave"] .settings-pane .setting{--c:var(--purple);padding:16px 20px;border-radius:14px;border:1px solid transparent;gap:20px;
+  background:var(--card) padding-box,linear-gradient(160deg,rgba(255,114,214,.5),rgba(165,138,255,.16) 55%,rgba(63,230,255,.28)) border-box;box-shadow:0 12px 26px -20px #000}
+html[data-theme="synthwave"] .settings-pane .setting-copy strong{font-size:15px;font-weight:700;color:#fff;margin-bottom:4px}
+html[data-theme="synthwave"] .settings-pane .setting-copy small{font-size:12.5px;color:var(--ink2);line-height:1.55}
+html[data-theme="synthwave"] .setting-state{font-size:12.5px;color:var(--ink2)}
+html[data-theme="synthwave"] .setting-state.ok{color:var(--green);font-weight:600}
+html[data-theme="synthwave"] .settings-pane .setting>.button{--c:var(--purple)}
+html[data-theme="synthwave"] .settings-pane .setting>.button.on{--c:var(--green)}
+html[data-theme="synthwave"] .settings-pane .setting>.button:not(.on){color:var(--ink2);box-shadow:none;background:linear-gradient(#150833,#150833) padding-box,linear-gradient(135deg,rgba(185,166,224,.55),rgba(185,166,224,.3)) border-box}
+html[data-theme="synthwave"] .settings-pane .setting>.button:not(.on):hover{color:#fff;background:linear-gradient(rgba(255,114,214,.12),rgba(255,114,214,.12)),linear-gradient(#150833,#150833) padding-box,linear-gradient(135deg,var(--purple),rgba(165,138,255,.5)) border-box;background-clip:border-box,padding-box,border-box}
+html[data-theme="synthwave"] .connection-note{color:var(--ink2)}
+
+html[data-theme="synthwave"] .widget-config{gap:10px}
+html[data-theme="synthwave"] .wc-toggle{min-width:118px;padding:5px 14px;border:1px solid rgba(185,166,224,.45);color:var(--ink2);border-radius:9px}
+html[data-theme="synthwave"] .wc-toggle.on{color:#fff;border-color:var(--green);background:rgba(71,242,196,.1);box-shadow:0 0 14px -6px var(--green)}
+html[data-theme="synthwave"] .wc-toggle.on:hover{background:rgba(71,242,196,.18)}
+html[data-theme="synthwave"] .wc-dot{width:9px;height:9px;border-width:1.5px}
+html[data-theme="synthwave"] .wc-toggle.on .wc-dot{box-shadow:0 0 8px 1px var(--green);color:var(--green)}
+html[data-theme="synthwave"] .wc-move{border:1px solid rgba(255,114,214,.34);border-radius:9px;padding:2px;gap:2px}
+html[data-theme="synthwave"] .wc-move .seg{padding:4px 10px}
+html[data-theme="synthwave"] .wc-shapes .seg{padding:4px 11px;font-size:12.5px}
+html[data-theme="synthwave"] .wc-swatch{width:18px;height:18px;border:1px solid rgba(255,255,255,.4)}
+html[data-theme="synthwave"] .wc-swatch.on{box-shadow:0 0 0 2px #150833,0 0 0 3.5px #fff,0 0 12px 3px rgba(255,255,255,.4)}
+html[data-theme="synthwave"] .wc-sub{border-left:2px solid rgba(255,114,214,.3)}
+html[data-theme="synthwave"] .wc-sublabel{color:var(--ink3);letter-spacing:.12em}
+
+html[data-theme="synthwave"] .theme-swatch{border:1px solid rgba(185,166,224,.3);border-radius:11px;background:rgba(255,255,255,.04);padding:8px 12px;color:var(--ink2);font-size:13px}
+html[data-theme="synthwave"] .theme-swatch:hover{background:rgba(255,114,214,.1);border-color:rgba(255,114,214,.5);color:#fff}
+html[data-theme="synthwave"] .theme-swatch.on{color:#fff;font-weight:700;border-color:var(--purple);background:linear-gradient(90deg,rgba(255,114,214,.22),rgba(138,98,255,.1));box-shadow:0 0 16px -6px var(--purple)}
+html[data-theme="synthwave"] .theme-swatch .dot{width:10px;height:10px;box-shadow:0 0 6px 0 rgba(255,255,255,.3)}
+
+html[data-theme="synthwave"] .bar-preview{border:1px solid rgba(255,114,214,.3);border-radius:12px;background:rgba(255,255,255,.04)}
+html[data-theme="synthwave"] .bar-item{color:var(--ink2)}
+html[data-theme="synthwave"] .bar-chip{border-color:rgba(255,114,214,.4);color:#fff}
+html[data-theme="synthwave"] .quota-icon-row,html[data-theme="synthwave"] .quota-block,html[data-theme="synthwave"] .account-add,html[data-theme="synthwave"] .pin-list{border-top-color:rgba(255,114,214,.2)}
+html[data-theme="synthwave"] .field-select{background:#150833;border-color:rgba(255,114,214,.4);border-radius:9px;color:#fff}
+html[data-theme="synthwave"] .field-note{color:var(--ink3)}
+html[data-theme="synthwave"] .icon-style{border:1px solid rgba(255,114,214,.28);border-radius:9px;background:rgba(255,255,255,.04)}
+html[data-theme="synthwave"] .icon-style:hover{background:rgba(255,114,214,.14)}
+html[data-theme="synthwave"] .icon-style.on{border-color:var(--purple);background:rgba(255,114,214,.18);box-shadow:0 0 12px -3px var(--purple)}
+
+/* Comptes (onglet Comptes des réglages) */
+html[data-theme="synthwave"] .connections{gap:16px}
+html[data-theme="synthwave"] .connection-panel{padding:20px 22px 22px;border-radius:16px;border:1px solid transparent;
+  background:radial-gradient(120% 50% at 50% -10%,color-mix(in srgb,var(--provider) 13%,transparent),transparent 60%) padding-box,linear-gradient(180deg,#1b0b3e,#12072d) padding-box,linear-gradient(160deg,color-mix(in srgb,var(--provider) 80%,transparent),rgba(165,138,255,.2) 50%,rgba(255,154,74,.3)) border-box;
+  box-shadow:0 16px 36px -24px #000}
+html[data-theme="synthwave"] .connection-panel:before{left:24px;right:24px;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,var(--provider) 30%,var(--sun) 70%,transparent);box-shadow:0 0 12px var(--provider)}
+html[data-theme="synthwave"] .connection-panel h3,html[data-theme="synthwave"] .connection-panel:nth-child(2) h3{font:800 17px/1.2 var(--disp);font-style:italic;text-transform:uppercase;letter-spacing:.1em;color:#fff}
+html[data-theme="synthwave"] .connection-panel>p{color:var(--ink2);font-size:12.5px}
+html[data-theme="synthwave"] .account-copy small{color:var(--ink3);font-size:12.5px}
+html[data-theme="synthwave"] .account-add small{color:var(--ink2)}
+html[data-theme="synthwave"] .account-menu summary{border:1px solid rgba(255,114,214,.5);border-radius:9px;padding:3px 13px;font-size:16px;line-height:1.2;color:#fff}
+html[data-theme="synthwave"] .account-menu-items{background:#160837;border:1px solid rgba(255,114,214,.55);border-radius:12px;box-shadow:0 0 22px -8px var(--purple),0 18px 36px rgba(0,0,0,.65)}
+html[data-theme="synthwave"] .account-menu-items .account-action{text-align:center}
+html[data-theme="synthwave"] .shortcut-row kbd{background:rgba(255,255,255,.06);border:1px solid rgba(185,166,224,.5);border-radius:7px;color:#fff;box-shadow:0 2px 0 rgba(185,166,224,.25)}
+html[data-theme="synthwave"] .storage-summary strong{color:#fff}
+html[data-theme="synthwave"] .api-figures strong{color:#fff}
+html[data-theme="synthwave"] .api-figures small{color:var(--ink3)}
+html[data-theme="synthwave"] .api-figures strong.warning{color:var(--amber)}
+html[data-theme="synthwave"] .api-figures strong.critical{color:#ff8592}
+html[data-theme="synthwave"] .api-rail{height:8px;border-radius:3px;background:rgba(255,255,255,.07);transform:skewX(-20deg);margin-right:4px}
+html[data-theme="synthwave"] .api-rail i{border-radius:2px 0 0 2px;box-shadow:0 0 10px -1px var(--provider)}
+html[data-theme="synthwave"] .api-rail.warning i{box-shadow:0 0 10px -1px var(--amber)}
+html[data-theme="synthwave"] .api-rail.critical i{box-shadow:0 0 10px -1px var(--danger)}
+html[data-theme="synthwave"] .api-foot{border:1px solid rgba(255,114,214,.3);border-radius:14px;background:var(--card)}
+html[data-theme="synthwave"] .api-foot p{color:var(--ink2)}
+
+/* ═══ 7. Popover (480 × 640) ═════════════════════════════════════════════════ */
+html[data-theme="synthwave"] .popover{box-shadow:inset 0 0 0 1px rgba(255,114,214,.5),inset 0 1px 0 rgba(255,255,255,.12)}
+html[data-theme="synthwave"] .providers{gap:10px;padding:12px 12px 8px}
+html[data-theme="synthwave"] .providers::-webkit-scrollbar{width:0}
+
+html[data-theme="synthwave"] #providers .quota-card{padding:11px 13px 10px;border-radius:15px;
+  background:radial-gradient(120% 55% at 50% -8%,color-mix(in srgb,var(--lv) 15%,transparent),transparent 62%) padding-box,var(--card) padding-box,var(--edge) border-box}
+html[data-theme="synthwave"] #providers .quota-main{gap:4px}
+html[data-theme="synthwave"] #providers .quota-main .value{font-size:44px}
+html[data-theme="synthwave"] #providers .quota-card footer{padding-top:6px}
+html[data-theme="synthwave"] #providers .quota-card header{margin-bottom:4px;gap:5px}
+html[data-theme="synthwave"] .provider-name{font:800 14px/1.1 var(--disp);font-style:italic;letter-spacing:.14em;text-transform:uppercase;color:#fff;display:flex;align-items:center;gap:8px}
+html[data-theme="synthwave"] .provider-name::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--provider);box-shadow:0 0 0 3px color-mix(in srgb,var(--provider) 24%,transparent),0 0 12px var(--provider)}
+html[data-theme="synthwave"] .account-name{font-size:12px;color:var(--ink3)}
+html[data-theme="synthwave"] .provider-picker{background:#150833;border:1px solid rgba(255,114,214,.4);border-radius:9px;padding:4px 10px;color:#fff;font-size:12px}
+html[data-theme="synthwave"] .value{font:800 44px/1 var(--disp);font-style:italic;letter-spacing:-.01em;white-space:nowrap;padding-right:3px;
+  background:linear-gradient(180deg,#fff 0 46%,var(--lv) 54%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 12px color-mix(in srgb,var(--lv) 40%,transparent))}
+html[data-theme="synthwave"] .value.critical,html[data-theme="synthwave"] .value.warning{color:transparent}
+html[data-theme="synthwave"] .value .unit{font-size:.42em;font-weight:700;opacity:1;margin-left:.1em}
+html[data-theme="synthwave"] .value.empty-value{opacity:.55}
+html[data-theme="synthwave"] .quota-label{font-size:12px;color:var(--ink2)}
+html[data-theme="synthwave"] .quota-side .primary-rail{margin-top:7px;margin-bottom:6px}
+html[data-theme="synthwave"] .reset{font-size:12.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-theme="synthwave"] .session-row{gap:5px 8px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,114,214,.2);color:var(--ink2)}
+html[data-theme="synthwave"] .session-row>b{color:var(--lv);font-weight:800}
+html[data-theme="synthwave"] .session-row[data-level="warn"]>b::before{content:"▲ "}
+html[data-theme="synthwave"] .session-row[data-level="crit"]>b::before{content:"◆ "}
+html[data-theme="synthwave"] .session-row>small{color:var(--ink3);white-space:nowrap}
+html[data-theme="synthwave"] .rail.thin{height:8px;margin:0 4px 0 0}
+html[data-theme="synthwave"] .rail.thin i::after{width:2px}
+html[data-theme="synthwave"] .account-note{color:var(--ink3);font-size:12px}
+html[data-theme="synthwave"] .account-note.stale{color:var(--amber);font-weight:700}
+html[data-theme="synthwave"] .account-note.live{color:var(--green)}
+html[data-theme="synthwave"] #providers .quota-card .account-note{white-space:normal;overflow:visible;text-overflow:clip}
+html[data-theme="synthwave"] .quota-card .who{color:#fff;font-weight:700}
+html[data-theme="synthwave"] .quota-card .extra-credits{border-top:1px solid rgba(255,114,214,.2);padding:7px 12px}
+html[data-theme="synthwave"] .extra-credits span,html[data-theme="synthwave"] .extra-credits small{color:var(--ink3)}
+html[data-theme="synthwave"] .popup-notice{border-bottom:1px solid var(--amber);background:rgba(255,216,74,.08)}
+html[data-theme="synthwave"] .popup-notice button{border:1px solid var(--amber);border-radius:8px;padding:3px 12px;color:#fff}
+
+/* Liste des comptes et crédits API */
+html[data-theme="synthwave"] .account-list,html[data-theme="synthwave"] .api-credits{border:1px solid transparent;border-radius:14px;background:var(--card) padding-box,linear-gradient(160deg,rgba(255,114,214,.5),rgba(165,138,255,.16) 55%,rgba(63,230,255,.3)) border-box}
+html[data-theme="synthwave"] .account-list>header,html[data-theme="synthwave"] .api-credits>header{font:700 11.5px/1.3 var(--disp);letter-spacing:.16em;color:var(--sun)}
+html[data-theme="synthwave"] .al-row,html[data-theme="synthwave"] .api-row{border-top-color:rgba(255,114,214,.16)}
+html[data-theme="synthwave"] .al-row>i{box-shadow:0 0 8px var(--provider)}
+html[data-theme="synthwave"] .al-row>small,html[data-theme="synthwave"] .api-row>small{color:var(--ink3)}
+html[data-theme="synthwave"] .al-row>b.warning,html[data-theme="synthwave"] .api-row>b.warning{color:var(--amber)}
+html[data-theme="synthwave"] .al-row>b.critical,html[data-theme="synthwave"] .api-row>b.critical{color:#ff8592}
+html[data-theme="synthwave"] .al-row.off>span,html[data-theme="synthwave"] .al-row.off>b{color:var(--ink3)}
+html[data-theme="synthwave"] .api-row>span{color:var(--provider);filter:brightness(1.1)}
+html[data-theme="synthwave"] .api-row>small.error{color:var(--amber)}
+
+/* Ventilateurs */
+html[data-theme="synthwave"] .fans{padding:9px 14px 9px;border-top:1px solid rgba(255,114,214,.3);background:rgba(15,6,36,.9)}
+html[data-theme="synthwave"] .fan-head strong{font:700 11.5px/1 var(--disp);letter-spacing:.18em;text-transform:uppercase;color:var(--sun)}
+html[data-theme="synthwave"] .fan-head span{color:var(--ink2)}
+html[data-theme="synthwave"] .fan-row .account-action{--c:var(--blue);padding:5px 14px}
+html[data-theme="synthwave"] .fan-state{color:var(--ink2)}
+html[data-theme="synthwave"] .fan-state.on{color:var(--blue);font-weight:700}
+html[data-theme="synthwave"] .fan-note{color:var(--ink3)}
+html[data-theme="synthwave"] .fan-row .seg{padding:3px 8px;overflow:visible}
+
+/* Outils du Mac : en-tête repliable, tuiles de mesure, luminosité, boutons. */
+html[data-theme="synthwave"] .mac-tools{background:rgba(15,6,36,.9);border-top:1px solid rgba(255,114,214,.3)}
+html[data-theme="synthwave"] .mac-tools>summary{padding:7px 14px;font:700 11.5px/1.2 var(--disp);letter-spacing:.18em;text-transform:uppercase;color:var(--sun)}
+html[data-theme="synthwave"] .metrics{gap:6px;padding:2px 12px 7px;background:transparent;border-top:0}
+html[data-theme="synthwave"] .mtile{--c:var(--blue);padding:6px 9px 6px;border-radius:11px;border:1px solid transparent;
+  background:var(--card) padding-box,linear-gradient(160deg,color-mix(in srgb,var(--c) 70%,transparent),rgba(165,138,255,.16) 60%) border-box}
+html[data-theme="synthwave"] .mtile:nth-child(2){--c:var(--purple)}
+html[data-theme="synthwave"] .mtile:nth-child(3){--c:var(--violet)}
+html[data-theme="synthwave"] .mtile:nth-child(4){--c:var(--green)}
+html[data-theme="synthwave"] .mtile:nth-child(5){--c:var(--sun)}
+html[data-theme="synthwave"] .mtile .mlabel{font:700 10.5px/1.2 var(--disp);letter-spacing:.12em;color:var(--ink2);white-space:nowrap}
+html[data-theme="synthwave"] .mtile .mvalue{font:800 15px/1.2 var(--disp);font-style:italic;color:#fff;margin:2px 0 4px}
+html[data-theme="synthwave"] .mtile .line{stroke:var(--c);stroke-width:1.6;filter:drop-shadow(0 0 3px var(--c))}
+html[data-theme="synthwave"] .mtile .line:nth-of-type(2){stroke:var(--purple);filter:drop-shadow(0 0 3px var(--purple))}
+
+html[data-theme="synthwave"] .brightness{gap:6px;padding:2px 12px 8px;background:transparent;border-top:0}
+html[data-theme="synthwave"] .b-row{gap:10px;padding:2px 2px;background:transparent}
+html[data-theme="synthwave"] .b-sun{color:var(--sun);filter:drop-shadow(0 0 4px var(--sun))}
+html[data-theme="synthwave"] .b-label{color:var(--ink2)}
+html[data-theme="synthwave"] .b-slider{height:10px;--c:var(--blue)}
+html[data-theme="synthwave"] .b-slider::-webkit-slider-thumb{width:10px;height:10px;margin-top:-1px;box-shadow:-1200px 0 0 1195px var(--c),0 0 8px 1px #fff}
+html[data-theme="synthwave"] .b-value{color:#fff;width:40px}
+
+html[data-theme="synthwave"] .tools{gap:8px;padding:2px 12px 8px;background:transparent;border-top:0}
+html[data-theme="synthwave"] .tool{--ic:var(--blue);flex-direction:row;justify-content:center;gap:8px;padding:7px 6px;border-radius:11px;color:var(--ink2);
+  border:1px solid color-mix(in srgb,var(--ic) 45%,transparent);background:transparent;letter-spacing:.03em;font-size:12.5px;white-space:nowrap}
+html[data-theme="synthwave"] .tool:nth-child(2){--ic:var(--violet)}
+html[data-theme="synthwave"] .tool:nth-child(3){--ic:var(--purple)}
+html[data-theme="synthwave"] .tool .glyph{color:var(--ic);filter:drop-shadow(0 0 4px var(--ic));flex:none;width:auto}
+html[data-theme="synthwave"] .tool:hover{background:rgba(255,114,214,.1);color:#fff}
+html[data-theme="synthwave"] .tool.on{color:#fff;font-weight:700;border-color:var(--ic);background:color-mix(in srgb,var(--ic) 16%,transparent);box-shadow:0 0 14px -4px var(--ic)}
+
+/* Pied */
+html[data-theme="synthwave"] .footer{border-top:1px solid rgba(255,114,214,.5);background:rgba(10,4,26,.94);box-shadow:0 -8px 24px -14px rgba(255,114,214,.5);padding:7px 12px}
+html[data-theme="synthwave"] .footer-row > button.sync{color:var(--ink2);font-size:12.5px}
+html[data-theme="synthwave"] .footer-row > button{border:1px solid transparent;border-radius:9px;padding:5px 14px;color:var(--ink2)}
+html[data-theme="synthwave"] .footer-row > button:hover{background:rgba(255,114,214,.12);border-color:rgba(255,114,214,.35);color:#fff}
+html[data-theme="synthwave"] .footer-row > button.go{color:#14052e;font-weight:800;border:0;background:linear-gradient(135deg,#ff72d6,#ff9a4a);box-shadow:0 0 18px -6px #ff72d6}
+html[data-theme="synthwave"] .footer-row > button.go:hover{filter:brightness(1.12);color:#14052e}
+html[data-theme="synthwave"] .footer-row > button[title^="Quitter"]{color:#ff8592!important}
+
+/* ═══ 8. Panneaux des widgets système (widget.html, 264 px) ══════════════════
+   Seuls les jetons et les classes existantes servent : pas de refonte de structure. */
+html[data-theme="synthwave"] .panel{background:radial-gradient(120% 40% at 50% -6%,rgba(255,114,214,.14),transparent 70%),linear-gradient(180deg,#160834,#0f0627)}
+html[data-theme="synthwave"] .head{border-bottom:1px solid transparent;border-image:linear-gradient(90deg,#ff72d6,rgba(165,138,255,.4) 55%,transparent) 1}
+html[data-theme="synthwave"] .head h1{font:800 13px/1.2 var(--disp);font-style:italic;letter-spacing:.14em;color:#fff}
+html[data-theme="synthwave"] .big{font:800 30px/1 var(--disp);font-style:italic;color:#fff;
+  background:linear-gradient(180deg,#fff 0 46%,var(--chart-a) 54%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 8px color-mix(in srgb,var(--chart-a) 36%,transparent));padding-right:2px}
+html[data-theme="synthwave"] .big .u{font:600 12px/1 var(--font);font-style:normal;-webkit-text-fill-color:var(--ink2)}
+html[data-theme="synthwave"] .big .sub{-webkit-text-fill-color:var(--ink3);font-style:normal}
+html[data-theme="synthwave"] .row .k,html[data-theme="synthwave"] .empty{color:var(--ink2)}
+html[data-theme="synthwave"] .section,html[data-theme="synthwave"] .stat span,html[data-theme="synthwave"] .cores .grp .lbl{color:var(--ink3)}
+html[data-theme="synthwave"] .stat-row{border-color:rgba(255,114,214,.25);background:rgba(255,114,214,.18)}
+html[data-theme="synthwave"] .stat{background:#150833}
+html[data-theme="synthwave"] .stat b{font-family:var(--disp);font-weight:800;font-style:italic}
+html[data-theme="synthwave"] .badge{border-radius:99px;color:var(--ink2);border-color:rgba(255,114,214,.4)}
+html[data-theme="synthwave"] .track,html[data-theme="synthwave"] .split{border-color:rgba(255,114,214,.3);background:rgba(255,255,255,.06);border-radius:3px}
+html[data-theme="synthwave"] .track i{background:linear-gradient(90deg,rgba(11,5,32,.5),var(--chart-a) 85%)}
+html[data-theme="synthwave"] .chart .line{filter:drop-shadow(0 0 3px var(--chart-a))}
+html[data-theme="synthwave"] .p .pbar{background:rgba(255,114,214,.2)}
+html[data-theme="synthwave"] .p .pbar i{background:linear-gradient(90deg,rgba(11,5,32,.4),var(--chart-a))}
+html[data-theme="synthwave"] .p .vv,html[data-theme="synthwave"] .vol .vh .vf,html[data-theme="synthwave"] .legend .lg{color:var(--ink2)}
+
+/* ═══ 9. Étroit (fenêtre mini 940), mouvement réduit ═════════════════════════ */
+@media (max-width:970px){
+  html[data-theme="synthwave"] .shell{grid-template-columns:184px 1fr}
+  html[data-theme="synthwave"] .settings-layout{grid-template-columns:1fr;gap:14px}
+  html[data-theme="synthwave"] .settings-nav{flex-direction:row;flex-wrap:wrap}
+  html[data-theme="synthwave"] main{padding:0 22px 24px}
+  html[data-theme="synthwave"] .vitals{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+html[data-theme="synthwave"] .monitor-section .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){html[data-theme="synthwave"] .monitor-section .metric-grid{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){
+  html[data-theme="synthwave"] *{transition:none!important;animation:none!important}
+}
