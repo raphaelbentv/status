@@ -45,6 +45,18 @@ NSArray<NSString *> *TMArrayByMovingItem(NSArray<NSString *> *list, NSString *it
 NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *_Nullable shape,
                                       NSString *_Nullable colorName);
 
+// Débit (octets/s) → 0..1, échelle logarithmique (1 = 100 Mo/s ou plus). Arcs ↓/↑ et sparkline réseau.
+double TMWidgetRateFraction(double bytesPerSec);
+
+// Forme réellement dessinée pour `shape` : elle-même si elle sait représenter la donnée du widget
+// (d'après les champs du readout), sinon la forme naturelle (readout[@"style"]). Vide ou inconnue →
+// forme naturelle.
+NSString *TMWidgetResolvedShape(NSDictionary *readout, NSString *_Nullable shape);
+
+// La forme (après résolution) dessine-t-elle son texte dans l'image ? Alors pas de titre système
+// à côté de l'icône.
+BOOL TMWidgetShapeCarriesText(NSDictionary *readout, NSString *_Nullable shape);
+
 // Lecture d'un widget depuis un snapshot moniteur ({ families: [ { id, now, series } ] }).
 // Retourne un dictionnaire sérialisable :
 //   style     : « bars » | « pie » | « battery » | « twoLine »

@@ -916,8 +916,7 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         item.button.image = TMWidgetImageStyled(readout, shape, color);
         // Le titre système (valeur à côté) n'accompagne que les formes « graphe/jauge » ; les formes
         // qui portent déjà leur texte (twoLine/battery/text) n'ont pas de titre séparé.
-        BOOL shapeCarriesText = [shape isEqual:@"text"] || [shape isEqual:@"twoLine"] || [shape isEqual:@"battery"]
-            || (!shape.length && ([readout[@"style"] isEqual:@"twoLine"] || [readout[@"style"] isEqual:@"battery"]));
+        BOOL shapeCarriesText = TMWidgetShapeCarriesText(readout, shape);
         NSString *title = shapeCarriesText ? @"" : readout[@"title"];
         if ([title length]) {
             item.button.attributedTitle = TMMenuBarTitle(title, readout[@"valueTemplate"],

@@ -107,6 +107,43 @@ static NSInteger TMWidgetSeverity(NSString *widgetId, NSDictionary *snapshot) {
     return 0;
 }
 
+// Arrondi à 1 % : les fractions de détail (parts mémoire, débits) bougent à chaque tick de quelques
+// millièmes ; sans cet arrondi la signature de rendu changerait à 1 Hz pour des pixels identiques.
+static double TMRound2(double v) { return round(MIN(MAX(v, 0), 1) * 100.0) / 100.0; }
+
+// Débit → 0..1 sur une échelle logarithmique (0 = rien, 1 = 100 Mo/s ou plus). Un débit réseau
+// s'étale sur six ordres de grandeur : en linéaire, tout ce qui n'est pas un téléchargement massif
+// resterait collé à zéro. Sert aux arcs ↓/↑ et à la sparkline réseau.
+double TMWidgetRateFraction(double bytesPerSec) {
+    if (!(bytesPerSec > 0)) return 0;
+    const double maxRate = 100.0 * 1024 * 1024;
+    return MIN(1.0, log10(1.0 + bytesPerSec / 1024.0) / log10(1.0 + maxRate / 1024.0));
+}
+
+// Nombre arrondi sans unité (« 43 ») : le chiffre des formes qui le dessinent (anneau chiffré, puce).
+static NSString *TMPlain(NSNumber *value) {
+    return [NSString stringWithFormat:@"%.0f", round(value.doubleValue)];
+}
+
+// Répartition de la RAM en parts du total, dans l'ordre app / système (wired) / compressée / cache.
+// Champs RÉELS du collecteur (appBytes, wiredBytes, compressedBytes, cachedBytes, totalBytes) ;
+// @[] si l'un manque — le dessin retombe alors sur dix segments de charge. Rien n'est déduit ni
+// complété : le reste de l'anneau est la mémoire libre.
+static NSArray<NSNumber *> *TMMemoryParts(NSDictionary *ram) {
+    NSNumber *total = TMNum(ram[@"totalBytes"]);
+    if (!total || total.doubleValue <= 0) return @[];
+    NSMutableArray *parts = [NSMutableArray array];
+    double sum = 0;
+    for (NSString *key in @[@"appBytes", @"wiredBytes", @"compressedBytes", @"cachedBytes"]) {
+        NSNumber *bytes = TMNum(ram[key]);
+        if (!bytes) return @[];
+        double share = TMRound2(bytes.doubleValue / total.doubleValue);
+        sum += share;
+        [parts addObject:@(share)];
+    }
+    return sum <= 1.04 ? parts : @[];  // incohérent (sommes qui débordent) : mieux vaut ne pas dessiner
+}
+
 static NSString *TMPct(NSNumber *value) {
     return value ? [NSString stringWithFormat:@"%.0f %%", round(value.doubleValue)] : @"—";
 }
@@ -129,6 +166,11 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
     NSMutableDictionary *r = [@{ @"style": @"pie", @"hasValue": @NO, @"title": @"", @"value": @"",
                                  @"primary": @"", @"secondary": @"", @"fraction": @0,
                                  @"series": @[], @"charging": @NO,
+                                 // Champs des formes Anneaux / Console (voir l'en-tête) :
+                                 @"widget": widgetId ?: @"", @"numeric": @NO, @"dual": @NO,
+                                 @"chipLabel": @"", @"chipValue": @"", @"chipUnit": @"",
+                                 @"chipKind": @"reservoir", @"autoScale": @NO,
+                                 @"parts": @[], @"rxFraction": @0, @"txFraction": @0,
                                  @"template": templates[@"template"],
                                  @"valueTemplate": templates[@"valueTemplate"],
                                  @"severity": @(TMWidgetSeverity(widgetId, snapshot)) } mutableCopy];
@@ -137,9 +179,12 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         NSString *fam = widgetId, *key = [widgetId isEqual:@"cpu"] ? @"total" : @"usage";
         NSNumber *value = TMNum(TMFamilyNow(snapshot, fam)[key]);
         r[@"style"] = @"bars";
+        r[@"numeric"] = @YES; r[@"chipKind"] = @"spark";
+        r[@"chipLabel"] = [widgetId isEqual:@"cpu"] ? @"CPU" : @"GPU";
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(value);
+            r[@"chipValue"] = TMPlain(value); r[@"chipUnit"] = @"%";
             r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
             r[@"series"] = TMFamilySeries(snapshot, fam, key);
         }
@@ -149,9 +194,11 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         // widget ; absente (aucun compte connecté), l'icône montre son tiret comme les autres.
         NSNumber *value = TMNum(TMFamilyNow(snapshot, widgetId)[@"percent"]);
         r[@"style"] = @"pie";
+        r[@"numeric"] = @YES;
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(@(100 - MIN(100, MAX(0, value.doubleValue))));
+            r[@"chipValue"] = TMPlain(@(100 - MIN(100, MAX(0, value.doubleValue)))); r[@"chipUnit"] = @"%";
             r[@"fraction"] = @(1 - MIN(MAX(value.doubleValue / 100.0, 0), 1));
             NSMutableArray *remainingSeries=[NSMutableArray array];
             for (NSNumber *used in TMFamilySeries(snapshot, widgetId, @"percent"))
@@ -173,20 +220,33 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         }
     } else if ([widgetId isEqual:@"memory"] || [widgetId isEqual:@"disk"]) {
         NSString *fam = [widgetId isEqual:@"memory"] ? @"ram" : @"disk";
-        NSNumber *value = TMNum(TMFamilyNow(snapshot, fam)[@"usedPercent"]);
+        NSDictionary *famNow = TMFamilyNow(snapshot, fam);
+        NSNumber *value = TMNum(famNow[@"usedPercent"]);
         r[@"style"] = @"pie";
+        r[@"numeric"] = @YES;
+        r[@"chipLabel"] = [widgetId isEqual:@"memory"] ? @"MEM" : @"DSK";
         if (value) {
             r[@"hasValue"] = @YES;
             r[@"title"] = r[@"value"] = TMPct(value);
+            r[@"chipValue"] = TMPlain(value); r[@"chipUnit"] = @"%";
             r[@"fraction"] = @(MIN(MAX(value.doubleValue / 100.0, 0), 1));
             r[@"series"] = TMFamilySeries(snapshot, fam, @"usedPercent");
+            if ([widgetId isEqual:@"memory"]) r[@"parts"] = TMMemoryParts(famNow);
         }
     } else if ([widgetId isEqual:@"network"]) {
         NSDictionary *net = TMFamilyNow(snapshot, @"network");
         NSNumber *rx = TMNum(net[@"rxBytesPerSec"]), *tx = TMNum(net[@"txBytesPerSec"]);
         r[@"style"] = @"twoLine";
+        r[@"dual"] = @YES; r[@"chipLabel"] = TMT(@"shape.chipNet"); r[@"chipKind"] = @"spark";
         if (rx || tx) {
             r[@"hasValue"] = @YES;
+            r[@"rxFraction"] = @(TMRound2(TMWidgetRateFraction(rx.doubleValue)));
+            r[@"txFraction"] = @(TMRound2(TMWidgetRateFraction(tx.doubleValue)));
+            // Série ↓ ramenée à 0..100 sur la même échelle log que les arcs.
+            NSMutableArray *rates = [NSMutableArray array];
+            for (NSNumber *sample in TMFamilySeries(snapshot, @"network", @"rxBytesPerSec"))
+                [rates addObject:@(round(100.0 * TMWidgetRateFraction(sample.doubleValue)))];
+            r[@"series"] = rates;
             r[@"primary"] = [@"↓ " stringByAppendingString:TMFmtRate(rx.doubleValue)];
             r[@"secondary"] = [@"↑ " stringByAppendingString:TMFmtRate(tx.doubleValue)];
             r[@"value"] = r[@"primary"];
@@ -194,8 +254,11 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
     } else if ([widgetId isEqual:@"temperature"]) {
         NSNumber *temp = TMNum(TMFamilyNow(snapshot, @"sensors")[@"tempC"]);
         r[@"style"] = @"twoLine";
+        r[@"numeric"] = @YES; r[@"chipLabel"] = @"TEMP"; r[@"chipKind"] = @"spark"; r[@"autoScale"] = @YES;
         if (temp) {
             r[@"hasValue"] = @YES;
+            r[@"chipValue"] = TMPlain(temp); r[@"chipUnit"] = @"°C";
+            r[@"series"] = TMFamilySeries(snapshot, @"sensors", @"tempC");
             r[@"primary"] = r[@"value"] = [NSString stringWithFormat:@"%.0f°", round(temp.doubleValue)];
             r[@"fraction"] = @(MIN(MAX(temp.doubleValue / 100.0, 0), 1));  // 0-100 °C pour l'anneau
             NSNumber *watts = TMNum(TMFamilyNow(snapshot, @"battery")[@"powerWatts"]);
@@ -205,7 +268,9 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
         NSDictionary *b = TMFamilyNow(snapshot, @"battery");
         NSNumber *pct = TMNum(b[@"percent"]);
         r[@"style"] = @"battery";
+        r[@"numeric"] = @YES; r[@"chipLabel"] = @"BAT";
         if (pct) {
+            r[@"chipValue"] = TMPlain(pct); r[@"chipUnit"] = @"%";
             BOOL charging = [TMNum(b[@"charging"]) boolValue];
             BOOL full = [TMNum(b[@"fullyCharged"]) boolValue];
             long long remaining = TMNum(b[@"minutesRemaining"]).longLongValue;
@@ -253,13 +318,74 @@ static NSColor *TMResolveWidgetInk(NSString *colorName, NSInteger severity, BOOL
     return NSColor.blackColor;
 }
 
-static void TMDrawDash(NSColor *ink, CGFloat cx, CGFloat cy) {
+static void TMDrawDashLen(NSColor *ink, CGFloat cx, CGFloat cy, CGFloat half) {
     NSBezierPath *dash = [NSBezierPath bezierPath];
     dash.lineWidth = 1.6; dash.lineCapStyle = NSLineCapStyleRound;
-    [dash moveToPoint:NSMakePoint(cx - 2.4, cy)];
-    [dash lineToPoint:NSMakePoint(cx + 2.4, cy)];
+    [dash moveToPoint:NSMakePoint(cx - half, cy)];
+    [dash lineToPoint:NSMakePoint(cx + half, cy)];
     [[ink colorWithAlphaComponent:0.55] setStroke];
     [dash stroke];
+}
+
+static void TMDrawDash(NSColor *ink, CGFloat cx, CGFloat cy) { TMDrawDashLen(ink, cx, cy, 2.4); }
+
+// Image vectorielle : le dessin est rejoué à la résolution réelle de l'écran (pas de bitmap figé
+// à l'échelle 1× ou 2×), donc des arcs nets partout. Réservée aux formes qui n'ont pas besoin de
+// l'effacement (blend clear) de l'éclair de la pile, dessiné, lui, dans un bitmap.
+static NSImage *TMVectorImage(NSSize size, BOOL isTemplate, void (^draw)(void)) {
+    NSImage *image = [NSImage imageWithSize:size flipped:NO drawingHandler:^BOOL(NSRect dst) {
+        draw();
+        return YES;
+    }];
+    image.template = isTemplate;
+    return image;
+}
+
+static CGFloat TMUnit(double v) { return (CGFloat)(v < 0 ? 0 : v > 1 ? 1 : v); }
+
+// Opacité de la piste (partie « vide ») d'une forme : un peu plus marquée en template, où
+// l'opacité est la seule nuance disponible.
+static CGFloat TMTrackAlpha(BOOL isTemplate) { return isTemplate ? 0.3 : 0.28; }
+
+// Arc de cercle tracé dans le sens horaire de startDeg à endDeg (degrés AppKit : 0 = est, 90 = midi).
+static void TMStrokeArc(NSPoint c, CGFloat radius, CGFloat startDeg, CGFloat endDeg, CGFloat lineWidth,
+                        NSLineCapStyle cap, NSColor *color) {
+    if (startDeg - endDeg < 0.05) return;
+    NSBezierPath *arc = [NSBezierPath bezierPath];
+    [arc appendBezierPathWithArcWithCenter:c radius:radius startAngle:startDeg endAngle:endDeg clockwise:YES];
+    arc.lineWidth = lineWidth; arc.lineCapStyle = cap;
+    [color setStroke];
+    [arc stroke];
+}
+
+static void TMStrokeCircle(NSPoint c, CGFloat radius, CGFloat lineWidth, NSColor *color) {
+    NSBezierPath *circle = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - radius, c.y - radius, 2 * radius, 2 * radius)];
+    circle.lineWidth = lineWidth;
+    [color setStroke];
+    [circle stroke];
+}
+
+static void TMFillCircle(NSPoint c, CGFloat radius, NSColor *color) {
+    [color setFill];
+    [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - radius, c.y - radius, 2 * radius, 2 * radius)] fill];
+}
+
+// Texte posé par sa ligne de base (et non par sa boîte typographique) : c'est ce qui permet de
+// centrer un chiffre sur la hauteur de ses chiffres plutôt que sur celle de la police.
+static void TMDrawTextAt(NSString *text, NSFont *font, NSColor *color, CGFloat x, CGFloat baseline,
+                         NSTextAlignment alignment, CGFloat kern) {
+    if (!text.length) return;
+    NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color,
+                             NSKernAttributeName: @(kern) };
+    NSSize size = [text sizeWithAttributes:attrs];
+    CGFloat left = alignment == NSTextAlignmentCenter ? x - size.width / 2
+                 : alignment == NSTextAlignmentRight ? x - size.width : x;
+    [text drawAtPoint:NSMakePoint(left, baseline + font.descender) withAttributes:attrs];
+}
+
+static CGFloat TMTextWidth(NSString *text, NSFont *font, CGFloat kern) {
+    if (!text.length) return 0;
+    return [text sizeWithAttributes:@{ NSFontAttributeName: font, NSKernAttributeName: @(kern) }].width;
 }
 
 // Deux lignes de texte monospace empilées. La largeur est celle du gabarit du widget (pire cas),
@@ -280,50 +406,47 @@ static NSImage *TMDrawTwoLine(NSString *top, NSString *bottom, NSString *widthTe
     return image;
 }
 
-// Histogramme : les derniers échantillons en barres verticales, plus récent à droite, échelle 0-100.
+// Histogramme : les dix derniers échantillons en barres verticales (plus récent à droite, échelle
+// 0-100), bouts arrondis, posées sur une ligne de base de 1 pt. Même cellule 26 × 18 qu'avant.
 static NSImage *TMDrawBars(NSArray<NSNumber *> *series, NSColor *ink, BOOL isTemplate) {
-    const CGFloat w = 26, h = 18, pad = 1;
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
-    [image lockFocus];
-    NSArray<NSNumber *> *pts = series.count > 17 ? [series subarrayWithRange:NSMakeRange(series.count - 17, 17)] : series;
-    if (pts.count < 1) { TMDrawDash(ink, w / 2, h / 2); }
-    else {
-        CGFloat plotW = w - 2 * pad, plotH = h - 2 * pad;
-        CGFloat slot = plotW / pts.count, barW = MAX(1, slot - 0.6);
+    const CGFloat w = 26, h = 18;
+    return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
+        const NSUInteger slots = 10;
+        const CGFloat barW = 1.5, pitch = 2.6, x0 = (w - ((slots - 1) * pitch + barW)) / 2;
+        const CGFloat floorY = 2.0, top = 16.0;  // boîte optique de 14 pt dans les 18 pt
+        [[ink colorWithAlphaComponent:0.55] setFill];
+        [[NSBezierPath bezierPathWithRect:NSMakeRect(x0 - 0.5, floorY, (slots - 1) * pitch + barW + 1, 1)] fill];
+        NSArray<NSNumber *> *pts = series.count > slots ? [series subarrayWithRange:NSMakeRange(series.count - slots, slots)] : series;
+        if (pts.count < 1) { TMDrawDash(ink, w / 2, h / 2 + 0.5); return; }
         [ink setFill];
+        NSUInteger first = slots - pts.count;  // série courte : alignée à droite, le plus récent reste au bord
         for (NSUInteger i = 0; i < pts.count; i++) {
-            CGFloat v = MIN(MAX(pts[i].doubleValue, 0), 100) / 100.0;
-            CGFloat barH = MAX(0.8, v * plotH);
-            NSRect bar = NSMakeRect(pad + i * slot, pad, barW, barH);
-            [[NSBezierPath bezierPathWithRect:bar] fill];
+            CGFloat v = TMUnit(pts[i].doubleValue / 100.0);
+            CGFloat barH = MAX(barW, v * (top - floorY - 1.0));
+            NSRect bar = NSMakeRect(x0 + (first + i) * pitch, floorY + 1.0, barW, barH);
+            [[NSBezierPath bezierPathWithRoundedRect:bar xRadius:barW / 2 yRadius:barW / 2] fill];
         }
-    }
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    });
 }
 
-// Camembert : disque plein proportionnel, sur une piste faible.
+// Camembert cerclé : anneau de 1 pt, disque faible, secteur franc. Même boîte optique (15 pt) que
+// l'anneau, donc les deux s'alignent sur la grille de 18 pt quand ils se côtoient.
 static NSImage *TMDrawPie(double fraction, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
-    const CGFloat side = 18, radius = 6.6;
-    NSPoint c = NSMakePoint(side / 2, side / 2);
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(side, side)];
-    [image lockFocus];
-    NSBezierPath *track = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - radius, c.y - radius, 2 * radius, 2 * radius)];
-    [[ink colorWithAlphaComponent:isTemplate ? 0.25 : 0.28] setFill];
-    [track fill];
-    if (!hasValue) { TMDrawDash(ink, c.x, c.y); }
-    else if (fraction > 0) {
+    const CGFloat side = 18, ringRadius = 7.0, radius = 5.6;
+    return TMVectorImage(NSMakeSize(side, side), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, side / 2);
+        TMStrokeCircle(c, ringRadius, 1.0, [ink colorWithAlphaComponent:isTemplate ? 0.6 : 0.5]);
+        TMFillCircle(c, radius, [ink colorWithAlphaComponent:isTemplate ? 0.25 : 0.28]);
+        if (!hasValue) { TMDrawDash(ink, c.x, c.y); return; }
+        double f = TMUnit(fraction);
+        if (f <= 0) return;
         NSBezierPath *wedge = [NSBezierPath bezierPath];
         [wedge moveToPoint:c];
-        [wedge appendBezierPathWithArcWithCenter:c radius:radius startAngle:90 endAngle:90 - MIN(MAX(fraction, 0), 1) * 360 clockwise:YES];
+        [wedge appendBezierPathWithArcWithCenter:c radius:radius startAngle:90 endAngle:90 - f * 360 clockwise:YES];
         [wedge closePath];
         [ink setFill];
         [wedge fill];
-    }
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    });
 }
 
 // Pile de batterie horizontale + deux lignes de texte (état / pourcentage), éclair si en charge.
@@ -380,51 +503,42 @@ static NSImage *TMDrawBattery(double fraction, BOOL charging, BOOL hasValue, NSS
     return image;
 }
 
-// Anneau (piste faible + arc de fraction, part de midi, sens horaire) — comme la jauge quota.
+// Anneau (piste faible + arc de fraction, part de midi, sens horaire, bouts ronds) — comme la
+// jauge quota. Rayon extérieur 7,5 pt, identique à celui du camembert.
 static NSImage *TMDrawRing(double fraction, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
-    const CGFloat side = 18, radius = 6.3, lineWidth = 2.0;
-    NSPoint c = NSMakePoint(side / 2, side / 2);
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(side, side)];
-    [image lockFocus];
-    NSBezierPath *track = [NSBezierPath bezierPath];
-    [track appendBezierPathWithArcWithCenter:c radius:radius startAngle:0 endAngle:360];
-    track.lineWidth = lineWidth;
-    [[ink colorWithAlphaComponent:isTemplate ? 0.3 : 0.28] setStroke];
-    [track stroke];
-    if (!hasValue) { TMDrawDash(ink, c.x, c.y); }
-    else if (fraction > 0) {
-        NSBezierPath *arc = [NSBezierPath bezierPath];
-        [arc appendBezierPathWithArcWithCenter:c radius:radius startAngle:90 endAngle:90 - MIN(MAX(fraction, 0), 1) * 360 clockwise:YES];
-        arc.lineWidth = lineWidth; arc.lineCapStyle = NSLineCapStyleRound;
-        [ink setStroke]; [arc stroke];
-    }
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    const CGFloat side = 18, radius = 6.4, lineWidth = 2.2;
+    return TMVectorImage(NSMakeSize(side, side), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, side / 2);
+        TMStrokeCircle(c, radius, lineWidth, [ink colorWithAlphaComponent:TMTrackAlpha(isTemplate)]);
+        if (!hasValue) { TMDrawDash(ink, c.x, c.y); return; }
+        double f = TMUnit(fraction);
+        if (f > 0) TMStrokeArc(c, radius, 90, 90 - f * 360, lineWidth, NSLineCapStyleRound, ink);
+    });
 }
 
-// Jauge horizontale : une piste et son remplissage. La forme la plus littérale pour « combien
-// il reste », et la seule qui se lise sans convention (l'anneau demande de savoir qu'il part de
-// midi, le camembert qu'il tourne dans le sens horaire).
+// Jauge horizontale : une piste en gélule et son remplissage, bouts arrondis. La forme la plus
+// littérale pour « combien il reste », et la seule qui se lise sans convention (l'anneau demande
+// de savoir qu'il part de midi, le camembert qu'il tourne dans le sens horaire).
 static NSImage *TMDrawBar(double fraction, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
     const CGFloat w = 22, h = 18, barH = 8;
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
-    [image lockFocus];
-    NSRect track = NSMakeRect(0.5, (h - barH) / 2, w - 1, barH);
-    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5];
-    outline.lineWidth = 1;
-    [[ink colorWithAlphaComponent:isTemplate ? 0.45 : 0.5] setStroke];
-    [outline stroke];
-    if (!hasValue) { TMDrawDash(ink, NSMidX(track), NSMidY(track)); }
-    else if (fraction > 0) {
-        NSRect fill = NSInsetRect(track, 1.6, 1.6);
-        fill.size.width *= MIN(MAX(fraction, 0), 1);
+    return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
+        NSRect track = NSMakeRect(0.5, (h - barH) / 2, w - 1, barH);
+        NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:track xRadius:barH / 2 yRadius:barH / 2];
+        outline.lineWidth = 1;
+        [[ink colorWithAlphaComponent:isTemplate ? 0.45 : 0.5] setStroke];
+        [outline stroke];
+        if (!hasValue) { TMDrawDash(ink, NSMidX(track), NSMidY(track)); return; }
+        double f = TMUnit(fraction);
+        if (f <= 0) return;
+        // Gélule pleine longueur rognée à la fraction : la tête est toujours arrondie, la queue du
+        // remplissage coupée net, comme un liquide qui monte dans un tube.
+        NSRect fill = NSInsetRect(track, 1.7, 1.7);
+        [NSGraphicsContext saveGraphicsState];
+        [[NSBezierPath bezierPathWithRect:NSMakeRect(fill.origin.x, fill.origin.y, fill.size.width * f, fill.size.height)] addClip];
         [ink setFill];
-        [[NSBezierPath bezierPathWithRect:fill] fill];
-    }
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+        [[NSBezierPath bezierPathWithRoundedRect:fill xRadius:fill.size.height / 2 yRadius:fill.size.height / 2] fill];
+        [NSGraphicsContext restoreGraphicsState];
+    });
 }
 
 // Courbe (ligne) de la série récente, échelle fixe 0-100 + point terminal — comme la sparkline.
@@ -468,18 +582,50 @@ static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink
     return image;
 }
 
-// Dessin selon la forme choisie. Une forme qui ne peut pas représenter la donnée retombe sur la
-// forme naturelle du widget (readout[@"style"]).
+// Forme réellement dessinée : celle demandée si elle sait représenter la donnée de ce widget, sinon
+// la forme naturelle du readout. Les formes historiques passent telles quelles (inchangées pour les
+// utilisateurs existants) ; les formes ajoutées exigent les champs du readout qu'elles dessinent.
+NSString *TMWidgetResolvedShape(NSDictionary *readout, NSString *shape) {
+    NSString *natural = [readout[@"style"] isKindOfClass:NSString.class] ? readout[@"style"] : @"";
+    if (![shape isKindOfClass:NSString.class] || !shape.length) return natural;
+    static NSSet<NSString *> *legacy, *needsFraction;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        legacy = [NSSet setWithArray:@[@"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery"]];
+        needsFraction = [NSSet setWithArray:@[@"segments", @"dial", @"hub"]];
+    });
+    if ([legacy containsObject:shape]) return shape;
+    BOOL numeric = [readout[@"numeric"] boolValue], dual = [readout[@"dual"] boolValue];
+    BOOL chip = [readout[@"chipLabel"] isKindOfClass:NSString.class] && [readout[@"chipLabel"] length];
+    if ([shape isEqual:@"ringValue"]) return numeric ? shape : natural;
+    if ([needsFraction containsObject:shape]) return dual ? natural : shape;  // le réseau n'a pas de fraction
+    if ([shape isEqual:@"dualArc"]) return dual ? shape : natural;
+    if ([shape isEqual:@"chip"] || [shape isEqual:@"chipBar"]) return chip ? shape : natural;
+    return natural;  // forme inconnue
+}
+
+// Les formes qui portent leur texte dans l'image n'ont pas de titre système à côté : le chiffre
+// y serait dit deux fois.
+BOOL TMWidgetShapeCarriesText(NSDictionary *readout, NSString *shape) {
+    static NSSet<NSString *> *carrying;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        carrying = [NSSet setWithArray:@[@"text", @"twoLine", @"battery", @"ringValue", @"dualArc", @"chip", @"chipBar"]];
+    });
+    return [carrying containsObject:TMWidgetResolvedShape(readout, shape)];
+}
+
 NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *shape, NSString *colorName) {
-    // Même résolution de forme que TMWidgetImageWithInk : vide → style naturel du readout.
-    NSString *resolved = shape.length ? shape : ([readout[@"style"] isKindOfClass:NSString.class] ? readout[@"style"] : @"");
-    // Seules les formes qui dessinent la série la gardent dans la signature (histogramme, courbe,
-    // et la sparkline de la jauge principale) ; pour les autres, l'écarter est tout l'intérêt —
-    // elle glisse à chaque tick alors que les pixels, eux, ne bougent que quand une valeur
-    // affichée change.
-    BOOL usesSeries = [resolved isEqual:@"bars"] || [resolved isEqual:@"graph"] || [resolved isEqual:@"spark"];
+    NSString *resolved = TMWidgetResolvedShape(readout, shape);
+    // Chaque champ de détail n'entre dans la signature que si la forme choisie le dessine : la série
+    // glisse à chaque tick, les débits et les parts mémoire bougent de quelques % — alors que les
+    // pixels, eux, ne changent que quand une valeur affichée change.
+    BOOL sparkChip = [resolved isEqual:@"chip"] && [readout[@"chipKind"] isEqual:@"spark"];
+    BOOL usesSeries = [resolved isEqual:@"bars"] || [resolved isEqual:@"graph"] || [shape isEqual:@"spark"] || sparkChip;
     NSMutableDictionary *signature = [readout mutableCopy] ?: [NSMutableDictionary dictionary];
     if (!usesSeries) [signature removeObjectForKey:@"series"];
+    if (![resolved isEqual:@"segments"]) [signature removeObjectForKey:@"parts"];
+    if (![resolved isEqual:@"dualArc"]) { [signature removeObjectForKey:@"rxFraction"]; [signature removeObjectForKey:@"txFraction"]; }
     signature[@"shape"] = resolved;
     signature[@"color"] = colorName ?: @"";
     return signature;
@@ -497,7 +643,7 @@ NSImage *TMWidgetImageWithInk(NSDictionary *readout, NSString *shape, NSColor *i
     BOOL isTemplate = inkOrNil == nil;
     NSColor *ink = inkOrNil ?: NSColor.blackColor;
     BOOL hasValue = [readout[@"hasValue"] boolValue];
-    if (!shape.length) shape = readout[@"style"];
+    shape = TMWidgetResolvedShape(readout, shape);
 
     if ([shape isEqual:@"bars"])
         return TMDrawBars(hasValue ? readout[@"series"] : @[], ink, isTemplate);
