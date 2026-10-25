@@ -582,6 +582,124 @@ static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink
     return image;
 }
 
+#pragma mark - Famille Anneaux
+
+// Tout vit sur la même grille que l'anneau historique : cellule de 18 pt, centre (9, 9), rayon
+// extérieur ≤ 8 pt, départ à midi dans le sens horaire, traits de 1,8 à 2,6 pt. Chaque forme se lit
+// en monochrome (alpha seul) et en couleur ; « pas de valeur » = piste faible + tiret.
+
+// Anneau avec le chiffre au centre : la valeur est dans l'image, donc pas de titre système.
+static NSImage *TMDrawRingValue(double fraction, BOOL hasValue, NSString *digits, NSColor *ink, BOOL isTemplate) {
+    const CGFloat side = 18, radius = 7.1, lineWidth = 1.8;
+    return TMVectorImage(NSMakeSize(side, side), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, side / 2);
+        TMStrokeCircle(c, radius, lineWidth, [ink colorWithAlphaComponent:TMTrackAlpha(isTemplate)]);
+        if (!hasValue || !digits.length) { TMDrawDashLen(ink, c.x, c.y, 2.0); return; }
+        double f = TMUnit(fraction);
+        if (f > 0) TMStrokeArc(c, radius, 90, 90 - f * 360, lineWidth, NSLineCapStyleRound, ink);
+        // Le chiffre le plus large (« 100 ») garde ses chiffres dans le vide de l'anneau : corps réduit.
+        NSFont *font = [NSFont monospacedDigitSystemFontOfSize:digits.length >= 3 ? 5.6 : 7.2 weight:NSFontWeightSemibold];
+        TMDrawTextAt(digits, font, ink, c.x, c.y - font.capHeight / 2, NSTextAlignmentCenter, -0.1);
+    });
+}
+
+// Anneau segmenté. Mémoire avec ses parts (app / système / compressée / cache, du plus au moins
+// opaque ; le reste est la mémoire libre) ; sinon dix segments allumés selon la charge.
+static NSImage *TMDrawSegments(double fraction, BOOL hasValue, NSArray<NSNumber *> *parts, NSColor *ink, BOOL isTemplate) {
+    const CGFloat side = 18, radius = 6.8, lineWidth = 2.6;
+    return TMVectorImage(NSMakeSize(side, side), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, side / 2);
+        NSColor *faint = [ink colorWithAlphaComponent:TMTrackAlpha(isTemplate)];
+        if (hasValue && parts.count == 4) {
+            TMStrokeCircle(c, radius, lineWidth, [ink colorWithAlphaComponent:0.16]);
+            const CGFloat alphas[4] = { 1.0, 0.7, 0.46, 0.26 }, gap = 3.0;
+            double at = 0;
+            for (NSUInteger i = 0; i < 4; i++) {
+                double span = TMUnit(parts[i].doubleValue) * 360;
+                if (span > 0.5) {
+                    double start = 90 - at - (span > gap + 1 ? gap / 2 : 0);
+                    double end = 90 - at - span + (span > gap + 1 ? gap / 2 : 0);
+                    TMStrokeArc(c, radius, start, end, lineWidth, NSLineCapStyleButt, [ink colorWithAlphaComponent:alphas[i]]);
+                }
+                at += span;
+            }
+            return;
+        }
+        NSInteger lit = hasValue ? (NSInteger)round(TMUnit(fraction) * 10) : 0;
+        for (NSInteger i = 0; i < 10; i++) {
+            CGFloat start = 90 - 5 - i * 36;
+            TMStrokeArc(c, radius, start, start - 26, lineWidth, NSLineCapStyleButt, i < lit ? ink : faint);
+        }
+        if (!hasValue) TMDrawDash(ink, c.x, c.y);
+    });
+}
+
+// Cadran de 240°, ouvert en bas, avec une aiguille courte et un moyeu. Centré optiquement : la
+// partie ouverte pèse moins, donc le centre géométrique est remonté vers le bas de la cellule.
+static NSImage *TMDrawDial(double fraction, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
+    const CGFloat side = 18, radius = 7.2, lineWidth = 2.0, sweep = 240;
+    return TMVectorImage(NSMakeSize(side, side), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, 7.4);
+        TMStrokeArc(c, radius, 210, 210 - sweep, lineWidth, NSLineCapStyleRound, [ink colorWithAlphaComponent:TMTrackAlpha(isTemplate)]);
+        if (!hasValue) { TMDrawDashLen(ink, c.x, c.y + 1.2, 2.0); return; }
+        double f = TMUnit(fraction);
+        if (f > 0) TMStrokeArc(c, radius, 210, 210 - f * sweep, lineWidth, NSLineCapStyleRound, ink);
+        double angle = (210 - f * sweep) * M_PI / 180.0;
+        NSBezierPath *needle = [NSBezierPath bezierPath];
+        [needle moveToPoint:c];
+        [needle lineToPoint:NSMakePoint(c.x + cos(angle) * 4.4, c.y + sin(angle) * 4.4)];
+        needle.lineWidth = 1.4; needle.lineCapStyle = NSLineCapStyleRound;
+        [ink setStroke];
+        [needle stroke];
+        TMFillCircle(c, 1.5, ink);
+    });
+}
+
+// Deux arcs concentriques (↓ extérieur, ↑ intérieur, échelle logarithmique) puis le texte deux
+// lignes, calé à droite dans la largeur du pire cas (« ↓ 999 Mo/s ») comme la forme « 2 lignes ».
+static NSImage *TMDrawDualArc(NSDictionary *readout, NSColor *ink, BOOL isTemplate) {
+    const CGFloat side = 18, h = 18, outer = 7.2, inner = 4.3, lineWidth = 1.8, gutter = 3;
+    BOOL hasValue = [readout[@"hasValue"] boolValue];
+    NSString *top = hasValue ? readout[@"primary"] : @"—", *bottom = hasValue ? readout[@"secondary"] : @"";
+    NSFont *font = [NSFont monospacedDigitSystemFontOfSize:8.5 weight:NSFontWeightMedium];
+    NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: ink };
+    NSString *widthTemplate = readout[@"template"];
+    CGFloat textW = ceil(MAX(MAX([top sizeWithAttributes:attrs].width, [bottom sizeWithAttributes:attrs].width),
+                             widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0));
+    CGFloat w = side + gutter + textW + 1;
+    double rx = [readout[@"rxFraction"] doubleValue], tx = [readout[@"txFraction"] doubleValue];
+    return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, side / 2);
+        NSColor *faint = [ink colorWithAlphaComponent:TMTrackAlpha(isTemplate)];
+        TMStrokeCircle(c, outer, lineWidth, faint);
+        TMStrokeCircle(c, inner, lineWidth, faint);
+        if (hasValue) {
+            if (rx > 0) TMStrokeArc(c, outer, 90, 90 - TMUnit(rx) * 360, lineWidth, NSLineCapStyleRound, ink);
+            if (tx > 0) TMStrokeArc(c, inner, 90, 90 - TMUnit(tx) * 360, lineWidth, NSLineCapStyleRound, ink);
+        } else {
+            TMDrawDashLen(ink, c.x, c.y, 1.4);
+        }
+        NSSize topSize = [top sizeWithAttributes:attrs], botSize = [bottom sizeWithAttributes:attrs];
+        [top drawAtPoint:NSMakePoint(w - 1 - topSize.width, h - topSize.height - 0.5) withAttributes:attrs];
+        [bottom drawAtPoint:NSMakePoint(w - 1 - botSize.width, 0.5) withAttributes:attrs];
+    });
+}
+
+// Anneau fin + moyeu central (le plateau d'un disque) : l'arc dit le remplissage, le moyeu et son
+// liseré distinguent la forme du simple anneau, même en monochrome.
+static NSImage *TMDrawHub(double fraction, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
+    const CGFloat side = 18, radius = 6.8, lineWidth = 1.6;
+    return TMVectorImage(NSMakeSize(side, side), isTemplate, ^{
+        NSPoint c = NSMakePoint(side / 2, side / 2);
+        TMStrokeCircle(c, radius, lineWidth, [ink colorWithAlphaComponent:TMTrackAlpha(isTemplate)]);
+        TMStrokeCircle(c, 3.9, 0.8, [ink colorWithAlphaComponent:0.4]);
+        if (!hasValue) { TMDrawDashLen(ink, c.x, c.y, 1.5); return; }
+        double f = TMUnit(fraction);
+        if (f > 0) TMStrokeArc(c, radius, 90, 90 - f * 360, lineWidth, NSLineCapStyleRound, ink);
+        TMFillCircle(c, 2.1, ink);
+    });
+}
+
 // Forme réellement dessinée : celle demandée si elle sait représenter la donnée de ce widget, sinon
 // la forme naturelle du readout. Les formes historiques passent telles quelles (inchangées pour les
 // utilisateurs existants) ; les formes ajoutées exigent les champs du readout qu'elles dessinent.
@@ -655,6 +773,17 @@ NSImage *TMWidgetImageWithInk(NSDictionary *readout, NSString *shape, NSColor *i
         return TMDrawPie([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
     if ([shape isEqual:@"bar"])
         return TMDrawBar([readout[@"fraction"] doubleValue], hasValue, ink, isTemplate);
+    double fraction = [readout[@"fraction"] doubleValue];
+    if ([shape isEqual:@"ringValue"])
+        return TMDrawRingValue(fraction, hasValue, readout[@"chipValue"], ink, isTemplate);
+    if ([shape isEqual:@"segments"])
+        return TMDrawSegments(fraction, hasValue, readout[@"parts"], ink, isTemplate);
+    if ([shape isEqual:@"dial"])
+        return TMDrawDial(fraction, hasValue, ink, isTemplate);
+    if ([shape isEqual:@"hub"])
+        return TMDrawHub(fraction, hasValue, ink, isTemplate);
+    if ([shape isEqual:@"dualArc"])
+        return TMDrawDualArc(readout, ink, isTemplate);
     NSString *textTemplate = readout[@"template"], *valueTemplate = readout[@"valueTemplate"];
     if ([shape isEqual:@"text"])
         return TMDrawText(hasValue ? readout[@"value"] : @"—", valueTemplate, ink, isTemplate);
