@@ -2516,6 +2516,32 @@ static double TMInkSum(NSImage *image) {
     return sum;
 }
 
+static void TestSystemMenuBarSpacing(void) {
+    Section(@"Espacement système des icônes (réglage macOS)");
+    CheckEqual(TMSystemSpacingPresetIDs(), (@[@"normal", @"snug", @"tight"]), @"préréglages proposés");
+    CheckEqual(TMSystemSpacingValues(@"normal"), (@{}), @"normal : aucune clé (réglage d'origine rétabli)");
+    CheckEqual(TMSystemSpacingValues(@"snug"), (@{ @"spacing": @8, @"padding": @8 }), @"serré : 8 / 8");
+    CheckEqual(TMSystemSpacingValues(@"tight"), (@{ @"spacing": @4, @"padding": @4 }), @"très serré : 4 / 4");
+    for (id bad in @[@"custom", @"", @"SNUG", @3, @YES, NSNull.null, @[]])
+        Check(TMSystemSpacingValues(bad) == nil, @"préréglage inconnu : rien à écrire");
+    Check(TMSystemSpacingValues(nil) == nil, @"préréglage absent : rien à écrire");
+    // Lecture : clés absentes = normal ; les deux valeurs d'un préréglage = ce préréglage ; le reste = personnalisé.
+    CheckEqual(TMSystemSpacingPresetFor(nil, nil), @"normal", @"clés absentes : normal");
+    CheckEqual(TMSystemSpacingPresetFor(NSNull.null, NSNull.null), @"normal", @"valeurs nulles : normal");
+    CheckEqual(TMSystemSpacingPresetFor(@8, @8), @"snug", @"8 / 8 : serré");
+    CheckEqual(TMSystemSpacingPresetFor(@4.0, @4), @"tight", @"4 / 4 : très serré (entier et flottant équivalents)");
+    CheckEqual(TMSystemSpacingPresetFor(@8, nil), @"custom", @"une seule clé : personnalisé");
+    CheckEqual(TMSystemSpacingPresetFor(@8, @4), @"custom", @"valeurs mixtes : personnalisé");
+    CheckEqual(TMSystemSpacingPresetFor(@6, @6), @"custom", @"6 / 6 : personnalisé");
+    CheckEqual(TMSystemSpacingPresetFor(@YES, @YES), @"custom", @"booléens : jamais un préréglage");
+    CheckEqual(TMSystemSpacingPresetFor(@"8", @"8"), @"custom", @"chaînes : jamais un préréglage");
+    // Aller-retour : ce que l'action écrit est relu comme le même préréglage.
+    for (NSString *preset in TMSystemSpacingPresetIDs()) {
+        NSDictionary *values = TMSystemSpacingValues(preset);
+        CheckEqual(TMSystemSpacingPresetFor(values[@"spacing"], values[@"padding"]), preset, @"écrit puis relu : même préréglage");
+    }
+}
+
 static void TestMenuBarIconLayout(void) {
     Section(@"Taille et espacement des icônes de la barre des menus");
 
@@ -2673,6 +2699,7 @@ int main(void) {
         TestWidgetStableWidth();
         TestWidgetNewShapes();
         TestMenuBarIconLayout();
+        TestSystemMenuBarSpacing();
         TestApiRegistry();
         TestApiBaseline();
         TestApiInputs();

@@ -240,6 +240,19 @@ static NSImage *TMSparklineIcon(NSArray<NSNumber *> *series, BOOL hasValue, TMSe
 // `widthTemplate` : le texte le plus large que ce titre puisse prendre (« 100 % » quand la valeur
 // du moment est « 9 % »). Sans lui, l'élément rétrécit à chaque tick et décale toute la rangée
 // d'icônes — y compris celle sous laquelle un panneau vient d'être ancré.
+// Réglage global de macOS (domaine « tous les domaines », hôte courant) : c'est celui de
+// `defaults -currentHost write -g …`. Une valeur nil supprime la clé.
+static id TMReadSystemStatusItemPref(NSString *key) {
+    CFPropertyListRef value = CFPreferencesCopyValue((__bridge CFStringRef)key, kCFPreferencesAnyApplication,
+                                                     kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
+    return CFBridgingRelease(value);
+}
+static void TMWriteSystemStatusItemPref(NSString *key, id value) {
+    CFPreferencesSetValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, kCFPreferencesAnyApplication,
+                          kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
+    CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
+}
+
 static NSAttributedString *TMMenuBarTitle(NSString *text, NSString *widthTemplate, TMSeverity severity, CGFloat scale) {
     // Le titre suit la taille des icônes (Réglages › Affichage) : 12 pt à l'échelle 1, arrondi au demi-point.
     NSMutableDictionary *attributes = [@{
@@ -1524,6 +1537,16 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         [self updateStatusMenu];
         [self pushData];
     }
+    if ([action isEqualToString:@"setSystemMenuBarSpacing"]) {
+        // Réglage macOS global (toutes les apps), appliqué à la prochaine ouverture de session. Seul un
+        // préréglage connu écrit quelque chose ; « normal » supprime les deux clés (réglage d'origine).
+        NSDictionary<NSString *, NSNumber *> *values = TMSystemSpacingValues(body[@"preset"]);
+        if (values) {
+            TMWriteSystemStatusItemPref(@"NSStatusItemSpacing", values[@"spacing"]);
+            TMWriteSystemStatusItemPref(@"NSStatusItemSelectionPadding", values[@"padding"]);
+            [self pushData];
+        }
+    }
     if ([action isEqualToString:@"setMenuBarIconLayout"]) {
         // Valeurs validées contre les listes autorisées : tout le reste est ignoré (une valeur
         // inconnue ne doit ni changer le réglage ni le remettre au défaut).
@@ -1810,6 +1833,8 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             @"providerMenuMetrics":@{@"openai":[self metricForProvider:@"openai"],@"claude":[self metricForProvider:@"claude"]},
             @"providerIconStyles":@{@"openai":[self iconStyleForProvider:@"openai"],@"claude":[self iconStyleForProvider:@"claude"]},
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
+            @"systemMenuBarSpacing": TMSystemSpacingPresetFor(TMReadSystemStatusItemPref(@"NSStatusItemSpacing"),
+                                                                 TMReadSystemStatusItemPref(@"NSStatusItemSelectionPadding")),
             @"menuBarIconScale": @([self menuBarIconScale]),
             @"menuBarIconSpacing": @([self menuBarIconSpacing]),
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),

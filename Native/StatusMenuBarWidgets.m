@@ -956,6 +956,32 @@ NSImage *TMWidgetImage(NSDictionary *readout) {
     return TMWidgetImageStyled(readout, readout[@"style"], nil);
 }
 
+#pragma mark - Espacement système des icônes
+
+NSArray<NSString *> *TMSystemSpacingPresetIDs(void) { return @[@"normal", @"snug", @"tight"]; }
+
+NSDictionary<NSString *, NSNumber *> *TMSystemSpacingValues(NSString *preset) {
+    if (![preset isKindOfClass:NSString.class]) return nil;
+    if ([preset isEqual:@"normal"]) return @{};
+    if ([preset isEqual:@"snug"]) return @{ @"spacing": @8, @"padding": @8 };
+    if ([preset isEqual:@"tight"]) return @{ @"spacing": @4, @"padding": @4 };
+    return nil;
+}
+
+static BOOL TMIsPlainNumber(id value, double expected) {
+    if (![value isKindOfClass:NSNumber.class]) return NO;
+    if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) return NO;
+    return fabs([value doubleValue] - expected) < 0.0001;
+}
+
+NSString *TMSystemSpacingPresetFor(id spacing, id padding) {
+    BOOL noSpacing = spacing == nil || spacing == NSNull.null, noPadding = padding == nil || padding == NSNull.null;
+    if (noSpacing && noPadding) return @"normal";
+    if (TMIsPlainNumber(spacing, 8) && TMIsPlainNumber(padding, 8)) return @"snug";
+    if (TMIsPlainNumber(spacing, 4) && TMIsPlainNumber(padding, 4)) return @"tight";
+    return @"custom";
+}
+
 #pragma mark - Taille et espacement des icônes
 
 NSArray<NSNumber *> *TMMenuBarIconScales(void) { return @[@0.85, @1.0, @1.15, @1.25]; }

@@ -877,11 +877,20 @@ function widgetPopupModeRow(p){
   const mode=p.widgetPopupMode==='grouped'?'grouped':'separate';
   return `<div class="wc-popup-mode" style="margin-bottom:14px"><div class="setting-copy" style="margin-bottom:8px"><strong>${t('w.group.title')}</strong><small>${t('w.group.desc')}</small></div><span class="segmented" style="display:inline-flex" role="group" aria-label="${t('w.group.aria')}">${['separate','grouped'].map(m=>`<button class="seg ${mode===m?'on':''}" aria-pressed="${mode===m}" title="${t('w.group.'+m+'Desc')}" onclick="send('setWidgetPopupMode',{mode:'${m}'})">${t('w.group.'+m)}</button>`).join('')}</span><small class="wc-popup-hint" style="display:block;margin-top:6px;color:var(--muted);font-size:12px;line-height:1.45">${t('w.group.'+mode+'Desc')}</small></div>`;
 }
+// Espacement système des icônes de la barre des menus (réglage macOS : TOUTES les apps, appliqué à la
+// prochaine ouverture de session). Le natif n'écrit que les trois préréglages connus.
+const SYSTEM_SPACINGS=['normal','snug','tight'];
+function systemSpacingSettings(p){
+  const current=SYSTEM_SPACINGS.includes(p.systemMenuBarSpacing)?p.systemMenuBarSpacing:(p.systemMenuBarSpacing==='custom'?'custom':'normal');
+  const buttons=SYSTEM_SPACINGS.map(id=>`<button class="seg ${current===id?'on':''}" aria-pressed="${current===id}" onclick="send('setSystemMenuBarSpacing',{preset:'${id}'})">${t('sys.sp.'+id)}</button>`).join('');
+  return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('sys.sp.title')}</strong><small>${t('sys.sp.desc')}</small></div><div class="layout-rows"><div class="layout-row" data-layout="system-spacing"><span class="segmented wc-shapes">${buttons}</span>${current==='custom'?`<small>${t('sys.sp.custom')}</small>`:''}</div></div><p class="connection-note" role="status">${t('sys.sp.note')}</p></section>`;
+}
 function menuBarSettings(data,p){
   return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.title')}</strong><small>${t('bar.desc')}</small></div>${barPreview(data,p)}</section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('sg.quotas')}</strong><small>${t('bar.quotasDesc')}</small></div><div class="quota-icon-rows">${['openai','claude'].map(pr=>quotaIconRow(data,p,pr)).join('')}</div><div class="quota-icon-actions"><button class="button" onclick="send('previewMenuIcons',{provider:'openai'})">${t('bar.compare',{name:'OpenAI'})}</button><button class="button" onclick="send('previewMenuIcons',{provider:'claude'})">${t('bar.compare',{name:'Claude'})}</button><button class="button" onclick="send('closeMenuIconPreviews')">${t('set.icons.close')}</button></div></section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div>${widgetPopupModeRow(p)}<div class="widget-config">${widgetConfigRows(p)}</div></section>
-  ${iconLayoutSettings(p)}`;
+  ${iconLayoutSettings(p)}
+  ${systemSpacingSettings(p)}`;
 }
 // Mises à jour (Sparkle). Sans flux ni clé (build de développement), la section n'a rien à proposer :
 // on ne montre alors que la version, sans boutons qui ne feraient rien.

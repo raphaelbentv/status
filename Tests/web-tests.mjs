@@ -910,6 +910,25 @@ section('Popup : capot fermé démarrable directement');
   menubar('setLidMinutes(7)');menubar('startLid()');
   checkEqual(menubar('window.sent[1]'),{action:'startLidMode',minutes:60},'durée hors liste ignorée : la précédente est conservée');
 }
+section('Réglages : espacement système des icônes');
+{
+  const render=prefs=>dashboard('settingsView')({prefs,accounts:[]},'appearance');
+  const labels=html=>[...html.slice(html.indexOf('data-layout="system-spacing"')).matchAll(/<button class="seg [^"]*"[^>]*>([^<]+)<\/button>/g)].map(m=>m[1]).slice(0,3);
+  const active=html=>[...html.slice(html.indexOf('data-layout="system-spacing"')).matchAll(/<button class="seg on"[^>]*>([^<]+)<\/button>/g)].map(m=>m[1]).slice(0,1);
+  const def=render({});
+  check(def.includes('Espacement des icônes (macOS)'),'section présente dans Affichage');
+  check(def.includes('TOUTES les icônes'),'avertissement : réglage global, pas seulement Status');
+  check(def.includes('déconnexion puis reconnexion')&&def.includes('rétablit le réglage d’origine'),'note : reconnexion nécessaire et retour au défaut');
+  checkEqual(labels(def),['Normal','Serré','Très serré'],'trois préréglages');
+  checkEqual(active(def),['Normal'],'sans donnée : Normal actif');
+  checkEqual(active(render({systemMenuBarSpacing:'snug'})),['Serré'],'préréglage serré actif');
+  checkEqual(active(render({systemMenuBarSpacing:'tight'})),['Très serré'],'préréglage très serré actif');
+  const custom=render({systemMenuBarSpacing:'custom'});
+  check(custom.includes('Valeur personnalisée détectée'),'valeur personnalisée signalée');
+  check(!/data-layout="system-spacing"[\s\S]*?<button class="seg on"[^>]*>(Normal|Serré|Très serré)</.test(custom.slice(0,custom.indexOf('Valeur personnalisée détectée')+40)),'valeur personnalisée : aucun préréglage actif');
+  for(const id of ['normal','snug','tight']) check(def.includes(`send('setSystemMenuBarSpacing',{preset:'${id}'})`),`bouton ${id} → setSystemMenuBarSpacing`);
+  checkEqual(active(render({systemMenuBarSpacing:'<img>'})),['Normal'],'valeur inconnue : repli sur Normal');
+}
 section('Réglages : mises à jour automatiques');
 {
   const off=plain(dashboard('updateSettings')({updates:{available:false,version:'0.9.0'}}));

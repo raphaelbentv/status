@@ -99,6 +99,18 @@ NSAttributedString *TMTitleWithReservedWidth(NSString *text, NSString *_Nullable
 // Couleur nommée de la palette, ou nil si « auto »/inconnu (pour l'aperçu éventuel côté natif).
 NSColor *_Nullable TMWidgetNamedColor(NSString *name);
 
+#pragma mark - Espacement système des icônes (réglage macOS, toutes les apps)
+
+// macOS règle l'espace entre les icônes de la barre des menus pour TOUTES les apps par deux clés globales
+// (NSStatusItemSpacing, NSStatusItemSelectionPadding), lues à l'ouverture de session. Trois préréglages :
+// « normal » = clés absentes (réglage d'origine), « snug » = 8/8, « tight » = 4/4.
+extern NSArray<NSString *> *TMSystemSpacingPresetIDs(void);                   // normal, snug, tight
+// Valeurs à écrire pour un préréglage : @{ @"spacing": n, @"padding": n }, ou @{} pour « normal » (supprimer
+// les clés) ; nil pour un préréglage inconnu — l'action native n'écrit alors rien.
+NSDictionary<NSString *, NSNumber *> *_Nullable TMSystemSpacingValues(NSString *_Nullable preset);
+// Préréglage correspondant aux valeurs lues (nil = clé absente) : normal, snug, tight, ou « custom ».
+NSString *TMSystemSpacingPresetFor(id _Nullable spacing, id _Nullable padding);
+
 #pragma mark - Taille et espacement des icônes (Réglages › Affichage)
 
 // Valeurs autorisées, dans l'ordre des boutons des Réglages. Défauts : 1.0 (taille) et 0 (espacement).
