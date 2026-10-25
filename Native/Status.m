@@ -862,9 +862,29 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
     self.widgetPopover.contentSize = size;
 }
 
+// widgetElementColors relu et assaini : seuls les widgets et éléments de la liste blanche, avec une
+// valeur valide (nom de palette ou #RRGGBB), sortent d'ici — une préférence bricolée à la main ne
+// traverse jamais jusqu'aux pages.
+- (NSDictionary *)widgetElementColorsPayload {
+    NSDictionary *stored = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetElementColors"];
+    NSMutableDictionary *clean = [NSMutableDictionary dictionary];
+    for (NSString *wid in stored) {
+        NSDictionary *one = [stored[wid] isKindOfClass:NSDictionary.class] ? stored[wid] : nil;
+        NSMutableDictionary *kept = [NSMutableDictionary dictionary];
+        for (NSString *element in TMWidgetElementKeys(wid)) {
+            NSString *color = TMWidgetNormalizedColor(one[element], NO);
+            if (color) kept[element] = color;
+        }
+        if (kept.count) clean[wid] = kept;
+    }
+    return clean;
+}
+
 - (NSDictionary *)widgetMetricsPayload {
     NSMutableDictionary *payload = [[self.systemMonitor snapshot] mutableCopy];
     payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
+                           // widgetId → { élément : couleur } ; absent = couleur du thème.
+                           @"elementColors": [self widgetElementColorsPayload],
                            @"panels": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
                            // widgetId → niveau de détail du panneau (0 résumé, 1 détaillé, 2 hyper détaillé).
                            @"detail": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{},
@@ -1611,7 +1631,9 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{}) mutableCopy];
             NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
             if ([body[@"shape"] isKindOfClass:NSString.class]) one[@"shape"] = body[@"shape"];
-            if ([body[@"color"] isKindOfClass:NSString.class]) one[@"color"] = body[@"color"];
+            // Nom de palette, « #RRGGBB » ou « auto » ; toute autre valeur est ignorée.
+            NSString *color = TMWidgetNormalizedColor(body[@"color"], YES);
+            if (color) one[@"color"] = color;
             config[wid] = one;
             [NSUserDefaults.standardUserDefaults setObject:config forKey:@"menuBarWidgetConfig"];
             [self refreshQuotaWidgetFamilies];        // la forme choisie décide si la série est lue
@@ -1641,6 +1663,25 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             config[wid] = one;
             [NSUserDefaults.standardUserDefaults setObject:config forKey:@"widgetPanelConfig"];
             [self pushWidgetMetrics];  // rafraîchit le panneau ouvert avec le nouveau contenu
+            [self pushData];
+        }
+    }
+    // Couleur d'un élément du panneau d'info (cœurs de performance, courbe, ↓ reçu…), stockée dans
+    // widgetElementColors { widgetId : { élément : nom | #RRGGBB } }. Absent = couleur du thème. L'id et
+    // l'élément sont validés contre une liste blanche ; « auto » ou null efface le réglage.
+    if ([action isEqualToString:@"setWidgetElementColor"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        NSString *element = [body[@"element"] isKindOfClass:NSString.class] ? body[@"element"] : nil;
+        id raw = body[@"color"];
+        BOOL clear = !raw || [raw isKindOfClass:NSNull.class] || [raw isEqual:@"auto"];
+        NSString *color = clear ? nil : TMWidgetNormalizedColor(raw, NO);
+        if (wid && element && [TMWidgetElementKeys(wid) containsObject:element] && (clear || color)) {
+            NSMutableDictionary *all = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetElementColors"] ?: @{}) mutableCopy];
+            NSMutableDictionary *one = [([all[wid] isKindOfClass:NSDictionary.class] ? all[wid] : @{}) mutableCopy];
+            if (color) one[element] = color; else [one removeObjectForKey:element];
+            if (one.count) all[wid] = one; else [all removeObjectForKey:wid];
+            [NSUserDefaults.standardUserDefaults setObject:all forKey:@"widgetElementColors"];
+            [self pushWidgetMetrics];  // rafraîchit le panneau ouvert avec la nouvelle couleur
             [self pushData];
         }
     }
@@ -1845,6 +1886,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
             @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},
             @"widgetPanelConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
+            @"widgetElementColors": [self widgetElementColorsPayload],
             @"widgetPopupMode": [self widgetPopupGrouped] ? @"grouped" : @"separate",
             @"alerts": [self alertsPayload],
             @"notificationsAuthorized": @(self.notificationsAuthorized),

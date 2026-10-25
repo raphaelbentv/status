@@ -57,7 +57,7 @@ function sandboxFor(htmlFile, language = 'fr') {
   });
   const sandbox = {
     document: { documentElement: {dataset:{}}, querySelector: () => element(), querySelectorAll: () => [], addEventListener() {} },
-    window: {}, setInterval() {}, setTimeout() {}, console,
+    window: {}, setInterval() {}, setTimeout() {}, clearTimeout() {}, console,
     Intl, Date, Math, JSON, Number, String, Array, Object, isNaN, parseFloat, parseInt,
   };
   sandbox.window = sandbox;
@@ -556,6 +556,211 @@ section('dashboard.html — réglage « Popups des widgets »');
   check(row({}).includes(`send('setWidgetPopupMode',{mode:'grouped'})`) && row({}).includes(`send('setWidgetPopupMode',{mode:'separate'})`), 'réglage : chaque segment envoie setWidgetPopupMode');
   check(/Chaque icône ouvre le panneau de son propre widget/.test(row({})) && /un seul popup avec tous les widgets activés/.test(row({ widgetPopupMode: 'grouped' })), 'réglage : description du mode choisi');
   check(dashboard(`menuBarSettings({prefs:{}},{widgetPopupMode:'grouped',menuBarWidgets:['cpu']})`).includes('setWidgetPopupMode'), 'réglage : présent dans la section des widgets système (Affichage)'); }
+
+// ── Couleurs des éléments (widget.html) ─────────────────────────────────────
+// prefs.elementColors[widgetId][élément] : nom de palette ou #RRGGBB. Absent, invalide ou hors liste
+// blanche : le renderer garde le jeton de thème qu'il utilisait avant (aucun changement par défaut).
+section('widget.html — couleurs choisies par élément');
+{
+  const withColors = (id, lv, elementColors, extra = {}) => {
+    const m = JSON.parse(JSON.stringify(richSnap));
+    m.prefs = { theme: 'neon', detail: { [id]: lv }, ...(elementColors ? { elementColors } : {}), ...extra };
+    widget('metrics = ' + JSON.stringify(m)); widget(`widgetId = ${JSON.stringify(id)}`);
+    return widget(RENDER[id]);
+  };
+  const setPrefs = ec => { widget('metrics = ' + JSON.stringify({ ...richSnap, prefs: { elementColors: ec } })); };
+
+  // elColor : le choix de l'utilisateur, ou le repli.
+  setPrefs({ cpu: { perf: 'orange', eff: '#00aabb', user: 'teal', system: 'nimportequoi', curve: '#12345', bogus: 'red' }, network: { down: 'sky', up: 'white' } });
+  checkEqual(widget('elColor("cpu","perf","var(--k)")'), '#FF9933', 'elColor : nom de palette → valeur hexadécimale');
+  checkEqual(widget('elColor("cpu","eff","var(--k)")'), '#00AABB', 'elColor : #rrggbb accepté, mis en majuscules');
+  checkEqual(widget('elColor("cpu","user","var(--k)")'), '#2EC4B6', 'elColor : nouvelle couleur de la palette élargie (teal)');
+  checkEqual(widget('elColor("cpu","system","var(--amber)")'), 'var(--amber)', 'elColor : nom inconnu → jeton de thème');
+  checkEqual(widget('elColor("cpu","curve","var(--chart-a)")'), 'var(--chart-a)', 'elColor : hexadécimal invalide (#12345) ignoré');
+  checkEqual(widget('elColor("cpu","bogus","var(--k)")'), 'var(--k)', 'elColor : élément hors liste blanche ignoré, même présent dans les préférences');
+  checkEqual(widget('elColor("network","perf","var(--k)")'), 'var(--k)', 'elColor : élément d’un autre widget ignoré');
+  checkEqual(widget('elColor("disk","read","var(--chart-a)")'), 'var(--chart-a)', 'elColor : widget sans réglage → repli');
+  checkEqual(widget('elColor("__proto__","curve","var(--k)")'), 'var(--k)', 'elColor : identifiant « __proto__ » sans effet');
+  checkEqual(widget('elColor(null,"curve","var(--k)")'), 'var(--k)', 'elColor : identifiant nul sans effet');
+  for (const bad of ['#GGGGGG', '#ff00ff\\n', 'red;background:url(x)', '#fff', 'rgb(1,2,3)', '', 'var(--danger)', '#FF00FF"onload="x'])
+    { setPrefs({ cpu: { perf: bad } }); checkEqual(widget('elColor("cpu","perf","FALLBACK")'), 'FALLBACK', `elColor : « ${bad} » refusé`); }
+  for (const bad of [42, null, true, ['red'], { a: 1 }])
+    { setPrefs({ cpu: { perf: bad } }); checkEqual(widget('elColor("cpu","perf","FALLBACK")'), 'FALLBACK', `elColor : valeur ${JSON.stringify(bad)} refusée`); }
+  widget('metrics = ' + JSON.stringify({ families: [], prefs: { elementColors: 'oops' } }));
+  checkEqual(widget('elColor("cpu","perf","FALLBACK")'), 'FALLBACK', 'elColor : elementColors mal formé ignoré');
+  widget('metrics = null'); checkEqual(widget('elColor("cpu","perf","FALLBACK")'), 'FALLBACK', 'elColor : sans données, repli');
+  // Aucune valeur choisie ne peut sortir de la forme « #RRGGBB » : pas d’injection dans le style.
+  setPrefs({ cpu: { perf: 'red;background:url(x)' } });
+  check(!/url\(x\)/.test(withColors('cpu', 1, { cpu: { perf: 'red;background:url(x)', eff: '#00AABB"onload="x' } })), 'CPU : valeur piégée jamais recopiée dans le HTML');
+
+  // Palette de widget.html = celle des Réglages (le natif est comparé dans native-tests).
+  checkEqual(widget('Object.keys(WIDGET_PALETTE).length'), dashboard('WIDGET_COLORS.length - 1'), 'palette : widget.html et dashboard.html ont autant de couleurs');
+  checkEqual(widget('Object.entries(WIDGET_PALETTE)'), dashboard('WIDGET_COLORS.filter(([c])=>c!=="auto")'), 'palette : mêmes noms, mêmes valeurs, même ordre dans les deux pages');
+  checkEqual(widget('ELEMENTS'), dashboard('PANEL_ELEMENTS'), 'éléments : mêmes listes dans widget.html et dashboard.html');
+
+  // Par défaut (rien de choisi) : mêmes jetons de thème qu’avant, aucune variable --ec ni couleur imposée.
+  for (const id of Object.keys(RENDER)) for (const lv of [0, 1, 2]) {
+    const html = withColors(id, lv, null);
+    check(!/--ec:|#[0-9A-Fa-f]{6}/.test(html), `${id} niveau ${lv} : sans choix, aucune couleur d’élément dans le rendu`);
+    const withEmpty = withColors(id, lv, {}); const norm = h => h.replace(/wg\d+_/g, 'wg_');
+    check(norm(withEmpty) === norm(html), `${id} niveau ${lv} : elementColors vide = absent`);
+  }
+  check(/stroke:var\(--chart-a\)/.test(withColors('cpu', 1, null)) && /background:var\(--amber\)/.test(withColors('cpu', 1, null)), 'CPU : défauts = jetons chart-a / amber');
+
+  // CPU : cœurs de performance en orange, d’efficacité en hexadécimal ; courbe, utilisateur, système.
+  const cpu = withColors('cpu', 2, { cpu: { perf: 'orange', eff: '#00AABB', curve: 'violet', user: 'mint', system: 'magenta' } });
+  check(noJunk(cpu), 'CPU coloré : aucun NaN/undefined/null');
+  check(count(cpu, /class="w-core[^e"]*"[^>]*style="--ec:#FF9933"/g) === 4, 'CPU : 4 cœurs de performance en orange (--ec)');
+  check(count(cpu, /class="w-core e[^"]*"[^>]*style="--ec:#00AABB"/g) === 4, 'CPU : 4 cœurs d’efficacité en #00AABB (--ec)');
+  check(cpu.includes('class="w-sq" style="--ec:#FF9933"') && cpu.includes('class="w-sq e" style="--ec:#00AABB"'), 'CPU : pastilles des légendes de cœurs suivent les couleurs');
+  check(cpu.includes('stroke:#8A5CF6'), 'CPU : courbe en violet');
+  check(cpu.includes('background:#7EEAC0') && cpu.includes('background:#E04FD8'), 'CPU : pastilles utilisateur/système');
+  check(!cpu.includes('stroke:var(--chart-a)'), 'CPU : plus de couleur de thème sur la courbe quand elle est choisie');
+  const cpuPartial = withColors('cpu', 1, { cpu: { perf: 'red' } });
+  check(count(cpuPartial, /--ec:#FF615A/g) === 5 && !/--ec:#(?!FF615A)/.test(cpuPartial), 'CPU : seule la couleur choisie est posée (les autres éléments gardent le thème)');
+  check(/w-core e"><span/.test(cpuPartial) || /class="w-core e"/.test(cpuPartial), 'CPU : cœurs d’efficacité inchangés');
+  // La sévérité garde la priorité : un cœur à 96 % reste signalé, la règle CSS le dit.
+  check(/\.w-core\.crit \.w-ct i\{background:var\(--danger\)\}/.test(readFileSync(join(root, 'Resources', 'widget.html'), 'utf8')), 'CPU : la sévérité (ambre/rouge) l’emporte sur la couleur choisie');
+  // Pas de types de cœurs : tous les cœurs prennent la couleur « performance ».
+  { const m = JSON.parse(JSON.stringify(richSnap)); delete m.families[0].now.coreTypes;
+    m.prefs = { elementColors: { cpu: { perf: 'sky' } }, detail: { cpu: 1 } }; widget('metrics = ' + JSON.stringify(m)); widget('widgetId = "cpu"');
+    check(count(widget('renderCPU()'), /--ec:#66C2FF/g) === 8, 'CPU sans types de cœurs : tous en « performance »'); }
+
+  // Mémoire : quatre segments, quatre couleurs, la courbe en plus.
+  const mem = withColors('memory', 2, { memory: { app: 'lime', wired: 'coral', compressed: 'indigo', cache: 'brown', curve: 'sky' } });
+  check(['#B5E655', '#FF7F7A', '#5B6CFF', '#A9744F'].every(c => count(mem, new RegExp(`background:${c}`, 'g')) >= 2), 'Mémoire : chaque segment (barre ET légende) a sa couleur');
+  check(mem.includes('stroke:#66C2FF'), 'Mémoire : courbe en ciel');
+  check(!/background:var\(--(blue|purple|amber|muted)\)/.test(mem.split('w-split')[1].split('w-list')[0]), 'Mémoire : plus de jeton de thème sur la barre empilée');
+  const memDef = withColors('memory', 1, null);
+  check(/background:var\(--blue\)/.test(memDef) && /background:var\(--purple\)/.test(memDef) && /background:var\(--muted\)/.test(memDef), 'Mémoire : défauts inchangés (blue, purple, amber, muted)');
+  // Réseau : ↓ et ↑ (colonnes, courbe, interfaces, tableau).
+  const net = withColors('network', 2, { network: { down: 'red', up: '#112233' } });
+  check(net.includes('--c:#FF615A') && net.includes('--c:#112233'), 'Réseau : flèches ↓/↑ colorées');
+  check(net.includes('stroke:#FF615A') && net.includes('stroke:#112233'), 'Réseau : courbes ↓/↑ colorées');
+  check(net.includes('class="d" style="--ec:#FF615A"') && net.includes('class="u" style="--ec:#112233"'), 'Réseau : interfaces ↓/↑ colorées');
+  check(!/--c:var\(--chart/.test(net), 'Réseau : plus de jeton chart-a/chart-b quand les deux sont choisis');
+  const netOne = withColors('network', 1, { network: { down: 'red' } });
+  check(netOne.includes('--c:#FF615A') && netOne.includes('--c:var(--chart-b)'), 'Réseau : ↑ garde le thème quand seul ↓ est choisi');
+  // GPU, température, batterie, disque.
+  const gpu = withColors('gpu', 2, { gpu: { curve: 'yellow', renderer: 'pink', tiler: 'lime' } });
+  check(gpu.includes('stroke:#FFE14D') && gpu.includes('background:#FF73B3') && gpu.includes('background:#B5E655'), 'GPU : courbe, rendu et tuilage colorés');
+  check(/<i[^>]*style="width:21.0%;background:#FF73B3"/.test(gpu), 'GPU : barre du rendu colorée');
+  check(withColors('temperature', 1, { temperature: { curve: 'sky' } }).includes('stroke:#66C2FF'), 'Température : courbe colorée');
+  check(withColors('battery', 1, { battery: { curve: 'violet' } }).includes('stroke:#8A5CF6'), 'Batterie : courbe colorée');
+  check(withColors('battery', 1, { battery: { curve: 'violet' } }, { panels: { battery: { chart: false } } }).includes('background:#8A5CF6'), 'Batterie : sans courbe, la jauge prend la couleur');
+  const disk = withColors('disk', 2, { disk: { read: 'cyan', write: 'orange', volumes: 'teal' } });
+  check(disk.includes('stroke:#4CCCE6') && disk.includes('stroke:#FF9933') && disk.includes('background:#4CCCE6') && disk.includes('background:#FF9933'), 'Disque : lecture/écriture (courbes, pastilles, tableau)');
+  check(/width:41%;background:#2EC4B6/.test(disk), 'Disque : volume sain en teal');
+  check(/width:90%;background:var\(--danger\)/.test(disk), 'Disque : un volume plein reste rouge (la sévérité prime)');
+  // Un widget n’est jamais teinté par les réglages d’un autre.
+  check(!withColors('cpu', 1, { memory: { app: 'red' }, network: { down: 'red' } }).includes('#FF615A'), 'CPU : les couleurs des autres widgets sont sans effet');
+
+  // Regroupé : cartes de résumé et sections empilées respectent les mêmes couleurs.
+  const groupedWith = (lv, ec) => {
+    const m = JSON.parse(JSON.stringify(richSnap));
+    m.prefs = { theme: 'neon', popupMode: 'grouped', widgets: ['cpu', 'memory', 'network', 'disk'], detail: { grouped: lv }, ...(ec ? { elementColors: ec } : {}) };
+    widget('metrics = ' + JSON.stringify(m)); widget('widgetId = "grouped"'); return widget('renderGrouped()');
+  };
+  const ec = { cpu: { curve: 'violet', perf: 'orange' }, memory: { curve: 'mint', app: 'lime' }, network: { down: 'red', up: 'sky' }, disk: { read: 'cyan', write: 'amber' } };
+  const gSum = groupedWith(0, ec);
+  check(['#8A5CF6', '#7EEAC0', '#FF615A', '#66C2FF', '#4CCCE6', '#FFBF40'].every(c => gSum.includes(`stroke:${c}`)), 'Regroupé · Résumé : les mini-courbes suivent les couleurs choisies');
+  check(!gSum.includes('stroke:var(--chart-a)'), 'Regroupé · Résumé : plus de courbe de thème quand tous les éléments tracés sont colorés');
+  const gDet = groupedWith(1, ec);
+  check(gDet.includes('--ec:#FF9933') && gDet.includes('background:#B5E655') && gDet.includes('--c:#FF615A') && gDet.includes('background:#4CCCE6'), 'Regroupé · Détaillé : sections empilées colorées');
+  const gNone = groupedWith(1, undefined);
+  check(!/--ec:|#[0-9A-Fa-f]{6}/.test(gNone), 'Regroupé : sans choix, aucune couleur d’élément');
+  // Chaque section lit les couleurs de SON widget : le CPU n’emprunte pas celles de la mémoire.
+  check(!groupedWith(1, { memory: { app: 'red' } }).slice(0, groupedWith(1, { memory: { app: 'red' } }).indexOf('id="g-memory"')).includes('#FF615A'), 'Regroupé : la section CPU ignore les couleurs de la mémoire');
+  widget('metrics = ' + JSON.stringify(wsnap)); widget('widgetId = null');  // restaure
+}
+
+// ── Réglages : couleurs de l’icône et des éléments (dashboard.html) ──────────
+section('dashboard.html — palette élargie, couleur personnalisée, couleurs du panneau');
+{
+  const names = dashboard('WIDGET_COLORS.map(([c])=>c)');
+  check(names.length >= 25 && names[0] === 'auto', `palette : ${names.length - 1} couleurs + auto en tête`);
+  for (const legacy of ['auto', 'blue', 'green', 'purple', 'cyan', 'orange', 'amber', 'red', 'pink', 'gray']) check(names.includes(legacy), `palette : nom historique « ${legacy} » conservé`);
+  check(dashboard('WIDGET_COLORS.every(([c,h])=>c==="auto"||/^#[0-9A-F]{6}$/.test(h))'), 'palette : chaque couleur nommée est un #RRGGBB majuscule');
+  check(dashboard('new Set(WIDGET_COLORS.map(([,h])=>h)).size') === names.length, 'palette : aucune valeur en double');
+  const keys = [...names.filter(c => c !== 'auto').map(c => 'color.' + c), 'color.custom', 'col.title', 'col.auto', 'col.autoHint',
+    ...Object.entries(dashboard('PANEL_ELEMENTS')).flatMap(([id, els]) => els.map(e => `col.${id}.${e}`))];
+  for (const lang of ['fr', 'en', 'es', 'it']) {
+    const dict = loadDictionary(lang);
+    check(keys.every(k => typeof dict[k] === 'string' && dict[k].trim()), `${lang} : ${keys.length} clés color.* / col.* définies`);
+  }
+  // Validation stricte côté JS.
+  for (const ok of ['#000000', '#ffffff', '#4C90FF', '#aBcDeF']) check(dashboard(`isHexColor(${JSON.stringify(ok)})`) === true, `isHexColor : ${ok} accepté`);
+  for (const bad of ['#FFF', '#GGGGGG', '000000', '#0000000', '#00000', ' #000000', '#000000 ', '#000000\n', 'red', '', null, undefined, 7])
+    check(dashboard(`isHexColor(${JSON.stringify(bad) ?? 'undefined'})`) === false, `isHexColor : ${JSON.stringify(bad)} refusé`);
+  checkEqual(dashboard('colorValue("#33a6ff")'), '#33A6FF', 'colorValue : hexadécimal en majuscules');
+  checkEqual(dashboard('colorValue("teal")'), 'teal', 'colorValue : nom de palette conservé');
+  checkEqual(dashboard('[colorValue(undefined),colorValue("auto"),colorValue("inconnu"),colorValue("#12"),colorValue(5)]'), ['auto', 'auto', 'auto', 'auto', 'auto'], 'colorValue : absent/inconnu/invalide → auto');
+  // Messages envoyés au natif.
+  checkEqual(dashboard('colorMessage({id:"cpu"},"teal")'), ['setMenuBarWidgetStyle', { id: 'cpu', color: 'teal' }], 'message : couleur de l’icône (nom)');
+  checkEqual(dashboard('colorMessage({id:"cpu"},"#AA00FF")'), ['setMenuBarWidgetStyle', { id: 'cpu', color: '#AA00FF' }], 'message : couleur de l’icône (hexadécimal)');
+  checkEqual(dashboard('colorMessage({id:"cpu",el:"perf"},"orange")'), ['setWidgetElementColor', { id: 'cpu', element: 'perf', color: 'orange' }], 'message : couleur d’un élément');
+  checkEqual(dashboard('colorMessage({id:"cpu",el:"perf"},"auto")'), ['setWidgetElementColor', { id: 'cpu', element: 'perf', color: 'auto' }], 'message : « auto » efface la couleur d’un élément');
+  for (const [d, v, why] of [['{id:"cpu"}', '"#FFF"', 'hexadécimal court'], ['{id:"cpu"}', '"javascript:1"', 'valeur étrangère'], ['{id:"cpu",el:"down"}', '"red"', 'élément d’un autre widget'],
+    ['{id:"cpu",el:"bogus"}', '"red"', 'élément inconnu'], ['{id:"bogus"}', '"red"', 'widget inconnu'], ['{id:"bogus",el:"perf"}', '"red"', 'widget inconnu (élément)'], ['null', '"red"', 'sans cible']])
+    check(dashboard(`colorMessage(${d},${v})`) === null, `message refusé : ${why}`);
+  // Sélecteur personnalisé : validation avant envoi, aperçu local.
+  const preview = (value, dataset) => dashboard(`(()=>{const p={style:{}};pickCustomColor({value:${JSON.stringify(value)},dataset:${JSON.stringify(dataset)},parentNode:p});return p.style.background})()`);
+  checkEqual(preview('#12abEF', { id: 'cpu', el: 'perf' }), '#12abEF', 'pickCustomColor : aperçu immédiat sur la pastille');
+  checkEqual(preview('#12345', { id: 'cpu' }), undefined, 'pickCustomColor : hexadécimal invalide ignoré (pas d’aperçu)');
+  checkEqual(preview('#12abEF', { id: 'cpu', el: 'down' }), undefined, 'pickCustomColor : élément hors liste blanche ignoré');
+  checkEqual(preview('#12abEF', { id: 'bogus' }), undefined, 'pickCustomColor : widget inconnu ignoré');
+  check(dashboard('colorBusyUntil>Date.now()'), 'pickCustomColor : le rendu est suspendu pendant la sélection');
+  check(dashboard('colorPickerBusy()') === false, 'rendu : jamais suspendu sans champ couleur actif');
+
+  // Rangée d’icône : 24 couleurs + auto + personnalisée.
+  const row = (cfg, extra = {}) => plain(dashboard(`widgetConfigRows(${JSON.stringify({ menuBarWidgets: ['cpu', 'memory'], menuBarWidgetConfig: cfg, ...extra })})`));
+  const iconRow = row({}).split('<details')[0];
+  check(count(iconRow, /class="wc-swatch/g) >= 26 && /wc-swatch custom/.test(iconRow), 'rangée de l’icône : toutes les pastilles et la personnalisée');
+  check(/<input type="color" value="#4C90FF" data-id="cpu"/.test(iconRow), 'rangée de l’icône : sélecteur <input type="color"> lié au widget');
+  check(/class="wc-swatch on" title="[^"]*" style="background:var\(--muted\)"/.test(iconRow), 'rangée de l’icône : « auto » actif par défaut');
+  check(row({ cpu: { color: 'teal' } }).split('<details')[0].includes('class="wc-swatch on" title="Turquoise" style="background:#2EC4B6"'), 'rangée de l’icône : nouvelle couleur nommée active');
+  const custom = row({ cpu: { color: '#33a6ff' } }).split('<details')[0];
+  check(/wc-swatch custom on" title="Personnalisée…" style="background:#33A6FF"><input type="color" value="#33A6FF"/.test(custom), 'rangée de l’icône : couleur personnalisée active, aperçu et valeur');
+  check(count(custom, /wc-swatch on/g) === 0, 'rangée de l’icône : une seule pastille active (la personnalisée)');
+  const bogus = row({ cpu: { color: '#12' } }).split('<details')[0];
+  check(/class="wc-swatch on" title="[^"]*" style="background:var\(--muted\)"/.test(bogus) && !/custom on/.test(bogus), 'rangée de l’icône : préférence invalide → auto');
+  check(!row({ cpu: { color: '"><img src=x onerror=1>' } }).includes('onerror'), 'rangée de l’icône : valeur piégée jamais recopiée');
+  // Couleurs du panneau : un <details> replié par widget activé, une ligne par élément.
+  const html = row({}, { widgetElementColors: { cpu: { perf: 'orange', eff: '#00aabb' } } });
+  check(count(html, /<details class="wc-el"/g) === 2, 'couleurs du panneau : un <details> par widget activé (cpu, memory)');
+  check(!/<details class="wc-el" open/.test(html), 'couleurs du panneau : replié par défaut');
+  check(/<summary>Couleurs du panneau<\/summary>/.test(html), 'couleurs du panneau : titre français');
+  const cpuBlock = html.split('<details class="wc-el"')[1];
+  check(count(cpuBlock.split('</details>')[0], /class="wc-el-row"/g) === 5, 'couleurs du panneau CPU : 5 lignes (courbe, performance, efficacité, utilisateur, système)');
+  for (const label of ['Courbe', 'Cœurs de performance', 'Cœurs d’efficacité', 'Utilisateur', 'Système']) check(cpuBlock.includes(`>${label}</span>`), `couleurs du panneau CPU : libellé « ${label} »`);
+  const perfRow = cpuBlock.split('wc-el-row')[2];
+  check(/class="wc-swatch on" title="Orange" style="background:#FF9933" onclick="send\(\.\.\.colorMessage\(\{id:'cpu',el:'perf'\},'orange'\)\)"/.test(perfRow), 'ligne performance : orange actif, envoie setWidgetElementColor');
+  check(/class="wc-auto " title="Couleur du thème"/.test(perfRow) && />Auto<\/button>/.test(perfRow), 'ligne performance : bouton « Auto » inactif quand une couleur est choisie');
+  const effRow = cpuBlock.split('wc-el-row')[3];
+  check(/wc-swatch custom on" title="Personnalisée…" style="background:#00AABB"><input type="color" value="#00AABB" data-id="cpu" data-el="eff"/.test(effRow), 'ligne efficacité : couleur personnalisée active (hexadécimal en majuscules)');
+  const curveRow = cpuBlock.split('wc-el-row')[1];
+  check(/class="wc-auto on"/.test(curveRow) && count(curveRow, /wc-swatch on/g) === 0, 'ligne courbe : Auto actif, aucune pastille active par défaut');
+  check(count(curveRow, /class="wc-swatch /g) === names.length - 1 + 1, 'ligne : toutes les couleurs nommées + la personnalisée (sans la pastille « auto »)');
+  check(!/class="wc-swatch[^"]*" title="[^"]*" style="background:var\(--muted\)"/.test(curveRow), 'ligne d’élément : pas de pastille « auto » (le bouton texte la remplace)');
+  const memBlock = html.split('<details class="wc-el"')[2].split('</details>')[0];
+  check(count(memBlock, /class="wc-el-row"/g) === 5 && memBlock.includes('>Applications</span>') && memBlock.includes('>Système (résidente)</span>'), 'couleurs du panneau mémoire : 5 lignes');
+  // État déplié conservé d’un rendu à l’autre.
+  dashboard('toggleElementColors("cpu",true)');
+  check(/<details class="wc-el" open ontoggle="toggleElementColors\('cpu'/.test(row({})), 'couleurs du panneau : l’état déplié survit au re-rendu');
+  dashboard('toggleElementColors("cpu",false)');
+  // Widgets inactifs ou sans élément : rien.
+  check(!/wc-el/.test(plain(dashboard(`widgetConfigRows(${JSON.stringify({ menuBarWidgets: [] })})`))), 'couleurs du panneau : rien pour un widget désactivé');
+  checkEqual(dashboard('elementColorRows("claudeWeek",{})'), '', 'couleurs du panneau : rien pour un widget de quotas');
+  check(dashboard('elementColorRows("cpu","bogus")').includes('class="wc-el-row"'), 'couleurs du panneau : préférences mal formées tolérées');
+  // Autres langues : les libellés suivent.
+  const en = sandboxFor('dashboard.html', 'en');
+  check(plain(en(`widgetConfigRows(${JSON.stringify({ menuBarWidgets: ['cpu'], menuBarWidgetConfig: {} })})`)).includes('Performance cores'), 'couleurs du panneau : anglais');
+  // Le natif est la dernière barrière : l’action existe avec liste blanche et validation.
+  const nativeSource = readFileSync(join(root, 'Native', 'Status.m'), 'utf8');
+  const action = nativeSource.slice(nativeSource.indexOf('@"setWidgetElementColor"'));
+  check(/TMWidgetElementKeys\(wid\) containsObject:element/.test(action.slice(0, 900)) && /TMWidgetNormalizedColor\(raw, NO\)/.test(action.slice(0, 900)), 'natif : setWidgetElementColor valide l’id, l’élément et la couleur');
+  check(/@"elementColors": \[self widgetElementColorsPayload\]/.test(nativeSource) && /@"widgetElementColors": \[self widgetElementColorsPayload\]/.test(nativeSource), 'natif : le panneau widget ET le dashboard reçoivent les couleurs');
+}
 
 // Échelle auto : la crête ne doit pas toucher le bord haut, sinon la courbe se lit comme saturée.
 section('widget.html — échelle des courbes sans pourcentage');
