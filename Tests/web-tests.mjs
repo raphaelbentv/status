@@ -658,6 +658,7 @@ section('Popup : jauges, sous-quotas, sélecteurs et état inconnu');
   const dated=(n,label,used,offset)=>openAIAccount(n,label,[{windowId:'weekly',durationMinutes:10080,label:'Semaine',usedPercent:used,resetsAt:at(offset)}]);
   const list=plain(menubar('accountList')([dated(1,'Jeudi',13,2),dated(2,'Vendredi',9,3),dated(3,'Mardi',67,0)]));
   check(/Mardi.*33 %.*Jeudi.*87 %.*Vendredi.*91 %/.test(list),'liste compacte : % restants, par prochain renouvellement');
+  checkEqual((menubar('accountList')([dated(1,'Jeudi',13,2),dated(2,'Vendredi',9,3)]).match(/role="meter"/g)||[]).length,2,'liste compacte : une jauge par compte');
   checkEqual(menubar('accountList')([one]),'','un seul compte : pas de liste');
   check(plain(menubar('accountList')([{...one,connected:false},two])).includes('—'),'compte sans mesure : tiret');
 }

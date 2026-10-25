@@ -42,7 +42,7 @@
   .account-note{margin-top:11px;color:var(--muted);font-size:12px;min-height:24px}
   .account-note.stale{color:var(--amber);font-weight:700}
   .account-note.live{color:var(--green)}
-  .extra-credits{margin-top:12px;padding-top:10px;border-top:1px solid var(--hair);font-size:12px}
+  .extra-credits{margin-top:9px;padding-top:8px;border-top:1px solid var(--hair);font-size:12px}
   .extra-credits span,.extra-credits small{display:block;color:var(--muted)}
   .extra-credits strong{display:block;margin-top:3px;font-variant-numeric:tabular-nums}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
@@ -114,36 +114,45 @@
   .fan-state{flex:1;font-size:12px;font-weight:700;color:var(--muted)}.fan-state.on{color:var(--blue)}
   .fan-note{display:block;color:var(--muted);font-size:12px;margin-top:7px;line-height:1.4}
   /* Cartes fournisseur côte à côte : volume hebdo en grand, jauge, renouvellement, puis la 5 h. */
-  .providers{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;align-content:start;gap:10px;padding:12px;flex:1;min-height:0;overflow-y:auto}
-  .quota-card{background:var(--panel-bg);border:1px solid var(--hair);border-top:2px solid var(--provider);border-radius:var(--radius);padding:12px 12px 10px;min-width:0;display:flex;flex-direction:column}
-  .quota-card header{display:flex;flex-direction:column;align-items:stretch;gap:6px;margin-bottom:10px;min-width:0}
+  .providers{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;align-content:start;gap:8px;padding:10px;flex:1;min-height:0;overflow-y:auto}
+  .quota-card{background:var(--panel-bg);border:1px solid var(--hair);border-top:2px solid var(--provider);border-radius:var(--radius);padding:10px 10px 8px;min-width:0;display:flex;flex-direction:column}
+  .quota-card header{display:flex;flex-direction:column;align-items:stretch;gap:5px;margin-bottom:6px;min-width:0}
   .provider-name{font-size:12px;font-weight:700;color:var(--provider);text-transform:lowercase;letter-spacing:.06em}
   .account-name{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .quota-card .provider-picker{margin:0;width:100%;padding:4px 6px}
+  .quota-card .provider-picker{margin:0;width:100%;padding:3px 6px;font-size:11.5px}
   .quota-main{display:flex;flex-direction:column;gap:6px}
-  .quota-main .value{font-size:40px}
+  .quota-main .value{font-size:34px}
   .quota-side{min-width:0}
   .quota-label{font-size:12px;color:var(--muted)}
   .quota-side .primary-rail{margin-top:6px}
-  .quota-side .reset{margin-top:6px}
-  .session-row{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"l v" "r r" "t t";align-items:center;gap:5px 8px;margin-top:10px;padding-top:9px;border-top:1px solid var(--hair);font-size:12px;color:var(--muted)}
+  /* Une seule ligne, tronquée au pire : un retour à la ligne laissait « h » seul au bout. */
+  .quota-side .reset{margin-top:5px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .session-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"l t v" "r r r";align-items:center;gap:5px 8px;margin-top:8px;padding-top:7px;border-top:1px solid var(--hair);font-size:12px;color:var(--muted)}
   .session-row>span{grid-area:l}.session-row>b{grid-area:v;justify-self:end;color:var(--text);font-variant-numeric:tabular-nums}
   .session-row>.rail{grid-area:r}.session-row>small{grid-area:t;font-size:12px;font-variant-numeric:tabular-nums}
   .rail.thin{height:6px;margin:0;border-radius:3px}
-  .quota-card footer{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:auto;padding-top:10px;min-width:0;width:100%}
+  .quota-card footer{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:auto;padding-top:8px;min-width:0;width:100%}
   .quota-card .account-note{margin:0;min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quota-card .who{color:var(--text);font-weight:700;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .quota-card .account-action{margin:0}
-  .quota-card .extra-credits{margin-top:10px;padding-top:9px}
+  /* Crédits calés en bas des deux cartes : ils tombent à la même hauteur même quand une seule
+     des deux a une ligne 5 h. Le pied suit sans second « auto », qui se partagerait le vide. */
+  .quota-card .extra-credits~footer{margin-top:0}
+  .quota-card .session-row{margin-bottom:8px}
+  .quota-card .extra-credits{margin-top:auto;padding-top:9px}
   /* Crédits API : sous les deux cartes, sur toute la largeur. Estimation, jamais un solde lu. */
-  /* Liste compacte : une ligne par compte, le % hebdo restant à droite (et la 5 h en retrait). */
-  .account-list{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:8px 12px}
-  .account-list>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:2px}
-  .al-row{display:grid;grid-template-columns:8px minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--hair);font-size:12px;font-variant-numeric:tabular-nums}
+  /* Liste compacte : une ligne par compte — nom, jauge (même sens que les cartes : la part consommée
+     se remplit), 5 h en retrait pour Claude, puis le % hebdo restant. Colonnes fixes pour que les
+     jauges s'alignent d'une ligne à l'autre. */
+  .account-list{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:8px 10px 4px}
+  .account-list>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:3px}
+  .al-row{display:grid;grid-template-columns:8px minmax(0,140px) minmax(40px,1fr) 52px 40px;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--hair);font-size:12px;font-variant-numeric:tabular-nums}
   .al-row:first-of-type{border-top:0}
   .al-row>i{width:8px;height:8px;border-radius:50%;background:var(--provider)}
   .al-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
-  .al-row>small{color:var(--muted);min-width:46px;text-align:right}
-  .al-row>b{min-width:38px;text-align:right}.al-row>b.warning{color:var(--amber)}.al-row>b.critical{color:var(--danger)}
+  .al-row .rail{height:6px;margin:0;border-radius:3px}
+  .al-row>.al-gap{height:6px}
+  .al-row>small{color:var(--muted);text-align:right;white-space:nowrap}
+  .al-row>b{text-align:right}.al-row>b.warning{color:var(--amber)}.al-row>b.critical{color:var(--danger)}
   .al-row.off>span,.al-row.off>b{color:var(--muted)}
   .api-credits{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:10px 12px}
   .api-credits>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:2px}
@@ -212,11 +221,11 @@ function selectPopupAccount(provider,accountId){
   if(!lastData?.accounts?.some(a=>a.provider===provider&&a.accountId===accountId))return;
   send('setMenuBarMetric',{value:pinnedMetric(provider,accountId,'weekly')});
 }
-function quotaRail(window,primary=false){
+function quotaRail(window,primary=false,thin=false){
   const value=used(window);
   if(value===null||!Number.isFinite(value))return '';
   const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
-  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${t('menu.consumed',{label:esc(I.label(window.label)||window.windowId||'Quota')})}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${t('menu.valueText',{used:I.pct(value),left:I.pct(100-value)})}"><i style="width:${value}%;background:${color}"></i></div>`;
+  return `<div class="rail ${thin?'thin':''} ${primary?'primary-rail':''}" role="meter" aria-label="${t('menu.consumed',{label:esc(I.label(window.label)||window.windowId||'Quota')})}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${t('menu.valueText',{used:I.pct(value),left:I.pct(100-value)})}"><i style="width:${value}%;background:${color}"></i></div>`;
 }
 function extraCredits(account){
   if(!account)return '';
@@ -281,7 +290,8 @@ function accountList(accounts){
   const row=({account,weekly,session})=>{
     const value=used(weekly),level=value===null?'':value>=95?'critical':value>=80?'warning':'';
     const ink=account.provider==='openai'?'var(--blue)':'var(--purple)';
-    return `<div class="al-row ${value===null?'off':''}" style="--provider:${ink}"><i></i><span title="${esc(account.label)}">${esc(account.label)}</span><small>${session?'5 h '+I.pct(100-used(session)):''}</small><b class="${level}">${value===null?'—':I.pct(100-value)}</b></div>`;
+    const rail=value===null?'<div class="al-gap"></div>':quotaRail(weekly,false,true);
+    return `<div class="al-row ${value===null?'off':''}" style="--provider:${ink}"><i></i><span title="${esc(account.label)}">${esc(account.label)}</span>${rail}<small>${session?'5 h '+I.pct(100-used(session)):''}</small><b class="${level}">${value===null?'—':I.pct(100-value)}</b></div>`;
   };
   return `<section class="account-list"><header>${t('menu.accountList')}</header>${rows.map(row).join('')}</section>`;
 }

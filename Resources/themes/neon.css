@@ -422,7 +422,7 @@ html[data-theme="neon"] .account-note{color:var(--ink3);font-size:12px}
 html[data-theme="neon"] .account-note.stale{color:var(--amber);font-weight:500}
 html[data-theme="neon"] .account-note.live{color:var(--green);text-shadow:0 0 8px rgba(52,245,168,.5)}
 html[data-theme="neon"] .quota-card .who{color:#fff;font-weight:500}
-html[data-theme="neon"] .quota-card .extra-credits{border-top:1px solid rgba(255,255,255,.1)}
+html[data-theme="neon"] .quota-card .extra-credits{border-top:1px solid rgba(255,255,255,.1);padding:7px 12px}
 html[data-theme="neon"] .extra-credits span,html[data-theme="neon"] .extra-credits small{color:var(--ink3)}
 html[data-theme="neon"] .popup-notice{border-bottom:1.5px solid var(--amber);background:rgba(255,163,26,.06)}
 html[data-theme="neon"] .popup-notice button{border:1.5px solid var(--amber);border-radius:99px;padding:3px 12px;color:#fff}
