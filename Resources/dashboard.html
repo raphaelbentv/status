@@ -419,14 +419,24 @@ const WIDGETS=[['cpu'],['memory'],['gpu'],['network'],['temperature'],['battery'
 // Formes valides par widget (défaut = 1re). Ids alignés sur TMWidgetImageStyled.
 // « jauge » (barre horizontale) partout où la donnée est un taux de remplissage — pas pour le
 // réseau, dont le débit n'a pas de plafond connu à représenter.
-const WIDGET_SHAPES={cpu:['bars','graph','ring','pie','bar','text'],gpu:['bars','graph','ring','pie','bar','text'],
-  memory:['pie','ring','bars','graph','bar','text'],disk:['pie','ring','bars','graph','bar','text'],
-  network:['twoLine','text'],temperature:['twoLine','ring','bar','text'],battery:['battery','ring','bar','twoLine','text'],
+const WIDGET_SHAPES={
+  // Les formes historiques restent en tête, dans leur ordre (la 1re est le défaut : aucun changement
+  // pour les réglages existants) ; les familles Anneaux (ringValue, segments, dial, dualArc, hub) et
+  // Console (chip, chipBar) s'ajoutent derrière. Un id que le moteur ne sait pas dessiner pour un
+  // widget retombe sur sa forme naturelle (TMWidgetResolvedShape).
+  cpu:['bars','graph','ring','pie','bar','text','ringValue','segments','dial','chip'],
+  gpu:['bars','graph','ring','pie','bar','text','ringValue','segments','dial','chip'],
+  memory:['pie','ring','bars','graph','bar','text','ringValue','segments','hub','chip','chipBar'],
+  disk:['pie','ring','bars','graph','bar','text','ringValue','segments','hub','chip','chipBar'],
+  network:['twoLine','text','dualArc','chip'],
+  temperature:['twoLine','ring','bar','text','dial','ringValue','chip'],
+  battery:['battery','ring','bar','twoLine','text','ringValue','chipBar','chip'],
   // Consommations hebdomadaires : mêmes formes que les taux de remplissage — les deux IA peuvent
   // être affichées côte à côte, chacune avec sa forme et sa couleur.
-  claudeWeek:['pie','ring','bars','graph','bar','text'],codexWeek:['pie','ring','bars','graph','bar','text'],
-  // Crédit API : une part restante, sans historique à tracer.
-  anthropicApi:['ring','pie','bar','text'],openaiApi:['ring','pie','bar','text']};
+  claudeWeek:['pie','ring','bars','graph','bar','text','ringValue','segments','dial'],
+  codexWeek:['pie','ring','bars','graph','bar','text','ringValue','segments','dial'],
+  // Crédit API : une part restante, sans historique à tracer (pas de chiffre seul : le texte est en dollars).
+  anthropicApi:['ring','pie','bar','text','segments','dial'],openaiApi:['ring','pie','bar','text','segments','dial']};
 // Formes de la jauge des consommations (ids alignés sur updateStatusMenu côté natif). Les quatre
 // dernières viennent du moteur des widgets : une forme ajoutée là profite aux deux.
 const ICON_DESIGNS=['doubleRing','capsules','doubleArc','boldRing','reservoir','segments','hairline','thinRing','tube','grid','squircle'];

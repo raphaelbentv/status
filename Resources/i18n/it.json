@@ -646,7 +646,7 @@
  "shape.hub": "mozzo",
  "shape.pie": "torta",
  "shape.ring": "anello",
- "shape.ringValue": "anello + valore",
+ "shape.ringValue": "anello cifra",
  "shape.segments": "segmenti",
  "shape.text": "testo",
  "shape.twoLine": "2 righe",
