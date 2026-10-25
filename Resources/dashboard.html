@@ -127,9 +127,29 @@
   .wc-move{display:flex;gap:0;border:1px solid var(--hair-strong);flex:none}
   .wc-move .seg{padding:5px 8px;font-size:12px;line-height:1}
   .wc-move .seg[disabled]{opacity:.28;cursor:default}
-  .wc-colors{display:flex;gap:4px;margin-left:auto;flex:none}
-  .wc-swatch{width:15px;height:15px;border-radius:50%;border:1px solid var(--hair-strong);cursor:pointer;padding:0}
+  /* 24 couleurs + auto + personnalisée : grille de 13 colonnes sur deux rangées (le bouton « Auto » des
+     éléments occupe la colonne de gauche, sur les deux rangées). */
+  .wc-colors{display:grid;grid-template-columns:repeat(13,15px);gap:6px 5px;margin-left:auto;flex:none;align-items:center}
+  .wc-swatch{width:15px;height:15px;border-radius:50%;border:1px solid var(--hair-strong);cursor:pointer;padding:0;display:inline-block;flex:none}
   .wc-swatch.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--blue)}
+  /* Pastille personnalisée : un <input type="color"> invisible posé sur un disque arc-en-ciel (ou sur la
+     couleur choisie une fois posée). */
+  .wc-swatch.custom{position:relative;overflow:hidden;background:conic-gradient(#FF615A,#FFE14D,#4CD173,#4CCCE6,#4C90FF,#E04FD8,#FF615A)}
+  .wc-swatch.custom input{position:absolute;left:-4px;top:-4px;width:23px;height:23px;margin:0;padding:0;border:0;opacity:0;cursor:pointer}
+  .wc-auto{font:inherit;font-size:11px;line-height:15px;padding:0 7px;border:1px solid var(--hair-strong);border-radius:var(--radius);background:transparent;color:var(--muted);cursor:pointer}
+  .wc-auto:hover{color:var(--text)}.wc-auto.on{color:var(--blue);border-color:var(--blue)}
+  /* « Couleurs du panneau » : un <details> par widget, une ligne par élément (libellé + pastilles). */
+  .wc-el{margin:-3px 0 3px 10px;padding-left:10px;border-left:2px solid var(--hair)}
+  .wc-el>summary{cursor:pointer;list-style:none;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+  .wc-el>summary::-webkit-details-marker{display:none}
+  .wc-el>summary::before{content:"▸";font-size:11px;transition:transform .12s}
+  .wc-el[open]>summary::before{transform:rotate(90deg)}
+  .wc-el>summary:hover{color:var(--text)}
+  .wc-el-row{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:5px 0;border-top:1px solid var(--hair)}
+  .wc-el-row:first-of-type{margin-top:6px}
+  .wc-el-label{flex:0 0 150px;font-size:12px;color:var(--text);min-width:0}
+  .wc-el-row .wc-colors{margin-left:0;grid-template-columns:auto repeat(13,15px);column-gap:6px}
+  .wc-el-row .wc-auto{grid-row:span 2;align-self:center}
   /* Sous-rangée : contenu du panneau d'info (sections activables). */
   .wc-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-3px 0 3px 10px;padding-left:10px;border-left:2px solid var(--hair)}
   .wc-sublabel{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none}
@@ -455,10 +475,59 @@ const WIDGET_SHAPES={
 // Formes de la jauge des consommations (ids alignés sur updateStatusMenu côté natif). Les quatre
 // dernières viennent du moteur des widgets : une forme ajoutée là profite aux deux.
 const ICON_DESIGNS=['doubleRing','capsules','doubleArc','boldRing','reservoir','segments','hairline','thinRing','tube','grid','squircle'];
-// Palette (alignée sur TMWidgetNamedColor). « auto » = neutre adaptatif + alerte.
-const WIDGET_COLORS=[['auto','var(--muted)'],['blue','#4C90FF'],['green','#4CD173'],
-  ['purple','#AD85FF'],['cyan','#4CCCE6'],['orange','#FF9933'],
-  ['amber','#FFBF40'],['red','#FF615A'],['pink','#FF73B3'],['gray','#9EA9B8']];
+// Palette (même liste, mêmes valeurs que TMWidgetPaletteTable côté natif et WIDGET_PALETTE de widget.html :
+// un test vérifie la concordance). « auto » = neutre adaptatif + alerte. Les dix noms historiques restent valides.
+const WIDGET_COLORS=[['auto','var(--muted)'],['blue','#4C90FF'],['sky','#66C2FF'],['cyan','#4CCCE6'],['teal','#2EC4B6'],
+  ['mint','#7EEAC0'],['green','#4CD173'],['lime','#B5E655'],['yellow','#FFE14D'],['amber','#FFBF40'],['orange','#FF9933'],
+  ['vermilion','#FF6B3D'],['coral','#FF7F7A'],['red','#FF615A'],['pink','#FF73B3'],['magenta','#E04FD8'],['purple','#AD85FF'],
+  ['violet','#8A5CF6'],['indigo','#5B6CFF'],['lavender','#C9B8FF'],['brown','#A9744F'],['sand','#D9C7A0'],['gray','#9EA9B8'],
+  ['slate','#6B7A90'],['white','#F2F4F8']];
+// Éléments colorables du panneau d'info de chaque widget (alignés sur TMWidgetElementKeys et ELEMENTS de widget.html).
+const PANEL_ELEMENTS={
+  cpu:['curve','perf','eff','user','system'],memory:['curve','app','wired','compressed','cache'],gpu:['curve','renderer','tiler'],
+  network:['down','up'],temperature:['curve'],battery:['curve'],disk:['read','write','volumes']};
+// Couleur libre : « #RRGGBB » strict, rien d'autre (le natif revalide).
+const HEX_COLOR=/^#[0-9a-fA-F]{6}$/;
+const isHexColor=v=>typeof v==='string'&&HEX_COLOR.test(v);
+const namedColor=name=>WIDGET_COLORS.find(([c])=>c===name&&c!=='auto');
+// Valeur affichable d'une préférence de couleur : « auto », un nom de palette, ou un hexadécimal en majuscules.
+const colorValue=v=>v==null||v==='auto'?'auto':isHexColor(v)?v.toUpperCase():namedColor(v)?v:'auto';
+// Message natif d'un choix de couleur : élément de panneau (d.el) ou icône de la barre des menus. Null si la valeur n'est pas valide.
+function colorMessage(d,value){
+  if(!d||!(isHexColor(value)||namedColor(value)||value==='auto'))return null;
+  if(d.el){
+    if(!(PANEL_ELEMENTS[d.id]||[]).includes(d.el))return null;
+    return ['setWidgetElementColor',{id:d.id,element:d.el,color:value}];
+  }
+  if(!WIDGETS.some(([w])=>w===d.id))return null;
+  return ['setMenuBarWidgetStyle',{id:d.id,color:value}];
+}
+// Rangée de pastilles : auto (disque neutre, ou bouton texte « Auto » pour les éléments), les 24 couleurs, puis la
+// pastille personnalisée. `d` = {id[,el]} ; le clic envoie la couleur au natif, jamais la page ne la stocke.
+function colorSwatches(current,d,{textAuto=false}={}){
+  const cur=colorValue(current),isCustom=isHexColor(cur),attrs=`data-id="${d.id}"${d.el?` data-el="${d.el}"`:''}`;
+  const pick=c=>`send(...colorMessage({id:'${d.id}'${d.el?`,el:'${d.el}'`:''}},'${c}'))`;
+  const auto=textAuto
+    ?`<button class="wc-auto ${cur==='auto'?'on':''}" title="${t('col.autoHint')}" onclick="${pick('auto')}">${t('col.auto')}</button>`
+    :'';
+  const swatches=WIDGET_COLORS.filter(([c])=>textAuto?c!=='auto':true).map(([c,hex])=>
+    `<button class="wc-swatch ${cur===c?'on':''}" title="${c==='auto'?t('col.autoHint'):t('color.'+c)}" style="background:${hex}" onclick="${pick(c)}"></button>`).join('');
+  const custom=`<label class="wc-swatch custom ${isCustom?'on':''}" title="${t('color.custom')}"${isCustom?` style="background:${cur}"`:''}><input type="color" value="${isCustom?cur:'#4C90FF'}" ${attrs} oninput="pickCustomColor(this)" onchange="pickCustomColor(this,true)"></label>`;
+  return `${auto}${swatches}${custom}`;
+}
+// Le sélecteur natif du système envoie `input` en continu : l'aperçu suit tout de suite, mais le choix n'est
+// transmis qu'après une courte pause (ou à la validation). render() est suspendu pendant ce temps — sinon la
+// pastille serait remplacée sous le sélecteur et ses événements suivants se perdraient.
+let colorBusyUntil=0,colorTimer=null;
+function pickCustomColor(input,commit){
+  const message=colorMessage({id:input.dataset?.id,el:input.dataset?.el},input.value);
+  if(!message||!isHexColor(input.value))return;
+  if(input.parentNode?.style)input.parentNode.style.background=input.value;
+  colorBusyUntil=Date.now()+15000;
+  clearTimeout(colorTimer);
+  colorTimer=setTimeout(()=>send(...message),commit?0:350);
+}
+const colorPickerBusy=()=>Date.now()<colorBusyUntil&&document.activeElement?.type==='color';
 // Sections activables du panneau d'info de chaque widget (clés alignées sur `on(section)` de
 // widget.html). Absent d'un réglage = affiché (défaut). Le titre, la grande valeur et la courbe
 // principale restent toujours présents — seules ces sections optionnelles se règlent.
@@ -492,6 +561,17 @@ function alertRows(p){
     return `<div class="wc-row">${toggle}${sel}</div>`;
   }).join('');
 }
+// « Couleurs du panneau » : repliable, une ligne par élément du popup (courbe, cœurs de performance…).
+// L'état déplié survit au re-rendu (la page se reconstruit à chaque donnée reçue).
+const elementColorsOpen=new Set();
+function toggleElementColors(id,open){if(open)elementColorsOpen.add(id);else elementColorsOpen.delete(id)}
+function elementColorRows(id,stored){
+  const keys=PANEL_ELEMENTS[id];
+  if(!keys)return '';
+  const own=stored&&typeof stored==='object'&&stored[id]&&typeof stored[id]==='object'?stored[id]:{};
+  const rows=keys.map(el=>`<div class="wc-el-row"><span class="wc-el-label">${t('col.'+id+'.'+el)}</span><span class="wc-colors">${colorSwatches(own[el],{id,el},{textAuto:true})}</span></div>`).join('');
+  return `<details class="wc-el" ${elementColorsOpen.has(id)?'open':''} ontoggle="toggleElementColors('${id}',this.open)"><summary>${t('col.title')}</summary>${rows}</details>`;
+}
 function widgetConfigRows(p){
   const enabled=(p.menuBarWidgets||[]).filter(id=>WIDGETS.some(([w])=>w===id));
   const config=p.menuBarWidgetConfig||{},panels=p.widgetPanelConfig||{};
@@ -505,12 +585,12 @@ function widgetConfigRows(p){
     const toggle=`<button class="seg wc-toggle ${on?'on':''}" title="${t(on?'widget.hide':'widget.show',{label})}" onclick="send('setMenuBarWidget',{id:'${id}',on:${!on}})"><span class="wc-dot"></span>${label}</button>`;
     if(!on)return `<div class="wc-row">${toggle}</div>`;
     const shapeSel=`<span class="segmented wc-shapes">${shapes.map(s=>`<button class="seg ${shape===s?'on':''}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',shape:'${s}'})">${t('shape.'+s)}</button>`).join('')}</span>`;
-    const colorSel=`<span class="wc-colors">${WIDGET_COLORS.map(([c,hex])=>`<button class="wc-swatch ${color===c?'on':''}" title="${t('color.'+c)}" style="background:${hex}" onclick="send('setMenuBarWidgetStyle',{id:'${id}',color:'${c}'})"></button>`).join('')}</span>`;
+    const colorSel=`<span class="wc-colors">${colorSwatches(color,{id})}</span>`;
     const secs=PANEL_SECTIONS[id]||[],pcfg=panels[id]||{};
     const secSel=secs.length?`<div class="wc-sub"><span class="wc-sublabel">${t('widget.panel')}</span><span class="segmented">${secs.map(key=>{const sOn=pcfg[key]!==false;return `<button class="seg ${sOn?'on':''}" onclick="send('setWidgetPanelSection',{id:'${id}',section:'${key}',on:${!sOn}})">${t('panel.'+id+'.'+key)}</button>`}).join('')}</span></div>`:'';
     // Déplacement dans la barre des menus : ← vers la gauche, → vers la droite. Désactivés en butée.
     const move=`<span class="wc-move"><button class="seg" ${index===0?'disabled':''} title="${t('widget.left')}" onclick="send('moveMenuBarWidget',{id:'${id}',delta:-1})">←</button><button class="seg" ${index===enabled.length-1?'disabled':''} title="${t('widget.right')}" onclick="send('moveMenuBarWidget',{id:'${id}',delta:1})">→</button></span>`;
-    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}${apiWidgetAccountRow(id,cfg)}`;
+    return `<div class="wc-row">${toggle}${move}${shapeSel}${colorSel}</div>${secSel}${elementColorRows(id,p.widgetElementColors)}${apiWidgetAccountRow(id,cfg)}`;
   }).join('');
 }
 let appData=null,currentView='overview';
@@ -1061,6 +1141,8 @@ function apiWidgetAccountRow(id,cfg){
 }
 function render(){
   if(!appData)return;
+  // Sélecteur de couleur du système ouvert : on ne remplace pas son champ, on repasse juste après.
+  if(colorPickerBusy()){setTimeout(render,1000);return}
   document.documentElement.dataset.theme=appData.prefs?.theme||'blueprint';
   document.querySelector('#overview').innerHTML=overview(appData);
   document.querySelector('#displays').innerHTML=displaysView(appData);
