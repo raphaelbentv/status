@@ -595,6 +595,11 @@ section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumul�
   const spark={...account,provider:'openai',windows:[{windowId:'base',durationMinutes:10080,label:'Semaine',usedPercent:2,resetsAt:future},{windowId:'spark',durationMinutes:10080,label:'Spark',usedPercent:99,resetsAt:future}]};
   checkEqual(dashboard('availability')(spark).remaining,98,'la synthèse standard ne mélange pas Spark avec le quota général');
   checkEqual(dashboard('sortedAccounts')([{...account,label:'Ancien',stale:true},account])[0].label,'Disponible','tri place les données exploitables en premier');
+  const resetOn=(label,y,m,d)=>({...account,label,windows:account.windows.map(w=>({...w,resetsAt:new Date(y,m,d,12).getTime()/1000}))});
+  // 2099 : toujours dans le futur ; on part d'un mardi réel, le jeudi est à +2 j et le vendredi à +3 j.
+  const tue=new Date(2099,0,1);while(tue.getDay()!==2)tue.setDate(tue.getDate()+1);
+  const at=offset=>[tue.getFullYear(),tue.getMonth(),tue.getDate()+offset];
+  checkEqual(dashboard('sortedAccounts')([resetOn('Jeudi',...at(2)),resetOn('Vendredi',...at(3)),resetOn('Mardi',...at(0))],'reset').map(a=>a.label).join(),'Mardi,Vendredi,Jeudi','tri par renouvellement : vendredi avant jeudi');
 }
 section('Réglages regroupés, connexions compactes et données conditionnelles');
 {
