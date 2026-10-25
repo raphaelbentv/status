@@ -871,6 +871,7 @@ function iconLayoutRow(kind,options,current,field){
 function iconLayoutSettings(p){
   const scale=Number.isFinite(p.menuBarIconScale)?p.menuBarIconScale:1,spacing=Number.isFinite(p.menuBarIconSpacing)?p.menuBarIconSpacing:0;
   return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.layout.title')}</strong><small>${t('bar.layout.desc')}</small></div><div class="layout-rows">${iconLayoutRow('size',ICON_SCALES,scale,'scale')}${iconLayoutRow('space',ICON_SPACINGS,spacing,'spacing')}</div></section>`;
+}
 // Popups des widgets : un panneau par widget (défaut) ou un seul popup regroupant tous les widgets activés.
 function widgetPopupModeRow(p){
   const mode=p.widgetPopupMode==='grouped'?'grouped':'separate';
