@@ -766,9 +766,9 @@ section('thèmes — THEMES, Status.m et feuilles CSS synchronisés');
     try { css += readFileSync(join(root, 'Resources', 'themes', id + '.css'), 'utf8'); } catch {}
     check(id === 'blueprint' || css.includes(`[data-theme="${id}"]`), `${id} : jetons [data-theme="${id}"] présents`);
   }
-  for (const page of ['dashboard.html', 'menubar.html']) {
+  for (const page of ['dashboard.html', 'menubar.html', 'widget.html']) {
     const html = readFileSync(join(root, 'Resources', page), 'utf8');
-    for (const id of ids.filter(i => ['moderne','dark','neon','bento','widget'].includes(i)))
+    for (const id of ids.filter(i => ['moderne','dark','neon','holograme','bento','widget'].includes(i)))
       check(html.includes(`themes/${id}.css`), `${page} charge themes/${id}.css`);
   }
 }
