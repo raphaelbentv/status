@@ -140,8 +140,8 @@
   .quota-card .session-row{margin-bottom:8px}
   .quota-card .extra-credits{margin-top:auto;padding-top:9px}
   /* Crédits API : sous les deux cartes, sur toute la largeur. Estimation, jamais un solde lu. */
-  /* Liste compacte : une ligne par compte — nom, jauge (même sens que les cartes : la part consommée
-     se remplit), 5 h en retrait pour Claude, puis le % hebdo restant. Colonnes fixes pour que les
+  /* Liste compacte : une ligne par compte — nom, jauge (la part RESTANTE se remplit — l'inverse des
+     cartes), 5 h en retrait pour Claude, puis le % hebdo restant. Colonnes fixes pour que les
      jauges s'alignent d'une ligne à l'autre. */
   .account-list{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:8px 10px 4px}
   .account-list>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:3px}
@@ -221,11 +221,13 @@ function selectPopupAccount(provider,accountId){
   if(!lastData?.accounts?.some(a=>a.provider===provider&&a.accountId===accountId))return;
   send('setMenuBarMetric',{value:pinnedMetric(provider,accountId,'weekly')});
 }
-function quotaRail(window,primary=false,thin=false){
+// `remaining` : la jauge montre ce qui reste au lieu de ce qui est consommé (liste des comptes) ;
+// la couleur d'alerte suit toujours la consommation.
+function quotaRail(window,primary=false,thin=false,remaining=false){
   const value=used(window);
   if(value===null||!Number.isFinite(value))return '';
   const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
-  return `<div class="rail ${thin?'thin':''} ${primary?'primary-rail':''}" role="meter" aria-label="${t('menu.consumed',{label:esc(I.label(window.label)||window.windowId||'Quota')})}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${t('menu.valueText',{used:I.pct(value),left:I.pct(100-value)})}"><i style="width:${value}%;background:${color}"></i></div>`;
+  return `<div class="rail ${thin?'thin':''} ${primary?'primary-rail':''}" role="meter" aria-label="${t(remaining?'menu.remaining':'menu.consumed',{label:esc(I.label(window.label)||window.windowId||'Quota')})}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${remaining?100-value:value}" aria-valuetext="${t('menu.valueText',{used:I.pct(value),left:I.pct(100-value)})}"><i style="width:${remaining?100-value:value}%;background:${color}"></i></div>`;
 }
 function extraCredits(account){
   if(!account)return '';
@@ -290,7 +292,7 @@ function accountList(accounts){
   const row=({account,weekly,session})=>{
     const value=used(weekly),level=value===null?'':value>=95?'critical':value>=80?'warning':'';
     const ink=account.provider==='openai'?'var(--blue)':'var(--purple)';
-    const rail=value===null?'<div class="al-gap"></div>':quotaRail(weekly,false,true);
+    const rail=value===null?'<div class="al-gap"></div>':quotaRail(weekly,false,true,true);
     return `<div class="al-row ${value===null?'off':''}" style="--provider:${ink}"><i></i><span title="${esc(account.label)}">${esc(account.label)}</span>${rail}<small>${session?'5 h '+I.pct(100-used(session)):''}</small><b class="${level}">${value===null?'—':I.pct(100-value)}</b></div>`;
   };
   return `<section class="account-list"><header>${t('menu.accountList')}</header>${rows.map(row).join('')}</section>`;

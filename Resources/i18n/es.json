@@ -334,6 +334,7 @@
  "menu.pause": "⚠ pausa · reintento {v}",
  "menu.quit": "Salir de Status",
  "menu.reading": "Lectura {v}",
+ "menu.remaining": "{label} restante",
  "menu.refreshing": "actualizando…",
  "menu.renewal": "Renovación {v}",
  "menu.stale": "⚠ medición antigua · {v}",

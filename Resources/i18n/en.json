@@ -334,6 +334,7 @@
  "menu.pause": "⚠ paused · retry {v}",
  "menu.quit": "Quit Status",
  "menu.reading": "Reading {v}",
+ "menu.remaining": "{label} remaining",
  "menu.refreshing": "refreshing…",
  "menu.renewal": "Renews {v}",
  "menu.stale": "⚠ stale reading · {v}",

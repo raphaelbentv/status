@@ -334,6 +334,7 @@
  "menu.pause": "⚠ pausa · riprova {v}",
  "menu.quit": "Esci da Status",
  "menu.reading": "Rilevamento {v}",
+ "menu.remaining": "{label} rimanente",
  "menu.refreshing": "aggiornamento…",
  "menu.renewal": "Rinnovo {v}",
  "menu.stale": "⚠ misura datata · {v}",
