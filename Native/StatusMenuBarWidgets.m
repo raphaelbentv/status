@@ -286,24 +286,84 @@ NSDictionary *TMWidgetReadout(NSString *widgetId, NSDictionary *snapshot) {
 
 #pragma mark - Dessin (AppKit)
 
-// Palette nommée pour les widgets. « auto »/inconnu → nil : l'encre retombe sur le template neutre.
-NSColor *TMWidgetNamedColor(NSString *name) {
-    static NSDictionary<NSString *, NSColor *> *palette;
+// Palette nommée pour les widgets : (nom, #RRGGBB) dans l'ordre d'affichage des Réglages. Source de
+// vérité côté natif ; Resources/dashboard.html (WIDGET_COLORS) et widget.html (WIDGET_PALETTE) la
+// recopient à l'identique, et un test (Tests/native-tests.m) vérifie que les trois listes concordent.
+static NSArray<NSArray<NSString *> *> *TMWidgetPaletteTable(void) {
+    return @[
+        @[@"blue",   @"#4C90FF"], @[@"sky",    @"#66C2FF"], @[@"cyan",    @"#4CCCE6"], @[@"teal",   @"#2EC4B6"],
+        @[@"mint",   @"#7EEAC0"], @[@"green",  @"#4CD173"], @[@"lime",    @"#B5E655"], @[@"yellow", @"#FFE14D"],
+        @[@"amber",  @"#FFBF40"], @[@"orange", @"#FF9933"], @[@"vermilion", @"#FF6B3D"], @[@"coral", @"#FF7F7A"],
+        @[@"red",    @"#FF615A"], @[@"pink",   @"#FF73B3"], @[@"magenta", @"#E04FD8"], @[@"purple", @"#AD85FF"],
+        @[@"violet", @"#8A5CF6"], @[@"indigo", @"#5B6CFF"], @[@"lavender", @"#C9B8FF"], @[@"brown",  @"#A9744F"],
+        @[@"sand",   @"#D9C7A0"], @[@"gray",   @"#9EA9B8"], @[@"slate",   @"#6B7A90"], @[@"white",  @"#F2F4F8"],
+    ];
+}
+
+NSArray<NSString *> *TMWidgetPaletteNames(void) {
+    static NSArray<NSString *> *names;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        palette = @{
-            @"blue":   [NSColor colorWithSRGBRed:0.30 green:0.56 blue:1.00 alpha:1],
-            @"green":  [NSColor colorWithSRGBRed:0.30 green:0.82 blue:0.45 alpha:1],
-            @"purple": [NSColor colorWithSRGBRed:0.68 green:0.52 blue:1.00 alpha:1],
-            @"cyan":   [NSColor colorWithSRGBRed:0.30 green:0.80 blue:0.90 alpha:1],
-            @"orange": [NSColor colorWithSRGBRed:1.00 green:0.60 blue:0.20 alpha:1],
-            @"amber":  [NSColor colorWithSRGBRed:1.00 green:0.75 blue:0.25 alpha:1],
-            @"red":    [NSColor colorWithSRGBRed:1.00 green:0.38 blue:0.35 alpha:1],
-            @"pink":   [NSColor colorWithSRGBRed:1.00 green:0.45 blue:0.70 alpha:1],
-            @"gray":   [NSColor colorWithSRGBRed:0.62 green:0.66 blue:0.72 alpha:1],
+        NSMutableArray *list = [NSMutableArray array];
+        for (NSArray<NSString *> *entry in TMWidgetPaletteTable()) [list addObject:entry[0]];
+        names = list;
+    });
+    return names;
+}
+
+NSString *TMWidgetPaletteHex(NSString *name) {
+    if (![name isKindOfClass:NSString.class]) return nil;
+    for (NSArray<NSString *> *entry in TMWidgetPaletteTable()) if ([entry[0] isEqualToString:name]) return entry[1];
+    return nil;
+}
+
+// « #RRGGBB » strict : sept caractères, un dièse, six chiffres hexadécimaux. Pas d'expression
+// régulière : `$` accepterait un saut de ligne final, et « #FFF », « rgb(…) », « red » doivent tomber.
+BOOL TMWidgetIsHexColor(NSString *value) {
+    if (![value isKindOfClass:NSString.class] || value.length != 7 || [value characterAtIndex:0] != '#') return NO;
+    for (NSUInteger i = 1; i < 7; i++) {
+        unichar c = [value characterAtIndex:i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return NO;
+    }
+    return YES;
+}
+
+NSString *TMWidgetNormalizedColor(id value, BOOL allowAuto) {
+    if (![value isKindOfClass:NSString.class]) return nil;
+    if (TMWidgetIsHexColor(value)) return [value uppercaseString];
+    if (allowAuto && [value isEqualToString:@"auto"]) return @"auto";
+    return TMWidgetPaletteHex(value) ? value : nil;
+}
+
+// Nom de palette OU « #RRGGBB » → couleur. « auto », nom inconnu, hexadécimal invalide → nil : l'encre
+// retombe sur le template neutre.
+NSColor *TMWidgetNamedColor(NSString *name) {
+    NSString *normalized = TMWidgetNormalizedColor(name, NO);
+    if (!normalized) return nil;
+    NSString *hex = TMWidgetIsHexColor(normalized) ? normalized : TMWidgetPaletteHex(normalized);
+    unsigned int rgb = 0;
+    [[NSScanner scannerWithString:[hex substringFromIndex:1]] scanHexInt:&rgb];
+    return [NSColor colorWithSRGBRed:((rgb >> 16) & 0xFF) / 255.0 green:((rgb >> 8) & 0xFF) / 255.0
+                                blue:(rgb & 0xFF) / 255.0 alpha:1];
+}
+
+// Éléments dont la couleur se règle dans le panneau d'un widget (widgetElementColors). Liste blanche :
+// le natif refuse tout identifiant ou élément qui n'y figure pas. Clés alignées sur widget.html (ELEMENTS).
+NSArray<NSString *> *TMWidgetElementKeys(NSString *widgetId) {
+    static NSDictionary<NSString *, NSArray<NSString *> *> *elements;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        elements = @{
+            @"cpu":         @[@"curve", @"perf", @"eff", @"user", @"system"],
+            @"memory":      @[@"curve", @"app", @"wired", @"compressed", @"cache"],
+            @"gpu":         @[@"curve", @"renderer", @"tiler"],
+            @"network":     @[@"down", @"up"],
+            @"temperature": @[@"curve"],
+            @"battery":     @[@"curve"],
+            @"disk":        @[@"read", @"write", @"volumes"],
         };
     });
-    return palette[name ?: @""];
+    return [widgetId isKindOfClass:NSString.class] ? (elements[widgetId] ?: @[]) : @[];
 }
 
 // Encre finale d'un widget : la sévérité prime toujours (ambre/rouge = alerte, quelle que soit la

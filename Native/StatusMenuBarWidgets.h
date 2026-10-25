@@ -96,8 +96,20 @@ NSImage *TMWidgetImage(NSDictionary *readout);
 NSAttributedString *TMTitleWithReservedWidth(NSString *text, NSString *_Nullable widthTemplate,
                                              NSDictionary<NSAttributedStringKey, id> *attributes);
 
-// Couleur nommée de la palette, ou nil si « auto »/inconnu (pour l'aperçu éventuel côté natif).
-NSColor *_Nullable TMWidgetNamedColor(NSString *name);
+// Couleur d'un widget : nom de la palette OU « #RRGGBB » ; nil si « auto », inconnu ou invalide.
+NSColor *_Nullable TMWidgetNamedColor(NSString *_Nullable name);
+
+// Palette (sans « auto ») dans l'ordre des Réglages, et valeur « #RRGGBB » d'un nom. La même liste
+// est recopiée dans dashboard.html et widget.html : un test vérifie que les trois concordent.
+NSArray<NSString *> *TMWidgetPaletteNames(void);
+NSString *_Nullable TMWidgetPaletteHex(NSString *_Nullable name);
+// Vrai pour « #RRGGBB » strict (rien d'autre : ni « #FFF », ni espace, ni saut de ligne final).
+BOOL TMWidgetIsHexColor(NSString *_Nullable value);
+// Valeur de couleur à stocker : nom de palette tel quel, hexadécimal en majuscules, « auto » si
+// `allowAuto` ; nil pour tout le reste (la préférence n'est alors pas modifiée).
+NSString *_Nullable TMWidgetNormalizedColor(id _Nullable value, BOOL allowAuto);
+// Éléments colorables du panneau d'un widget (liste blanche, vide pour un id inconnu).
+NSArray<NSString *> *TMWidgetElementKeys(NSString *_Nullable widgetId);
 
 #pragma mark - Taille et espacement des icônes (Réglages › Affichage)
 

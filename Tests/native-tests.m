@@ -1692,6 +1692,117 @@ static NSDictionary *TMRamSnapshot(double usedPercent, NSDictionary *extra) {
     return TMSnapshotWith(@"ram", now);
 }
 
+// Texte de Resources/<fichier>, relu depuis le dépôt (le chemin de ce fichier-ci sert de repère).
+static NSString *TMResourceText(NSString *name) {
+    NSString *root = [[@(__FILE__) stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
+    return [NSString stringWithContentsOfFile:[[root stringByAppendingPathComponent:@"Resources"] stringByAppendingPathComponent:name]
+                                     encoding:NSUTF8StringEncoding error:nil] ?: @"";
+}
+
+// Portion de `text` entre `opener` et la première occurrence suivante de `closer` (vide si absente).
+static NSString *TMBlock(NSString *text, NSString *opener, NSString *closer) {
+    NSRange start = [text rangeOfString:opener];
+    if (start.location == NSNotFound) return @"";
+    NSString *rest = [text substringFromIndex:NSMaxRange(start)];
+    NSRange end = [rest rangeOfString:closer];
+    return end.location == NSNotFound ? @"" : [rest substringToIndex:end.location];
+}
+
+// Toutes les correspondances d'un motif : une entrée par correspondance, les groupes en tableau.
+static NSArray<NSArray<NSString *> *> *TMMatches(NSString *pattern, NSString *text) {
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+    NSMutableArray *all = [NSMutableArray array];
+    for (NSTextCheckingResult *m in [re matchesInString:text options:0 range:NSMakeRange(0, text.length)]) {
+        NSMutableArray *groups = [NSMutableArray array];
+        for (NSUInteger g = 1; g < m.numberOfRanges; g++) [groups addObject:[text substringWithRange:[m rangeAtIndex:g]]];
+        [all addObject:groups];
+    }
+    return all;
+}
+
+static void TestWidgetColors(void) {
+    Section(@"Couleurs des widgets — palette, hexadécimal, éléments de panneau");
+    NSArray<NSString *> *names = TMWidgetPaletteNames();
+    Check(names.count >= 24, @"palette élargie : au moins 24 couleurs nommées");
+    Check([[NSSet setWithArray:names] count] == names.count, @"aucun nom de couleur en double");
+    for (NSString *legacy in @[@"blue", @"green", @"purple", @"cyan", @"orange", @"amber", @"red", @"pink", @"gray"])
+        Check([names containsObject:legacy] && TMWidgetNamedColor(legacy) != nil, ([NSString stringWithFormat:@"nom historique « %@ » toujours valide", legacy]));
+    for (NSString *name in names) {
+        NSString *hex = TMWidgetPaletteHex(name);
+        Check(TMWidgetIsHexColor(hex) && TMWidgetNamedColor(name) != nil, ([NSString stringWithFormat:@"« %@ » : valeur %@ résolue", name, hex]));
+    }
+    // Les valeurs historiques ne bougent pas d'un octet (tolérance 1/255 : l'ancienne table était en flottants).
+    NSColor *blue = [TMWidgetNamedColor(@"blue") colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    Check(fabs(blue.redComponent - 0.30) < 0.01 && fabs(blue.greenComponent - 0.56) < 0.01 && fabs(blue.blueComponent - 1.0) < 0.01,
+          @"« blue » garde sa teinte historique");
+
+    // Résolution : nom OU #RRGGBB (casse libre) ; tout le reste → nil (template neutre).
+    NSColor *custom = [TMWidgetNamedColor(@"#33a6FF") colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    Check(custom && fabs(custom.redComponent - 0x33 / 255.0) < 0.002 && fabs(custom.greenComponent - 0xA6 / 255.0) < 0.002
+          && fabs(custom.blueComponent - 1.0) < 0.002, @"« #33a6FF » résolu en sRGB exact");
+    Check(TMWidgetNamedColor(@"auto") == nil && TMWidgetNamedColor(nil) == nil && TMWidgetNamedColor(@"") == nil, @"« auto », nil et vide ne donnent pas de couleur");
+    for (NSString *bad in @[@"#FFF", @"#12345", @"#1234567", @"#GGGGGG", @"33A6FF", @" #33A6FF", @"#33A6FF\n", @"#33A6FF ", @"rgb(1,2,3)",
+                            @"red;", @"inconnu", @"#３３Ａ６ＦＦ", @"#33A6Fé"])
+        Check(!TMWidgetIsHexColor(bad) && TMWidgetNamedColor(bad) == nil && TMWidgetNormalizedColor(bad, YES) == nil,
+              ([NSString stringWithFormat:@"valeur refusée : %@", [bad stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"]]));
+    Check(TMWidgetNamedColor((NSString *)@42) == nil && TMWidgetNormalizedColor(@42, YES) == nil && TMWidgetNormalizedColor([NSNull null], YES) == nil,
+          @"valeur non textuelle : refusée sans planter");
+
+    // Normalisation : nom tel quel, hexadécimal en majuscules, « auto » seulement si permis.
+    CheckEqual(TMWidgetNormalizedColor(@"teal", NO), @"teal", @"normalisation : un nom reste un nom");
+    CheckEqual(TMWidgetNormalizedColor(@"#aa00ff", YES), @"#AA00FF", @"normalisation : hexadécimal en majuscules");
+    CheckEqual(TMWidgetNormalizedColor(@"auto", YES), @"auto", @"normalisation : « auto » accepté pour l'icône");
+    Check(TMWidgetNormalizedColor(@"auto", NO) == nil, @"normalisation : « auto » refusé quand non permis (élément : on efface)");
+
+    // Dessin : une couleur libre teinte l'icône, comme un nom (jamais de template).
+    NSDictionary *quota = @{ @"style": @"ring", @"hasValue": @YES, @"fraction": @0.4, @"series": @[@10, @40],
+                             @"value": @"40 %", @"valueTemplate": @"100 %", @"template": @"",
+                             @"primary": @"", @"secondary": @"", @"charging": @NO, @"severity": @0 };
+    NSImage *tinted = TMWidgetImageStyled(quota, @"ring", @"#FF8800");
+    NSImage *invalid = TMWidgetImageStyled(quota, @"ring", @"#FF88");
+    Check(tinted != nil && !tinted.isTemplate, @"icône : couleur #RRGGBB → encre imposée");
+    Check(invalid != nil && invalid.isTemplate, @"icône : hexadécimal invalide → template neutre (ignoré)");
+
+    // Éléments de panneau : liste blanche natif.
+    for (NSString *wid in @[@"cpu", @"memory", @"gpu", @"network", @"temperature", @"battery", @"disk"])
+        Check(TMWidgetElementKeys(wid).count > 0, ([NSString stringWithFormat:@"éléments colorables pour %@", wid]));
+    for (NSString *wid in @[@"claudeWeek", @"anthropicApi", @"inconnu", @"", @"__proto__"])
+        Check(TMWidgetElementKeys(wid).count == 0, ([NSString stringWithFormat:@"aucun élément pour « %@ »", wid]));
+    Check([TMWidgetElementKeys(@"cpu") containsObject:@"perf"] && [TMWidgetElementKeys(@"cpu") containsObject:@"eff"]
+          && ![TMWidgetElementKeys(@"cpu") containsObject:@"down"], @"CPU : perf/eff oui, « down » non");
+    Check(TMWidgetElementKeys((NSString *)@7).count == 0, @"id non textuel : liste vide");
+
+    // Cohérence native ↔ dashboard.html ↔ widget.html : la palette et les éléments sont les mêmes partout.
+    NSString *dashboard = TMResourceText(@"dashboard.html"), *widget = TMResourceText(@"widget.html");
+    Check(dashboard.length > 1000 && widget.length > 1000, @"Resources relues depuis le dépôt");
+    NSMutableArray *jsNames = [NSMutableArray array], *jsHex = [NSMutableArray array];
+    for (NSArray *m in TMMatches(@"\\['([a-z]+)','(#[0-9A-Fa-f]{6}|var\\([^)]*\\))'\\]", TMBlock(dashboard, @"const WIDGET_COLORS=[", @"];"))) {
+        if ([m[0] isEqualToString:@"auto"]) continue;  // « auto » n'est pas une couleur de la palette
+        [jsNames addObject:m[0]]; [jsHex addObject:m[1]];
+    }
+    CheckEqual(jsNames, names, @"dashboard.html (WIDGET_COLORS) : mêmes noms, même ordre que le natif");
+    NSMutableArray *nativeHex = [NSMutableArray array];
+    for (NSString *n in names) [nativeHex addObject:TMWidgetPaletteHex(n)];
+    CheckEqual(jsHex, nativeHex, @"dashboard.html (WIDGET_COLORS) : mêmes valeurs que le natif");
+    Check([TMBlock(dashboard, @"const WIDGET_COLORS=[", @"];") hasPrefix:@"['auto','var(--muted)']"], @"dashboard.html : « auto » en tête de palette");
+    NSMutableArray *wNames = [NSMutableArray array], *wHex = [NSMutableArray array];
+    for (NSArray *m in TMMatches(@"([a-z]+):'(#[0-9A-Fa-f]{6})'", TMBlock(widget, @"const WIDGET_PALETTE={", @"};"))) { [wNames addObject:m[0]]; [wHex addObject:m[1]]; }
+    CheckEqual(wNames, names, @"widget.html (WIDGET_PALETTE) : mêmes noms, même ordre que le natif");
+    CheckEqual(wHex, nativeHex, @"widget.html (WIDGET_PALETTE) : mêmes valeurs que le natif");
+    for (NSArray *pair in @[@[@"dashboard.html (PANEL_ELEMENTS)", TMBlock(dashboard, @"const PANEL_ELEMENTS={", @"};")],
+                            @[@"widget.html (ELEMENTS)", TMBlock(widget, @"const ELEMENTS={", @"};")]]) {
+        NSMutableDictionary *parsed = [NSMutableDictionary dictionary];
+        for (NSArray *m in TMMatches(@"([a-z]+):\\[([^\\]]*)\\]", pair[1])) {
+            NSMutableArray *keys = [NSMutableArray array];
+            for (NSArray *k in TMMatches(@"'([a-z]+)'", m[1])) [keys addObject:k[0]];
+            parsed[m[0]] = keys;
+        }
+        NSMutableDictionary *expected = [NSMutableDictionary dictionary];
+        for (NSString *wid in @[@"cpu", @"memory", @"gpu", @"network", @"temperature", @"battery", @"disk"]) expected[wid] = TMWidgetElementKeys(wid);
+        CheckEqual(parsed, expected, ([NSString stringWithFormat:@"%@ : mêmes éléments que la liste blanche native", pair[0]]));
+    }
+}
+
 static void TestWidgetNewShapes(void) {
     Section(@"Formes Anneaux / Console — readout, résolution, signature, largeur");
     NSDictionary *snap = TMFakeSnapshot();
@@ -2671,6 +2782,7 @@ int main(void) {
         TestMenuBarWidgets();
         TestWidgetRenderSignature();
         TestWidgetStableWidth();
+        TestWidgetColors();
         TestWidgetNewShapes();
         TestMenuBarIconLayout();
         TestApiRegistry();
