@@ -855,10 +855,15 @@ function quotaIconRow(data,p,provider){
   const styles=ICON_DESIGNS.map(v=>`<button class="icon-style ${style===v?'on':''}" title="${t('icon.'+v)}" aria-label="${t('icon.'+v)}" aria-pressed="${style===v}" onclick="send('setProviderMenuIconStyle',{provider:'${provider}',value:'${v}'})">${iconSvg(v,.62,ICON_COLORS[provider],22)}</button>`).join('');
   return `<div class="quota-icon-row" style="--provider:${ICON_COLORS[provider]}"><div class="quota-icon-head"><i class="dot"></i><strong>${PROVIDER_NAME[provider]}</strong>${windows}${account}</div><div class="icon-style-grid" role="group" aria-label="${t('bar.styleOf',{name:PROVIDER_NAME[provider]})}">${styles}</div></div>`;
 }
+// Popups des widgets : un panneau par widget (défaut) ou un seul popup regroupant tous les widgets activés.
+function widgetPopupModeRow(p){
+  const mode=p.widgetPopupMode==='grouped'?'grouped':'separate';
+  return `<div class="wc-popup-mode" style="margin-bottom:14px"><div class="setting-copy" style="margin-bottom:8px"><strong>${t('w.group.title')}</strong><small>${t('w.group.desc')}</small></div><span class="segmented" style="display:inline-flex" role="group" aria-label="${t('w.group.aria')}">${['separate','grouped'].map(m=>`<button class="seg ${mode===m?'on':''}" aria-pressed="${mode===m}" title="${t('w.group.'+m+'Desc')}" onclick="send('setWidgetPopupMode',{mode:'${m}'})">${t('w.group.'+m)}</button>`).join('')}</span><small class="wc-popup-hint" style="display:block;margin-top:6px;color:var(--muted);font-size:12px;line-height:1.45">${t('w.group.'+mode+'Desc')}</small></div>`;
+}
 function menuBarSettings(data,p){
   return `<section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('bar.title')}</strong><small>${t('bar.desc')}</small></div>${barPreview(data,p)}</section>
   <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy"><strong>${t('sg.quotas')}</strong><small>${t('bar.quotasDesc')}</small></div><div class="quota-icon-rows">${['openai','claude'].map(pr=>quotaIconRow(data,p,pr)).join('')}</div><div class="quota-icon-actions"><button class="button" onclick="send('previewMenuIcons',{provider:'openai'})">${t('bar.compare',{name:'OpenAI'})}</button><button class="button" onclick="send('previewMenuIcons',{provider:'claude'})">${t('bar.compare',{name:'Claude'})}</button><button class="button" onclick="send('closeMenuIconPreviews')">${t('set.icons.close')}</button></div></section>
-  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div><div class="widget-config">${widgetConfigRows(p)}</div></section>`;
+  <section class="setting" data-group="appearance" style="display:block"><div class="setting-copy" style="margin-bottom:10px"><strong>${t('bar.system')}</strong><small>${t('bar.systemDesc')}</small></div>${widgetPopupModeRow(p)}<div class="widget-config">${widgetConfigRows(p)}</div></section>`;
 }
 // Mises à jour (Sparkle). Sans flux ni clé (build de développement), la section n'a rien à proposer :
 // on ne montre alors que la version, sans boutons qui ne feraient rien.
