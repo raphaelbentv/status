@@ -2504,6 +2504,114 @@ static void TestApiAlerts(void) {
     CheckEqual(@([r[@"state"] count]), @0, @"compte disparu : état oublié");
 }
 
+// Taille et espacement des icônes de la barre des menus (Réglages › Affichage).
+static NSBitmapImageRep *TMBitmapOf(NSImage *image) {
+    return [[NSBitmapImageRep alloc] initWithData:image.TIFFRepresentation];
+}
+
+static double TMInkSum(NSImage *image) {
+    NSBitmapImageRep *b = TMBitmapOf(image);
+    double sum = 0;
+    for (NSInteger y = 0; y < b.pixelsHigh; y++) for (NSInteger x = 0; x < b.pixelsWide; x++) sum += [b colorAtX:x y:y].alphaComponent;
+    return sum;
+}
+
+static void TestMenuBarIconLayout(void) {
+    Section(@"Taille et espacement des icônes de la barre des menus");
+
+    // Valeurs autorisées et repli sur le défaut : une préférence inconnue ne change rien.
+    CheckEqual(TMMenuBarIconScales(), (@[@0.85, @1.0, @1.15, @1.25]), @"tailles autorisées");
+    CheckEqual(TMMenuBarIconSpacings(), (@[@0, @4, @8, @14]), @"espacements autorisés");
+    for (NSNumber *scale in TMMenuBarIconScales())
+        Check(TMMenuBarIconScaleFromValue(scale) == scale.doubleValue && TMMenuBarIconScaleIsAllowed(scale), @"taille autorisée conservée");
+    for (NSNumber *spacing in TMMenuBarIconSpacings())
+        Check(TMMenuBarIconSpacingFromValue(spacing) == spacing.doubleValue && TMMenuBarIconSpacingIsAllowed(spacing), @"espacement autorisé conservé");
+    for (id bad in @[@0.9, @2, @0, @-1, @"1.25", @YES, NSNull.null, @[]]) {
+        Check(TMMenuBarIconScaleFromValue(bad) == 1.0, @"taille inconnue : repli sur 1.0");
+        Check(!TMMenuBarIconScaleIsAllowed(bad), @"taille inconnue refusée par l'action native");
+    }
+    for (id bad in @[@3, @-4, @100, @"8", @YES, NSNull.null]) {
+        Check(TMMenuBarIconSpacingFromValue(bad) == 0, @"espacement inconnu : repli sur 0");
+        Check(!TMMenuBarIconSpacingIsAllowed(bad), @"espacement inconnu refusé par l'action native");
+    }
+    Check(TMMenuBarIconScaleFromValue(nil) == 1.0 && TMMenuBarIconSpacingFromValue(nil) == 0, @"préférence absente : défauts");
+    Check(TMMenuBarIconScaleIsAllowed(@1) && TMMenuBarIconSpacingIsAllowed(@0.0), @"entier et flottant équivalents acceptés");
+
+    // Taille de sortie : (largeur × scale + spacing, hauteur × scale).
+    NSSize out = TMMenuBarLayoutSize(NSMakeSize(26, 18), 1.25, 8);
+    Check(fabs(out.width - 40.5) < 1e-9 && fabs(out.height - 22.5) < 1e-9, @"taille : 26 × 1,25 + 8 = 40,5 ; 18 × 1,25 = 22,5");
+    Check(NSEqualSizes(TMMenuBarLayoutSize(NSMakeSize(26, 18), 1.0, 0), NSMakeSize(26, 18)), @"défauts : taille inchangée");
+    Check(fabs(TMMenuBarLayoutSize(NSMakeSize(18, 18), 0.85, 4).width - 19.3) < 1e-9, @"petite : 18 × 0,85 + 4");
+
+    // Corps du titre : 12 pt à l'échelle 1, arrondi au demi-point sinon.
+    Check(TMMenuBarTitleFontSize(1.0) == 12.0, @"titre : 12 pt par défaut");
+    Check(TMMenuBarTitleFontSize(0.85) == 10.0, @"titre petit : 10 pt");
+    Check(TMMenuBarTitleFontSize(1.15) == 14.0, @"titre grand : 14 pt");
+    Check(TMMenuBarTitleFontSize(1.25) == 15.0, @"titre très grand : 15 pt");
+
+    // Défauts : aucune enveloppe, c'est exactement la même image qu'avant.
+    NSImage *plain = [NSImage imageWithSize:NSMakeSize(18, 18) flipped:NO drawingHandler:^BOOL(NSRect r) { return YES; }];
+    Check(TMMenuBarImageWithLayout(plain, 1.0, 0) == plain, @"scale 1 / spacing 0 : la même image, sans enveloppe");
+    Check(TMMenuBarImageWithLayout(nil, 1.25, 8) == nil, @"image absente : nil");
+    Check(TMMenuBarImageWithLayout(plain, 0, -3) == plain && TMMenuBarImageWithLayout(plain, NAN, INFINITY) == plain,
+          @"scale/spacing invalides : repli sans enveloppe");
+
+    // Chaque widget × forme × taille × espacement : dimensions, drapeau template, hauteur ≤ 24 pt,
+    // image non vide et marge d'espacement transparente de part et d'autre.
+    NSDictionary *snap = @{ @"families": @[
+        @{ @"id": @"cpu", @"now": @{ @"total": @37 }, @"series": @{ @"total": @[@10,@40,@70,@30,@55,@20,@80,@45,@37] } },
+        @{ @"id": @"battery", @"now": @{ @"percent": @64, @"charging": @YES, @"minutesRemaining": @95 }, @"series": @{} },
+        @{ @"id": @"network", @"now": @{ @"rxBytesPerSec": @120000, @"txBytesPerSec": @9000 }, @"series": @{} } ] };
+    for (NSString *wid in @[@"cpu", @"battery", @"network"])
+        for (NSString *shape in @[@"", @"bars", @"graph", @"text", @"twoLine", @"battery", @"ring", @"chip"]) {
+            NSDictionary *readout = TMWidgetReadout(wid, snap);
+            for (NSNumber *scale in TMMenuBarIconScales()) for (NSNumber *spacing in TMMenuBarIconSpacings())
+                for (NSString *color in @[@"auto", @"purple"]) {
+                    NSImage *base = TMWidgetImageStyled(readout, shape, color);
+                    NSImage *wrapped = TMMenuBarImageWithLayout(base, scale.doubleValue, spacing.doubleValue);
+                    if (scale.doubleValue == 1.0 && spacing.doubleValue == 0) { Check(wrapped == base, @"défauts : image d'origine"); continue; }
+                    Check(NSEqualSizes(wrapped.size, TMMenuBarLayoutSize(base.size, scale.doubleValue, spacing.doubleValue)), @"taille de l'image finale");
+                    Check(wrapped.isTemplate == base.isTemplate, @"drapeau template conservé");
+                    Check(wrapped.size.height <= 24.0 + 1e-9, @"hauteur ≤ 24 pt (barre des menus à encoche)");
+                    NSBitmapImageRep *bitmap = TMBitmapOf(wrapped);
+                    double margin = 0;
+                    NSInteger edge = (NSInteger)floor(spacing.doubleValue / 2) - 1;  // colonnes sûrement dans la marge
+                    for (NSInteger y = 0; y < bitmap.pixelsHigh; y++) for (NSInteger x = 0; x < bitmap.pixelsWide; x++)
+                        if (x < edge || x >= bitmap.pixelsWide - edge) margin += [bitmap colorAtX:x y:y].alphaComponent;
+                    Check(TMInkSum(base) == 0 || TMInkSum(wrapped) > 0, [NSString stringWithFormat:@"l'image enveloppée dessine quelque chose (%@ / %@ / %@ ×%@ +%@)", wid, shape, color, scale, spacing]);
+                    Check(margin == 0, @"la marge d'espacement reste transparente");
+                }
+        }
+
+    // Template conservé en neutre, absent en couleur ; description d'accessibilité reprise.
+    NSDictionary *cpu = TMWidgetReadout(@"cpu", snap);
+    NSImage *neutral = TMWidgetImageStyled(cpu, @"ring", @"auto");
+    neutral.accessibilityDescription = @"CPU";
+    NSImage *wrappedNeutral = TMMenuBarImageWithLayout(neutral, 1.15, 4);
+    Check(wrappedNeutral.isTemplate && [wrappedNeutral.accessibilityDescription isEqual:@"CPU"], @"template neutre + description conservés");
+    Check(!TMMenuBarImageWithLayout(TMWidgetImageStyled(cpu, @"ring", @"purple"), 1.15, 4).isTemplate, @"image colorée : pas template");
+
+    // Agrandi, un anneau reste centré et rien n'est coupé.
+    NSBitmapImageRep *big = TMBitmapOf(TMMenuBarImageWithLayout(TMWidgetImageStyled(cpu, @"ring", @"purple"), 1.25, 14));
+    NSInteger minX = big.pixelsWide, maxX = -1, minY = big.pixelsHigh, maxY = -1;
+    for (NSInteger y = 0; y < big.pixelsHigh; y++) for (NSInteger x = 0; x < big.pixelsWide; x++)
+        if ([big colorAtX:x y:y].alphaComponent > 0.05) { minX = MIN(minX, x); maxX = MAX(maxX, x); minY = MIN(minY, y); maxY = MAX(maxY, y); }
+    Check(llabs(minX - (big.pixelsWide - 1 - maxX)) <= 1, @"anneau agrandi : centré horizontalement");
+    Check(llabs(minY - (big.pixelsHigh - 1 - maxY)) <= 1, @"anneau agrandi : centré verticalement");
+    Check(minX > 0 && minY > 0 && maxX < big.pixelsWide - 1 && maxY < big.pixelsHigh - 1, @"anneau agrandi : rien n'est coupé");
+
+    // Signature de rendu : taille et espacement y entrent.
+    NSDictionary *s0 = TMWidgetRenderSignatureWithLayout(cpu, @"ring", @"blue", 1.0, 0);
+    NSDictionary *s1 = TMWidgetRenderSignatureWithLayout(cpu, @"ring", @"blue", 1.25, 0);
+    NSDictionary *s2 = TMWidgetRenderSignatureWithLayout(cpu, @"ring", @"blue", 1.0, 8);
+    Check(![s0 isEqual:s1] && ![s0 isEqual:s2] && ![s1 isEqual:s2], @"signature : taille et espacement la changent");
+    Check([s0 isEqual:TMWidgetRenderSignatureWithLayout(cpu, @"ring", @"blue", 1.0, 0)], @"signature : stable à réglage égal");
+
+    // Les formes à texte sont vectorielles : agrandies, elles recouvrent plus de surface (pas un bitmap étiré flou).
+    NSImage *twoLine = TMWidgetImageStyled(TMWidgetReadout(@"network", snap), @"twoLine", @"purple");
+    Check(TMInkSum(TMMenuBarImageWithLayout(twoLine, 1.25, 0)) > TMInkSum(twoLine) * 1.2, @"texte deux lignes agrandi : plus d'encre");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -2564,6 +2672,7 @@ int main(void) {
         TestWidgetRenderSignature();
         TestWidgetStableWidth();
         TestWidgetNewShapes();
+        TestMenuBarIconLayout();
         TestApiRegistry();
         TestApiBaseline();
         TestApiInputs();

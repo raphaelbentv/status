@@ -99,4 +99,35 @@ NSAttributedString *TMTitleWithReservedWidth(NSString *text, NSString *_Nullable
 // Couleur nommée de la palette, ou nil si « auto »/inconnu (pour l'aperçu éventuel côté natif).
 NSColor *_Nullable TMWidgetNamedColor(NSString *name);
 
+#pragma mark - Taille et espacement des icônes (Réglages › Affichage)
+
+// Valeurs autorisées, dans l'ordre des boutons des Réglages. Défauts : 1.0 (taille) et 0 (espacement).
+extern NSArray<NSNumber *> *TMMenuBarIconScales(void);     // 0.85, 1.0, 1.15, 1.25
+extern NSArray<NSNumber *> *TMMenuBarIconSpacings(void);   // 0, 4, 8, 14 (points ajoutés autour de l'image)
+
+// Valeur validée : `value` si c'est un nombre de la liste autorisée, sinon le défaut. Une préférence
+// bricolée, absente ou venue d'une version ultérieure retombe sur l'apparence actuelle.
+CGFloat TMMenuBarIconScaleFromValue(id _Nullable value);
+CGFloat TMMenuBarIconSpacingFromValue(id _Nullable value);
+// La valeur est-elle exactement l'une des valeurs autorisées ? (l'action native n'écrit que celles-là)
+BOOL TMMenuBarIconScaleIsAllowed(id _Nullable value);
+BOOL TMMenuBarIconSpacingIsAllowed(id _Nullable value);
+
+// Taille de l'image finale : (largeur × scale + spacing, hauteur × scale). Pure, testable.
+NSSize TMMenuBarLayoutSize(NSSize size, CGFloat scale, CGFloat spacing);
+
+// Corps (pt) du titre système à côté de l'icône : 12 × scale, arrondi au demi-point.
+CGFloat TMMenuBarTitleFontSize(CGFloat scale);
+
+// Enveloppe `image` pour la barre des menus : agrandie/réduite de `scale`, centrée dans une marge
+// transparente qui ajoute `spacing` en largeur, drapeau template conservé. Image à drawingHandler :
+// une source vectorielle reste nette à toute échelle. scale == 1 et spacing == 0 : retourne `image`
+// elle-même, sans enveloppe (aucun changement pour les réglages par défaut).
+NSImage *_Nullable TMMenuBarImageWithLayout(NSImage *_Nullable image, CGFloat scale, CGFloat spacing);
+
+// Variante de TMWidgetRenderSignature qui inclut la mise en page : changer la taille ou l'espacement
+// doit redessiner tout de suite, même si la donnée n'a pas bougé.
+NSDictionary *TMWidgetRenderSignatureWithLayout(NSDictionary *readout, NSString *_Nullable shape,
+                                                NSString *_Nullable colorName, CGFloat scale, CGFloat spacing);
+
 NS_ASSUME_NONNULL_END

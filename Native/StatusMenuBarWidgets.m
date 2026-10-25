@@ -397,13 +397,12 @@ static NSImage *TMDrawTwoLine(NSString *top, NSString *bottom, NSString *widthTe
     NSSize topSize = [top sizeWithAttributes:attrs], botSize = [bottom sizeWithAttributes:attrs];
     CGFloat reserved = widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0;
     CGFloat w = ceil(MAX(MAX(topSize.width, botSize.width), reserved)) + 2, h = 18;
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(MAX(w, 12), h)];
-    [image lockFocus];
-    [top drawAtPoint:NSMakePoint(w - 1 - topSize.width, h - topSize.height - 0.5) withAttributes:attrs];
-    [bottom drawAtPoint:NSMakePoint(w - 1 - botSize.width, 0.5) withAttributes:attrs];
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    // Image vectorielle (et non un bitmap lockFocus) : le texte reste net quand la taille des
+    // icônes est agrandie dans les Réglages.
+    return TMVectorImage(NSMakeSize(MAX(w, 12), h), isTemplate, ^{
+        [top drawAtPoint:NSMakePoint(w - 1 - topSize.width, h - topSize.height - 0.5) withAttributes:attrs];
+        [bottom drawAtPoint:NSMakePoint(w - 1 - botSize.width, 0.5) withAttributes:attrs];
+    });
 }
 
 // Histogramme : les dix derniers échantillons en barres verticales (plus récent à droite, échelle
@@ -458,49 +457,52 @@ static NSImage *TMDrawBattery(double fraction, BOOL charging, BOOL hasValue, NSS
     CGFloat reserved = widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0;
     CGFloat textW = ceil(MAX(MAX([top sizeWithAttributes:attrs].width, [bottom sizeWithAttributes:attrs].width), reserved));
     CGFloat w = cellW + nub + (textW > 0 ? textW + 4 : 0) + 1;
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
-    [image lockFocus];
-
-    CGFloat y = (h - cellH) / 2;
-    NSRect body = NSMakeRect(0.5, y, cellW, cellH);
-    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:body xRadius:1.5 yRadius:1.5];
-    outline.lineWidth = 1;
-    [ink setStroke]; [outline stroke];
-    [ink setFill];
-    NSRect tip = NSMakeRect(NSMaxX(body), y + cellH / 2 - 1.8, nub, 3.6);
-    [[NSBezierPath bezierPathWithRect:tip] fill];
-    if (hasValue) {
-        NSRect fill = NSInsetRect(body, 1.6, 1.6);
-        fill.size.width *= MIN(MAX(fraction, 0), 1);
-        [[NSBezierPath bezierPathWithRect:fill] fill];
-    } else {
-        TMDrawDash(ink, NSMidX(body), NSMidY(body));
-    }
-    if (charging) {  // éclair « découpé » dans la pile : un trou (blend clear) le rend visible sur
-                     // une image template comme en couleur, quel que soit le fond.
-        NSBezierPath *bolt = [NSBezierPath bezierPath];
-        CGFloat bx = NSMidX(body), by = NSMidY(body);
-        [bolt moveToPoint:NSMakePoint(bx + 1, by + 3)];
-        [bolt lineToPoint:NSMakePoint(bx - 2, by - 0.2)];
-        [bolt lineToPoint:NSMakePoint(bx + 0.2, by - 0.2)];
-        [bolt lineToPoint:NSMakePoint(bx - 1, by - 3)];
-        [bolt lineToPoint:NSMakePoint(bx + 2, by + 0.2)];
-        [bolt lineToPoint:NSMakePoint(bx - 0.2, by + 0.2)];
-        [bolt closePath];
-        NSGraphicsContext *ctx = NSGraphicsContext.currentContext;
-        [ctx saveGraphicsState];
-        CGContextSetBlendMode(ctx.CGContext, kCGBlendModeClear);
-        [bolt fill];
-        [ctx restoreGraphicsState];
-    }
-    if (textW > 0) {
-        CGFloat right = cellW + nub + 4 + textW;  // bord droit du bloc texte, fixe
-        [top drawAtPoint:NSMakePoint(right - [top sizeWithAttributes:attrs].width, h - [top sizeWithAttributes:attrs].height) withAttributes:attrs];
-        [bottom drawAtPoint:NSMakePoint(right - [bottom sizeWithAttributes:attrs].width, 0) withAttributes:attrs];
-    }
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    NSSize topSize = [top sizeWithAttributes:attrs], botSize = [bottom sizeWithAttributes:attrs];
+    return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
+        CGFloat y = (h - cellH) / 2;
+        NSRect body = NSMakeRect(0.5, y, cellW, cellH);
+        NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:body xRadius:1.5 yRadius:1.5];
+        outline.lineWidth = 1;
+        [ink setStroke]; [outline stroke];
+        [ink setFill];
+        NSRect tip = NSMakeRect(NSMaxX(body), y + cellH / 2 - 1.8, nub, 3.6);
+        [[NSBezierPath bezierPathWithRect:tip] fill];
+        if (hasValue) {
+            NSRect fill = NSInsetRect(body, 1.6, 1.6);
+            fill.size.width *= MIN(MAX(fraction, 0), 1);
+            if (charging) {
+                // Éclair « découpé » dans le remplissage : le remplissage est tracé en règle
+                // pair-impair avec l'éclair, sous un clip à la zone remplie — un trou que l'on
+                // voit en template comme en couleur, sans effacement (blend clear) donc sans
+                // bitmap, et net à toute taille.
+                NSBezierPath *bolt = [NSBezierPath bezierPath];
+                CGFloat bx = NSMidX(body), by = NSMidY(body);
+                [bolt moveToPoint:NSMakePoint(bx + 1, by + 3)];
+                [bolt lineToPoint:NSMakePoint(bx - 2, by - 0.2)];
+                [bolt lineToPoint:NSMakePoint(bx + 0.2, by - 0.2)];
+                [bolt lineToPoint:NSMakePoint(bx - 1, by - 3)];
+                [bolt lineToPoint:NSMakePoint(bx + 2, by + 0.2)];
+                [bolt lineToPoint:NSMakePoint(bx - 0.2, by + 0.2)];
+                [bolt closePath];
+                NSBezierPath *punched = [NSBezierPath bezierPathWithRect:fill];
+                [punched appendBezierPath:bolt];
+                punched.windingRule = NSWindingRuleEvenOdd;
+                [NSGraphicsContext saveGraphicsState];
+                [[NSBezierPath bezierPathWithRect:fill] addClip];
+                [punched fill];
+                [NSGraphicsContext restoreGraphicsState];
+            } else {
+                [[NSBezierPath bezierPathWithRect:fill] fill];
+            }
+        } else {
+            TMDrawDash(ink, NSMidX(body), NSMidY(body));
+        }
+        if (textW > 0) {
+            CGFloat right = cellW + nub + 4 + textW;  // bord droit du bloc texte, fixe
+            [top drawAtPoint:NSMakePoint(right - topSize.width, h - topSize.height) withAttributes:attrs];
+            [bottom drawAtPoint:NSMakePoint(right - botSize.width, 0) withAttributes:attrs];
+        }
+    });
 }
 
 // Anneau (piste faible + arc de fraction, part de midi, sens horaire, bouts ronds) — comme la
@@ -544,10 +546,8 @@ static NSImage *TMDrawBar(double fraction, BOOL hasValue, NSColor *ink, BOOL isT
 // Courbe (ligne) de la série récente, échelle fixe 0-100 + point terminal — comme la sparkline.
 static NSImage *TMDrawGraph(NSArray<NSNumber *> *series, NSColor *ink, BOOL isTemplate) {
     const CGFloat w = 26, h = 18, pad = 2;
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
-    [image lockFocus];
-    if (series.count < 2) { TMDrawDash(ink, w / 2, h / 2); }
-    else {
+    return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
+        if (series.count < 2) { TMDrawDash(ink, w / 2, h / 2); return; }
         NSUInteger n = series.count; CGFloat plotW = w - 2 * pad, plotH = h - 2 * pad;
         NSBezierPath *line = [NSBezierPath bezierPath];
         line.lineWidth = 1.3; line.lineJoinStyle = NSLineJoinStyleRound;
@@ -560,10 +560,7 @@ static NSImage *TMDrawGraph(NSArray<NSNumber *> *series, NSColor *ink, BOOL isTe
         CGFloat lx = pad + plotW, ly = pad + MIN(MAX(series.lastObject.doubleValue, 0), 100) / 100.0 * plotH;
         [ink setFill];
         [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(lx - 1.5, ly - 1.5, 3, 3)] fill];
-    }
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    });
 }
 
 // Texte seul : la valeur en gros (« 43 % », « 50° »), à la largeur réservée du widget.
@@ -574,12 +571,9 @@ static NSImage *TMDrawText(NSString *text, NSString *widthTemplate, NSColor *ink
     NSSize size = [text sizeWithAttributes:attrs];
     CGFloat reserved = widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0;
     CGFloat w = ceil(MAX(size.width, reserved)) + 2, h = 18;
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(MAX(w, 12), h)];
-    [image lockFocus];
-    [text drawAtPoint:NSMakePoint(w - 1 - size.width, (h - size.height) / 2) withAttributes:attrs];
-    [image unlockFocus];
-    image.template = isTemplate;
-    return image;
+    return TMVectorImage(NSMakeSize(MAX(w, 12), h), isTemplate, ^{
+        [text drawAtPoint:NSMakePoint(w - 1 - size.width, (h - size.height) / 2) withAttributes:attrs];
+    });
 }
 
 #pragma mark - Famille Anneaux
@@ -960,4 +954,58 @@ NSAttributedString *TMTitleWithReservedWidth(NSString *text, NSString *widthTemp
 // Rendu par défaut : forme naturelle, couleur auto. Sert aux tests et au premier tick.
 NSImage *TMWidgetImage(NSDictionary *readout) {
     return TMWidgetImageStyled(readout, readout[@"style"], nil);
+}
+
+#pragma mark - Taille et espacement des icônes
+
+NSArray<NSNumber *> *TMMenuBarIconScales(void) { return @[@0.85, @1.0, @1.15, @1.25]; }
+NSArray<NSNumber *> *TMMenuBarIconSpacings(void) { return @[@0, @4, @8, @14]; }
+
+// Valeur autorisée correspondant à `value` (tolérance d'arrondi JSON), ou nil. Un booléen n'est pas
+// un nombre ici : @YES vaudrait 1.0 et passerait pour la taille normale.
+static NSNumber *TMAllowedMatch(id value, NSArray<NSNumber *> *allowed) {
+    if (![value isKindOfClass:NSNumber.class]) return nil;
+    if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) return nil;
+    double v = [value doubleValue];
+    for (NSNumber *candidate in allowed)
+        if (fabs(candidate.doubleValue - v) < 0.0001) return candidate;
+    return nil;
+}
+
+CGFloat TMMenuBarIconScaleFromValue(id value) { return TMAllowedMatch(value, TMMenuBarIconScales()).doubleValue ?: 1.0; }
+CGFloat TMMenuBarIconSpacingFromValue(id value) { return TMAllowedMatch(value, TMMenuBarIconSpacings()).doubleValue; }
+BOOL TMMenuBarIconScaleIsAllowed(id value) { return TMAllowedMatch(value, TMMenuBarIconScales()) != nil; }
+BOOL TMMenuBarIconSpacingIsAllowed(id value) { return TMAllowedMatch(value, TMMenuBarIconSpacings()) != nil; }
+
+NSSize TMMenuBarLayoutSize(NSSize size, CGFloat scale, CGFloat spacing) {
+    return NSMakeSize(size.width * scale + spacing, size.height * scale);
+}
+
+CGFloat TMMenuBarTitleFontSize(CGFloat scale) {
+    return round(12.0 * scale * 2.0) / 2.0;
+}
+
+NSImage *TMMenuBarImageWithLayout(NSImage *image, CGFloat scale, CGFloat spacing) {
+    if (!image) return image;
+    if (!(scale > 0) || !isfinite(scale)) scale = 1;
+    if (!(spacing >= 0) || !isfinite(spacing)) spacing = 0;
+    if (scale == 1 && spacing == 0) return image;
+    NSSize source = image.size, out = TMMenuBarLayoutSize(source, scale, spacing);
+    NSSize drawn = NSMakeSize(source.width * scale, source.height * scale);
+    NSRect target = NSMakeRect((out.width - drawn.width) / 2, (out.height - drawn.height) / 2, drawn.width, drawn.height);
+    NSImage *wrapped = [NSImage imageWithSize:out flipped:NO drawingHandler:^BOOL(NSRect dst) {
+        [image drawInRect:target fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+        return YES;
+    }];
+    wrapped.template = image.isTemplate;
+    wrapped.accessibilityDescription = image.accessibilityDescription;
+    return wrapped;
+}
+
+NSDictionary *TMWidgetRenderSignatureWithLayout(NSDictionary *readout, NSString *shape, NSString *colorName,
+                                                CGFloat scale, CGFloat spacing) {
+    NSMutableDictionary *signature = [TMWidgetRenderSignature(readout, shape, colorName) mutableCopy];
+    signature[@"scale"] = @(scale);
+    signature[@"spacing"] = @(spacing);
+    return signature;
 }
