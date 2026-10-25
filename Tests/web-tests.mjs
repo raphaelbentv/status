@@ -311,8 +311,9 @@ const count = (html, re) => (html.match(re) || []).length;
 for (const id of Object.keys(RENDER)) {
   const def = renderAt(id, null);
   checkEqual(widget('level()'), 1, `${id} : niveau par défaut = Détaillé`);
-  check(count(def, /<button type="button"/g) === 3, `${id} : sélecteur à 3 segments`);
-  check(count(def, /aria-pressed="true"/g) === 1 && /class="on" aria-pressed="true" title="[^"]*" onmousedown="setDetail\(1\)"/.test(def),
+  // Seuls les segments du niveau (setDetail) comptent : le panneau Température a aussi ses commandes de ventilateurs.
+  check(count(def, /<button type="button"[^>]*setDetail\(/g) === 3, `${id} : sélecteur à 3 segments`);
+  check(count(def, /aria-pressed="true"[^>]*setDetail\(/g) === 1 && /class="on" aria-pressed="true" title="[^"]*" onmousedown="setDetail\(1\)"/.test(def),
     `${id} : le segment « Détaillé » est marqué actif par défaut`);
   check(/title="Résumé[^"]*"/.test(def) && /title="Hyper détaillé[^"]*"/.test(def), `${id} : infobulles complètes`);
   for (const bad of [7, -1, 1.5]) { renderAt(id, bad); checkEqual(widget('level()'), 1, `${id} : niveau ${bad} hors bornes → défaut`); }
@@ -430,8 +431,8 @@ renderAt('cpu', null); checkEqual(widget('level()'), 1, 'séparé : le défaut r
 // Sélecteur global : trois segments, un seul actif, jamais de sélecteur par widget.
 for (const lv of [0, 1, 2]) {
   const html = groupedAt(lv);
-  check(count(html, /<button type="button"/g) === 3, `regroupé niveau ${lv} : un seul sélecteur (3 segments), aucun par widget`);
-  check(new RegExp(`class="on" aria-pressed="true"[^>]*setDetail\\(${lv}\\)`).test(html) && count(html, /aria-pressed="true"/g) === 1, `regroupé niveau ${lv} : segment ${lv} actif`);
+  check(count(html, /<button type="button"[^>]*setDetail\(/g) === 3, `regroupé niveau ${lv} : un seul sélecteur (3 segments), aucun par widget`);
+  check(new RegExp(`class="on" aria-pressed="true"[^>]*setDetail\\(${lv}\\)`).test(html) && count(html, /aria-pressed="true"[^>]*setDetail\(/g) === 1, `regroupé niveau ${lv} : segment ${lv} actif`);
   check(/Tous les widgets/.test(html), `regroupé niveau ${lv} : titre « Tous les widgets »`);
   check(html.indexOf('w-seg') < html.indexOf('<!--w-body-->'), `regroupé niveau ${lv} : le sélecteur est dans l’en-tête fixe, avant le corps`);
 }
@@ -1299,6 +1300,94 @@ section('Ventilateurs : autorisation, vérification et retour automatique');
   check(settings({tools:{lidMode:stuck}}).includes('(manuel)'),'mode manuel signalé dans les réglages');
   lid.unconfirmed=true;
   check(popup({lidMode:lid}).includes('État à vérifier')&&!popup({lidMode:lid}).includes('Boost 80 %'),'rupture du service visible');
+}
+section('widget.html — pilotage des ventilateurs (Auto / Courbe / Manuel)');
+{
+  const wf = sandboxFor('widget.html');
+  wf('window.__sent = []; window.webkit = {messageHandlers:{native:{postMessage:m=>window.__sent.push(m)}}}');
+  const presets = { silent: [[60, 50], [70, 60], [80, 75], [90, 100]], balanced: [[55, 50], [65, 60], [75, 80], [85, 100]], performance: [[50, 60], [60, 75], [70, 90], [80, 100]] };
+  const okService = { authorized: true, busy: false, fanBoost: { version: 2, active: false, fans: [{ rpm: 2345, mode: 0, maxRPM: 6000 }], message: 'Auto Apple' } };
+  const fan = (over = {}) => ({ mode: 'auto', preset: 'balanced', target: 0, reason: 'auto', notice: null, tempC: 70, presetIds: ['silent', 'balanced', 'performance'],
+    presets, values: { silent: 60, balanced: 70, performance: 100 }, floor: 50, criticalC: 95, service: okService, ...over });
+  const snap = (f, lv = 1) => ({ families: [{ id: 'sensors', now: { tempC: 70, thermalState: 0, fan0: 2345 }, series: { tempC: [60, 65, 70] } }],
+    prefs: { theme: 'neon', detail: { temperature: lv }, fanMode: f.mode, fanCurvePreset: f.preset }, fan: f });
+  const show = (f, lv) => { wf(`metrics=${JSON.stringify(snap(f, lv))};widgetId='temperature'`); return plain(wf('renderTemperature()')); };
+  const seg = html => (html.match(/class="w-seg w-fm"[\s\S]*?<\/div>/) || [''])[0];
+
+  let html = show(fan());
+  check(noJunk(html), 'Auto : aucun NaN/undefined/null');
+  check(/>Auto</.test(seg(html)) && />Courbe</.test(seg(html)) && />Manuel</.test(seg(html)), 'trois segments Auto / Courbe / Manuel');
+  check(html.includes('macOS gère les ventilateurs') && html.includes('Actif'), 'Auto : macOS gère les ventilateurs, état actif');
+  check(!/disabled/.test(seg(html)), 'service prêt : Courbe et Manuel disponibles');
+  check(/class="on cur"[^>]*>Auto</.test(seg(html)), 'segment du mode en vigueur teinté et marqué');
+
+  // Vue Courbe (aperçu, mode encore Auto) : préréglages, SVG, activation.
+  wf("fanUi('view','curve')");
+  html = plain(wf('renderTemperature()'));
+  check(html.includes('Silencieux') && html.includes('Équilibré') && html.includes('Performance'), 'Courbe : trois préréglages');
+  check(/<svg class="w-fc"/.test(html) && /class="m" cx="[\d.]+" cy="[\d.]+"/.test(html), 'Courbe : aperçu SVG avec marqueur de température');
+  check(html.includes('À 70 °C') && html.includes('70 %') && html.includes('Activer la courbe'), 'Courbe : valeur à la température actuelle, bouton d’activation');
+  check(noJunk(html), 'Courbe (aperçu) : aucun NaN/undefined/null');
+  wf("fanUi('preset','silent')");
+  check(plain(wf('renderTemperature()')).includes('60 %') && wf('window.__sent.length') === 0, 'aperçu d’un autre préréglage sans rien envoyer');
+  wf("fanUi('curve')");
+  checkEqual(wf('window.__sent.at(-1)'), { action: 'setFanMode', mode: 'curve', preset: 'silent' }, 'Activer : setFanMode courbe avec le préréglage choisi');
+  wf("fanUi('curve')");
+  checkEqual(wf('window.__sent.length'), 1, 'appui + clic : une seule commande');
+
+  // Courbe active : état, palier appliqué, retour en auto.
+  const active = { ...okService, fanBoost: { ...okService.fanBoost, active: true, verified: true, percent: 70, remainingSeconds: 95, message: 'Boost actif · vitesse vérifiée.' } };
+  html = show(fan({ mode: 'curve', target: 70, reason: 'curve', service: active }));
+  check(html.includes('Équilibré · 70 %') && html.includes('Revenir en auto'), 'Courbe active : préréglage, palier, retour en auto');
+  check(/class="on cur"[^>]*>Courbe</.test(seg(html)), 'Courbe active : segment Courbe en vigueur');
+  check(!/class="w-fc"[\s\S]*?NaN/.test(html), 'Courbe active : SVG sans NaN');
+  html = show(fan({ mode: 'curve', target: 0, reason: 'idle', tempC: 48, values: { silent: null, balanced: null, performance: null } }));
+  check(html.includes('Équilibré · macOS sous 55 °C'), 'Courbe sous le premier point : macOS pilote');
+  check(noJunk(html), 'Courbe au repos : aucun NaN/undefined/null');
+  html = show(fan({ mode: 'curve', target: 100, reason: 'critical', service: { ...active, fanBoost: { ...active.fanBoost, percent: 100 } } }));
+  check(html.includes('Seuil critique · Maximum'), 'Courbe : seuil critique affiché');
+  wf('window.__sent = []'); wf("fanUi('auto')");
+  checkEqual(wf('window.__sent'), [{ action: 'stopFanBoost' }], 'Revenir en auto : stopFanBoost (mode Auto + ventilateur réparé)');
+
+  // Vue Manuel : paliers, durées, Appliquer ; état actif avec temps restant.
+  show(fan());
+  wf("fanUi('view','manual')"); wf("fanUi('pct','80')"); wf("fanUi('min','30')");
+  html = plain(wf('renderTemperature()'));
+  check(html.includes('60 %') && html.includes('80 %') && html.includes('Maximum') && html.includes('15 min') && html.includes('60 min') && html.includes('Appliquer'), 'Manuel : 60/80/100 %, 15/30/60 min, Appliquer');
+  wf('window.__sent = []'); wf("fanUi('apply')");
+  checkEqual(wf('window.__sent'), [{ action: 'setFanMode', mode: 'manual', percent: 80, minutes: 30 }], 'Appliquer : setFanMode manuel, palier et durée choisis');
+  html = show(fan({ mode: 'manual', target: 80, service: { ...active, fanBoost: { ...active.fanBoost, percent: 80, remainingSeconds: 690 } } }));
+  check(html.includes('80 % · 12 min restantes') && html.includes('Revenir en auto'), 'Manuel actif : palier, temps restant, retour en auto');
+  check(/class="on cur"[^>]*>Manuel</.test(seg(html)), 'Manuel actif : segment Manuel en vigueur');
+
+  // Service absent, ancien ou non confirmé : Courbe et Manuel désactivés, explication, autorisation.
+  for (const [what, service] of [['non autorisé', { authorized: false }], ['protocole v1', { authorized: true, fanBoost: { version: 1 } }],
+    ['non confirmé', { ...okService, unconfirmed: true }]]) {
+    html = show(fan({ service }));
+    check((seg(html).match(/disabled/g) || []).length === 2 && html.includes('exigent le service macOS'), `service ${what} : Courbe et Manuel désactivés, avec l’explication`);
+    check(html.includes("fanUi('authorize'") && html.includes(service.authorized ? 'Mettre le service à jour' : 'Autoriser le service macOS'), `service ${what} : bouton d’autorisation`);
+  }
+  html = show({ service: {} });
+  check(noJunk(html) && /disabled/.test(seg(html)), 'sans payload fan : rendu propre, modes désactivés');
+
+  // Retour en Auto décidé par le natif : la raison est affichée.
+  html = show(fan({ notice: 'sensor' }));
+  check(html.includes('Température illisible · retour en Auto.'), 'retour en Auto forcé : raison affichée');
+
+  // Niveau Résumé : l'état du mode seulement.
+  html = show(fan({ mode: 'curve', target: 70, reason: 'curve', service: active }), 0);
+  check(!/w-fm/.test(html) && !/w-fc/.test(html) && html.includes('Ventilateurs') && html.includes('Équilibré · 70 %'), 'Résumé : état du mode seul, sans commandes');
+  html = show(fan(), 2);
+  check(/w-fm/.test(html) && noJunk(html), 'Hyper détaillé : commandes présentes');
+
+  // Popup quota et Réglages : une courbe active reste visible, « Auto Apple » la coupe.
+  const tools = { lidMode: active, fanMode: { mode: 'curve', preset: 'balanced', target: 70 } };
+  const pop = plain(menubar(`fanControls(${JSON.stringify(tools)})`));
+  check(pop.includes('Courbe Équilibré · 70 %') && pop.includes("send('stopFanBoost')") && !pop.includes('Boost 70 %'), 'popup quota : courbe affichée, Auto Apple disponible');
+  const idle = plain(menubar(`fanControls(${JSON.stringify({ lidMode: okService, fanMode: { mode: 'curve', preset: 'silent' } })})`));
+  check(idle.includes('Courbe Silencieux · macOS') && !idle.includes('startFanBoost()'), 'popup quota : courbe au repos, pas de boost concurrent proposé');
+  const settingsHtml = plain(dashboard('fanBoostSettings')({ tools }));
+  check(settingsHtml.includes('Courbe Équilibré · 70 %') && settingsHtml.includes('Auto Apple'), 'Réglages : courbe affichée, Auto Apple disponible');
 }
 section('Popup : crédits du compte sélectionné');
 {
