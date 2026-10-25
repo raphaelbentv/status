@@ -700,17 +700,11 @@ function availability(account){
 }
 let accountSort='reset';
 function setAccountSort(value){if(['remaining','reset','name'].includes(value)){accountSort=value;render();}}
-// Tri par renouvellement : un renouvellement du vendredi passe avant celui du jeudi (voulu ainsi).
-// On décale d'un jour la clé de tri — vendredi −1 j, jeudi +1 j — sans toucher à la date affichée.
-function resetSortKey(reset){
-  const day=new Date(reset*1000).getDay();
-  return reset+(day===5?-86400:day===4?86400:0);
-}
 function sortedAccounts(accounts,mode=accountSort){return [...accounts].sort((a,b)=>{
   const aa=availability(a),bb=availability(b);
   if(mode==='name')return String(a.label).localeCompare(String(b.label),I.locale);
   if(!aa||!bb)return aa?-1:bb?1:0;
-  if(mode==='reset')return resetSortKey(aa.reset)-resetSortKey(bb.reset);
+  if(mode==='reset')return aa.reset-bb.reset;
   return Number(bb.available)-Number(aa.available)||bb.remaining-aa.remaining;
 });}
 function notificationsNotice(data){return data.prefs?.notificationsAuthorized===false?`<aside class="notice"><div><strong>${t('notice.title')}</strong><p>${t('notice.body')}</p></div><button class="button" onclick="send('openNotificationSettings')">${t('notice.open')}</button></aside>`:'';}
