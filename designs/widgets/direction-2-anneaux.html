@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 2 — Anneaux</title>
+<style>
+/* Jetons du thème « neon » (Resources/themes/neon.css) — recopiés tels quels pour la maquette. */
+:root{
+  --bg:#06030d;--text:#f6f1ff;--muted:rgba(246,241,255,.62);
+  --hair:rgba(255,255,255,.1);--hair-strong:rgba(255,255,255,.22);--soft:rgba(255,255,255,.04);
+  --blue:#3fb0ff;--purple:#ff3d9a;--green:#34f5a8;--amber:#ffa31a;--danger:#ff5468;--violet:#b967ff;
+  --chart-a:#3fb0ff;--chart-b:#ff3d9a;
+  --font:"Outfit",-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --radius:14px;
+  --bg-image:radial-gradient(520px 340px at 30% -6%,rgba(255,61,154,.16),transparent 70%),radial-gradient(560px 380px at 100% 100%,rgba(63,176,255,.14),transparent 70%),linear-gradient(180deg,#0b0516,#06030d);
+}
+*{box-sizing:border-box}
+html{background:#0d0817}
+body{margin:0;color:var(--text);font:13.5px/1.5 var(--font);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.page{max-width:1240px;margin:0 auto;padding:44px 32px 72px}
+h1{font:300 40px/1.1 var(--font);letter-spacing:-.01em;margin:0 0 14px}
+h1 b{font-weight:600;color:var(--blue)}
+h2{font:600 11px/1 var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:56px 0 18px;display:flex;align-items:center;gap:12px}
+h2::after{content:"";flex:1;height:1px;background:var(--hair)}
+.principes{margin:0;padding:0;list-style:none;display:grid;gap:6px;max-width:880px;color:rgba(246,241,255,.8)}
+.principes li{padding-left:20px;position:relative}
+.principes li::before{content:"";position:absolute;left:0;top:.62em;width:9px;height:9px;border-radius:50%;border:2px solid var(--blue)}
+.note{color:var(--muted);font-size:12px;margin:-6px 0 16px;max-width:880px}
+
+/* ── Barre des menus ─────────────────────────────────────────────── */
+.strips{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}
+.strip .cap{font-size:11px;color:var(--muted);margin:0 0 6px 2px}
+.bar{height:24px;display:flex;align-items:center;gap:13px;padding:0 14px;border-radius:7px;font:500 13px/1 -apple-system,"SF Pro Text",sans-serif}
+.bar.dark{background:#1b1921;color:#f5f5f7;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.bar.light{background:#e9e9ed;color:#1d1d1f;box-shadow:inset 0 0 0 1px rgba(0,0,0,.06)}
+.bar svg{display:block;flex:none}
+.bar .sp{flex:1}
+.bar .clk{opacity:.9;white-space:nowrap}
+
+.zoom{display:grid;grid-template-columns:96px repeat(4,1fr);gap:8px;align-items:stretch}
+.zoom .hd{font-size:11px;color:var(--muted);padding:0 2px 2px}
+.zoom .nm{display:flex;flex-direction:column;justify-content:center;font-size:13px;font-weight:600}
+.zoom .nm small{font-weight:400;font-size:10.5px;color:var(--muted);margin-top:2px}
+.tile{position:relative;border-radius:8px;display:flex;align-items:center;justify-content:center;min-height:84px;padding:10px 12px}
+.tile.dark{background:#1b1921;color:#f5f5f7;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.tile.light{background:#e9e9ed;color:#1d1d1f;box-shadow:inset 0 0 0 1px rgba(0,0,0,.06)}
+.tile .box{position:relative;line-height:0}
+/* Boîte de 18 pt et axe médian : repères pour juger l'alignement. */
+.tile .box::before{content:"";position:absolute;inset:0;border:1px dashed currentColor;opacity:.14;pointer-events:none}
+.tile .box::after{content:"";position:absolute;left:0;right:0;top:50%;border-top:1px dashed currentColor;opacity:.14;pointer-events:none}
+
+/* ── Popups ──────────────────────────────────────────────────────── */
+.stage{background:#0d0817;padding:0}
+.popups{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+.pop{width:260px;padding:16px;border-radius:var(--radius);background:var(--bg);background-image:var(--bg-image);
+  border:1px solid var(--hair-strong);box-shadow:0 18px 40px -18px rgba(0,0,0,.8);color:var(--text);font:11.5px/1.4 var(--font);flex:none}
+.pop .hd2{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.pop .hd2 svg{display:block}
+.pop .hd2 .t{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.hero{display:block;width:228px;height:132px;overflow:visible}
+.hero .glow{filter:drop-shadow(0 0 5px var(--g,rgba(63,176,255,.5)))}
+.hero text{font-family:var(--font)}
+.spark{display:block;width:228px;height:40px;margin:2px 0 14px;overflow:visible}
+.spark .area{opacity:.14}.spark .line{fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.spark .base{stroke:var(--hair);stroke-width:1}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 14px}
+.tl{background:var(--soft);border:1px solid var(--hair);border-radius:12px;padding:9px 10px 10px;min-width:0}
+.tl .l{font-size:10px;color:var(--muted);white-space:nowrap;line-height:1.2;margin-bottom:6px}
+.tl .b{display:flex;align-items:center;gap:6px;min-width:0}
+.tl .b svg{flex:none;display:block}
+.tl .v{font-size:14px;font-weight:600;white-space:nowrap;line-height:1.1}
+.tl .v small{font-size:10px;font-weight:400;color:var(--muted);margin-left:2px}
+.cap2{font-size:10px;color:var(--muted);margin:0 0 7px;letter-spacing:.02em}
+.cores{display:grid;grid-template-columns:repeat(6,32px);justify-content:space-between;row-gap:6px;margin-bottom:12px}
+.cores svg{display:block}
+.rows{display:flex;flex-direction:column;gap:6px;margin:2px 0 0}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;line-height:1.35}
+.row .k{color:var(--muted);white-space:nowrap}
+.row .v{white-space:nowrap}
+.sec{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:14px 0 9px;padding-top:12px;border-top:1px solid var(--hair)}
+.pl{display:flex;flex-direction:column;gap:8px}
+.pr{display:flex;align-items:center;gap:9px}
+.pr svg{flex:none;display:block}
+.pr .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .vv{color:var(--muted);white-space:nowrap}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.split{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.split svg{flex:none;display:block}
+.lg{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.lg .r{display:flex;align-items:center;justify-content:space-between;gap:6px;white-space:nowrap}
+.lg .r span:first-child{color:var(--muted)}
+.iface{display:flex;align-items:center;gap:9px}
+.iface svg{flex:none;display:block}
+.iface .n{color:var(--text);width:38px;flex:none}
+.iface .vv{flex:1;text-align:right;white-space:nowrap;color:var(--muted)}
+.iface .vv b{font-weight:500;color:var(--text)}
+.ifaces{display:flex;flex-direction:column;gap:9px;margin-bottom:2px}
+
+/* Seuils d'alerte */
+.alerts{display:flex;gap:28px;flex-wrap:wrap;margin-top:34px;align-items:center}
+.alerts .a{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+.alerts .a b{display:block;color:var(--text);font-weight:600;font-size:13px}
+
+.choix{margin:0;padding:0;list-style:none;display:grid;gap:12px;max-width:940px;counter-reset:c}
+.choix li{counter-increment:c;display:grid;grid-template-columns:34px 1fr;gap:10px;color:rgba(246,241,255,.82)}
+.choix li::before{content:counter(c);width:26px;height:26px;border-radius:50%;border:2px solid var(--blue);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text)}
+.choix b{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Direction 2 — <b>Anneaux</b></h1>
+<ul class="principes">
+  <li><b>Un seul motif, l'arc.</b> Chaque widget est une variante d'anneau sur la même grille de 18 pt : trait de 2 pt, extrémités rondes, départ à midi dans le sens horaire (cadrans de 240° ouverts en bas).</li>
+  <li><b>Une valeur, un héros.</b> Chaque popup s'ouvre sur un grand arc de 240° portant le chiffre, puis une courbe, puis des tuiles qui reprennent le même geste.</li>
+  <li><b>La couleur est un signal.</b> Une teinte par métrique, ambre dès 80 %, rouge dès 95 %, portés par l'arc seul ; en monochrome, l'opacité et la position prennent le relais.</li>
+</ul>
+
+<h2>Barre des menus</h2>
+<div class="strips" id="strips"></div>
+
+<h2 style="margin-top:44px">Détail ×3</h2>
+<p class="note">Chaque icône est un SVG de 18 pt de haut (pointillés : boîte 18 pt et axe médian). Colonnes : barre sombre et barre claire, en image « template » monochrome puis en couleur (palette plus sombre sur barre claire).</p>
+<div class="zoom" id="zoom"></div>
+
+<h2>Popups — thème neon, 260 px</h2>
+<div class="stage"><div class="popups" id="popups"></div></div>
+<div class="alerts" id="alerts"></div>
+
+<h2>Choix de design</h2>
+<ul class="choix">
+  <li><div><b>Hiérarchie à trois niveaux.</b> Héros (46 px, fin) → courbe → tuiles (14 px). Tout le reste est en 11 px muted. Le regard tombe d'abord sur l'arc, jamais sur un libellé ; chaque popup tient en une seule idée.</div></li>
+  <li><div><b>Couleur = état, pas décoration.</b> CPU bleu, GPU rose, mémoire en quatre teintes, réseau bleu ↓ / rose ↑, température ambre, batterie verte, disque violet. L'alerte (ambre ≥ 80 %, rouge ≥ 95 %) recolore l'arc entier, pas le texte : on la voit à la périphérie de l'œil.</div></li>
+  <li><div><b>Densité réduite, chiffres tabulaires.</b> Une marge de 16 px, des tuiles de 112 px, des libellés de 10 px sans majuscules (sauf titres de section). Les cœurs passent de 10 barres à 10 petits anneaux avec leur valeur ; la découpe mémoire d'une barre empilée à un anneau segmenté et sa légende.</div></li>
+  <li><div><b>Faisable tel quel.</b> Icônes : <code>appendBezierPathWithArcWithCenter</code>, <code>lineCapStyle = Round</code>, un <code>NSBezierPath</code> par segment, texte mono 7 pt au centre ou 8,5 pt sur deux lignes à droite. Popups : <code>stroke-dasharray</code> ou chemins d'arc, jetons <code>var(--blue)</code> et consorts, aucune image.</div></li>
+  <li><div><b>Monochrome sans perte.</b> En template, la mémoire passe en quatre opacités (1 / .75 / .52 / .34), le réseau distingue ↓ (anneau extérieur) et ↑ (intérieur) par la position et par les flèches du texte, le GPU par son anneau en dix segments. Les icônes se reconnaissent par leur forme avant leur couleur.</div></li>
+</ul>
+
+</div>
+
+<script>
+const f=n=>+n.toFixed(2);
+const pt=(cx,cy,r,a)=>{const t=a*Math.PI/180;return[cx+r*Math.sin(t),cy-r*Math.cos(t)]};
+// Arc : angles en degrés, 0 = midi, sens horaire.
+function arc(cx,cy,r,a0,a1){
+  if(a1-a0<.01)a1=a0+.01; if(a1-a0>=359.99)a1=a0+359.99;
+  const[x0,y0]=pt(cx,cy,r,a0),[x1,y1]=pt(cx,cy,r,a1);
+  return `M${f(x0)} ${f(y0)}A${r} ${r} 0 ${a1-a0>180?1:0} 1 ${f(x1)} ${f(y1)}`;
+}
+const stroke=(d,c,w,o=1)=>`<path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-opacity="${o}"/>`;
+const circ=(cx,cy,r,c,w,o=1)=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${c}" stroke-width="${w}" stroke-opacity="${o}"/>`;
+// Anneau segmenté : chaque jonction est reculée de (w/2+gap/2)/r pour que les caps ronds laissent un vide net.
+function segs(cx,cy,r,w,gap,start,span,total,items){
+  let acc=0,out='';const d=(w/2+gap/2)/r*180/Math.PI;
+  items.forEach((it,i)=>{
+    const a0=start+acc/total*span,a1=start+(acc+it.v)/total*span;acc+=it.v;
+    let s=a0+(i>0?d:0),e=a1-(i<items.length-1?d:0);if(e<s)e=s;
+    out+=stroke(arc(cx,cy,r,s,e),it.c,w,it.o??1);
+  });
+  return out;
+}
+
+/* ═══════════ ICÔNES (grille 18 pt) ═══════════ */
+const PAL={
+  dark:{blue:'#3fb0ff',pink:'#ff3d9a',violet:'#b967ff',amber:'#ffa31a',green:'#34f5a8',red:'#ff5468',grey:'rgba(255,255,255,.5)',fg:'#f5f5f7'},
+  light:{blue:'#0a7fd1',pink:'#d81b7a',violet:'#7c34d6',amber:'#c97300',green:'#0f9a68',red:'#d93049',grey:'rgba(0,0,0,.42)',fg:'#1d1d1f'}
+};
+const MONO="ui-monospace,'SF Mono',Menlo,monospace";
+const DATA={cpu:43,gpu:24,mem:68,temp:50,bat:82,disk:74};
+const S=2,R=7,C=9;                 // trait, rayon, centre : communs à toutes les icônes
+const TRACK=.26;
+const clamp=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+const num=(t,fg,sz=7)=>`<text x="9" y="${f(9+sz*.35)}" text-anchor="middle" font-family="${MONO}" font-size="${sz}" font-weight="600" fill="${fg}">${t}</text>`;
+const two=(a,b,w,fg)=>`<text x="${w}" y="8" text-anchor="end" font-family="${MONO}" font-size="8.5" font-weight="500" fill="${fg}">${a}</text><text x="${w}" y="16.2" text-anchor="end" font-family="${MONO}" font-size="8.5" font-weight="500" fill="${fg}">${b}</text>`;
+const alert=(v,base,p)=>v>=95?p.red:v>=80?p.amber:base;
+
+function iconParts(id,mode,bg,bare){
+  const p=PAL[bg],fg=p.fg,tpl=mode==='template';
+  const ink=c=>tpl?fg:c, trk=tpl?fg:p.fg;
+  let g='',w=18;
+  if(id==='cpu'){
+    const c=ink(alert(DATA.cpu,p.blue,p));
+    g=circ(C,C,R,trk,S,TRACK)+stroke(arc(C,C,R,0,DATA.cpu*3.6),c,S)+(bare?'':num(DATA.cpu,fg));
+  }
+  if(id==='gpu'){
+    const c=ink(alert(DATA.gpu,p.pink,p)),lit=Math.round(DATA.gpu/10);
+    for(let i=0;i<10;i++){const a0=i*36+8.2;g+=stroke(arc(C,C,R,a0,a0+11),i<lit?c:trk,S,i<lit?1:TRACK)}
+    g+=bare?'':num(DATA.gpu,fg);
+  }
+  if(id==='mem'){
+    const o=tpl?[1,.75,.52,.34]:[1,1,1,1];
+    const col=tpl?[fg,fg,fg,fg]:[p.blue,p.violet,p.pink,p.grey];
+    const it=[14.2,3.1,2.4,6.0].map((v,i)=>({v,c:col[i],o:o[i]}));
+    g=circ(C,C,R,trk,S,tpl?.16:TRACK)+segs(C,C,R,S,.8,0,360,32,it)+(bare?'':num(DATA.mem,fg));
+  }
+  if(id==='net'){
+    const lg=v=>clamp(Math.log10(v/1e3)/5);
+    const dn=lg(1.2e6),up=lg(84e3);
+    g=circ(C,C,7,trk,S,TRACK)+stroke(arc(C,C,7,0,dn*360),ink(p.blue),S)
+     +circ(C,C,3.5,trk,S,TRACK)+stroke(arc(C,C,3.5,0,up*360),ink(p.pink),S);
+    if(!bare){const tw=Math.ceil(10*5.12);w=18+5+tw;g+=two('↓ 1,2 Mo/s','↑ 84 Ko/s',w,fg)}
+  }
+  if(id==='temp'){
+    const fr=clamp((DATA.temp-20)/80),c=ink(alert(DATA.temp,p.amber,p));
+    g=stroke(arc(C,C,R,-120,120),trk,S,TRACK)+stroke(arc(C,C,R,-120,-120+240*fr),c,S)+(bare?'':num(DATA.temp,fg));
+  }
+  if(id==='bat'){
+    const c=ink(p.green);
+    g=circ(C,C,R,trk,S,TRACK)+stroke(arc(C,C,R,0,DATA.bat*3.6),c,S);
+    // éclair (en charge) à la place du chiffre
+    g+=bare?'':`<path d="M10.2 5.2 L7.1 9.6 H8.9 L7.9 12.8 L11 8.4 H9.2 Z" fill="${fg}" stroke="${fg}" stroke-width=".6" stroke-linejoin="round"/>`;
+    if(!bare){const tw=Math.ceil(6*5.12);w=18+5+tw;g+=two('82 %','0 h 48',w,fg)}
+  }
+  if(id==='disk'){
+    const c=ink(alert(DATA.disk,p.violet,p));
+    g=circ(C,C,R,trk,S,TRACK)+stroke(arc(C,C,R,0,DATA.disk*3.6),c,S)+`<circle cx="${C}" cy="${C}" r="2" fill="${fg}"/>`;
+  }
+  return[w,g];
+}
+function icon(id,mode,bg,{scale=1,bare=false}={}){
+  const[w,g]=iconParts(id,mode,bg,bare);
+  return `<svg width="${w*scale}" height="${18*scale}" viewBox="0 0 ${w} 18" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+}
+const IDS=['cpu','gpu','mem','net','temp','bat','disk'];
+const NAMES={cpu:'CPU',gpu:'GPU',mem:'Mémoire',net:'Réseau',temp:'Température',bat:'Batterie',disk:'Disque'};
+const DESC={cpu:'anneau plein · valeur au centre',gpu:'anneau en 10 segments',mem:'anneau segmenté 4 parts',net:'double arc ↓ extérieur / ↑ intérieur',temp:'cadran 240°',bat:'anneau + éclair, texte à droite',disk:'anneau + plateau central'};
+
+// Bandeaux
+(function(){
+  const rows=[['dark','template','Sombre · image template (blanc)'],['dark','color','Sombre · couleur'],['light','template','Clair · image template (noir)'],['light','color','Clair · couleur']];
+  document.getElementById('strips').innerHTML=rows.map(([bg,mode,cap])=>
+    `<div class="strip"><p class="cap">${cap}</p><div class="bar ${bg}">${IDS.map(i=>icon(i,mode,bg)).join('')}<span class="sp"></span><span class="clk">mer. 25 oct. 14:32</span></div></div>`).join('');
+  let z=`<div></div><div class="hd">Sombre · template</div><div class="hd">Sombre · couleur</div><div class="hd">Clair · template</div><div class="hd">Clair · couleur</div>`;
+  IDS.forEach(i=>{
+    z+=`<div class="nm">${NAMES[i]}<small>${DESC[i]}</small></div>`;
+    [['dark','template'],['dark','color'],['light','template'],['light','color']].forEach(([bg,mode])=>{
+      z+=`<div class="tile ${bg}"><div class="box">${icon(i,mode,bg,{scale:3})}</div></div>`;
+    });
+  });
+  document.getElementById('zoom').innerHTML=z;
+})();
+
+/* ═══════════ POPUPS ═══════════ */
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function gen(seed,n,end,{base,amp,noise=.25,lo=0,hi=100,bursts=[],drift=0}){
+  const r=rng(seed),v=[];
+  for(let i=0;i<n;i++){
+    let x=base+drift*i/n+amp*(.55*Math.sin(i*.31+seed)+.3*Math.sin(i*.83+seed*1.7)+noise*(r()-.5)*2);
+    bursts.forEach(([b,h,wd])=>x+=h*Math.exp(-((i-b)**2)/(2*wd*wd)));
+    v.push(x);
+  }
+  const s=v.map((x,i)=>i&&i<n-1?(v[i-1]+x+v[i+1])/3:x);
+  const d=end-s[n-1],K=9;
+  for(let i=n-K;i<n;i++)s[i]+=d*Math.pow((i-(n-1-K))/K,1.6);
+  return s.map(x=>clamp(x,lo,hi));
+}
+function spark(list,{max=null,lo=0}={}){ // list=[{v:[],c}] ; max=null → échelle propre à chaque courbe
+  const w=228,h=40,pad=3;let out=`<line class="base" x1="0" x2="${w}" y1="${h}" y2="${h}"/>`,dots='';
+  list.forEach(s=>{
+    const m=(max??Math.max(...s.v)*1.12)-lo,n=s.v.length;
+    const P=s.v.map((x,i)=>[i/(n-1)*w,h-pad-clamp((x-lo)/m)*(h-pad*2)]);
+    const d=P.map((p,i)=>`${i?'L':'M'}${f(p[0])},${f(p[1])}`).join(' ');
+    out+=`<path class="area" fill="${s.c}" d="${d} L${w},${h} L0,${h} Z"/><path class="line" stroke="${s.c}" d="${d}"/>`;
+    const l=P[n-1];dots+=`<circle cx="${f(l[0]-1)}" cy="${f(l[1])}" r="2.6" fill="var(--bg)" stroke="${s.c}" stroke-width="1.6"/>`;
+  });
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}">${out}${dots}</svg>`;
+}
+const TRK='rgba(255,255,255,.09)';
+const lvl=(v,c)=>v>=95?'var(--danger)':v>=80?'var(--amber)':c;
+// Héros : arc(s) de 240° ; layers=[{r,w,items:[{v,c}],total}] ; centre = SVG déjà prêt
+function hero(layers,center,glow){
+  const cx=114,cy=86;
+  const body=layers.map(L=>stroke(arc(cx,cy,L.r,-120,120),TRK,L.w)+`<g class="glow" style="--g:${glow}">${segs(cx,cy,L.r,L.w,2.5,-120,240,L.total,L.items)}</g>`).join('');
+  return `<svg class="hero" viewBox="0 0 228 132">${body}${center}</svg>`;
+}
+const big=(v,u,y=98,c='var(--text)')=>`<text x="114" y="${y}" text-anchor="middle" fill="${c}"><tspan font-size="46" font-weight="300">${v}</tspan><tspan font-size="16" font-weight="400" dx="3" fill="var(--muted)">${u}</tspan></text>`;
+const cap=(t,y=118)=>`<text x="114" y="${y}" text-anchor="middle" font-size="11" fill="var(--muted)">${t}</text>`;
+function mini(sz,items,{w=3.4,text='',fs=9.5,total=100,gap=1}={}){
+  const r=(sz-w)/2,c=sz/2;
+  const body=circ(c,c,r,TRK,w)+(items.length>1?segs(c,c,r,w,gap,0,360,total,items):stroke(arc(c,c,r,0,items[0].v/total*360),items[0].c,w));
+  return `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">${body}${text?`<text x="${c}" y="${f(c+fs*.36)}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="var(--text)" font-family="var(--font)">${text}</text>`:''}</svg>`;
+}
+// Double arc ↓/↑ (échelle logarithmique 1 Ko/s → 100 Mo/s)
+const lg=v=>clamp(Math.log10(v/1e3)/5);
+function dual(sz,dn,up){
+  const w=sz>=30?3:2.3,c=sz/2,r1=(sz-w)/2,r2=r1-w-1.7;
+  return `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">${circ(c,c,r1,TRK,w)+stroke(arc(c,c,r1,0,lg(dn)*360),'var(--blue)',w)+circ(c,c,r2,TRK,w)+stroke(arc(c,c,r2,0,lg(up)*360),'var(--purple)',w)}</svg>`;
+}
+const head=(id,title,color)=>`<div class="hd2" style="color:${color}">${icon(id,'color','dark',{bare:true,scale:.9}).replace(/stroke="#[0-9a-f]+"/gi,m=>m)}<span class="t">${title}</span></div>`;
+const tile=(label,svg,val,unit='')=>`<div class="tl"><div class="l">${label}</div><div class="b">${svg}<span class="v">${val}${unit?`<small>${unit}</small>`:''}</span></div></div>`;
+const row=(k,v)=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+
+const CPU_CORES={P:[78,52,41,66],E:[22,18,31,12,25,9]};
+const coreRing=v=>mini(32,[{v,c:lvl(v,'var(--blue)')}],{w:3.4,text:v,fs:10});
+
+function popCPU(){
+  const hist=gen(3,60,43,{base:40,amp:15,noise:.5,bursts:[[17,24,3],[39,16,2.6],[52,-8,2]]});
+  const procs=[['Xcode',38],['WindowServer',14],['Safari',9],['Claude',6],['node',4]];
+  return `<div class="pop">${head('cpu','CPU','var(--blue)')}
+    ${hero([{r:74,w:9,total:100,items:[{v:31,c:'var(--blue)'},{v:12,c:'var(--purple)'}]}],big(43,'%'),'rgba(63,176,255,.5)')}
+    ${spark([{v:hist,c:'var(--blue)'}],{max:100})}
+    <div class="tiles">
+      ${tile('utilisateur',mini(26,[{v:31,c:'var(--blue)'}],{w:3.2}),'31',' %')}
+      ${tile('système',mini(26,[{v:12,c:'var(--purple)'}],{w:3.2}),'12',' %')}
+    </div>
+    <div class="cap2">Performance · 4</div>
+    <div class="cores">${CPU_CORES.P.map(coreRing).join('')}</div>
+    <div class="cap2">Efficience · 6</div>
+    <div class="cores">${CPU_CORES.E.map(coreRing).join('')}</div>
+    <div class="rows">${row('charge','2,14 · 1,87 · 1,52')}${row('processus','612')}${row('actif depuis','4 j 3 h')}</div>
+    <div class="sec">Processus · CPU</div>
+    <div class="pl">${procs.map(([n,v])=>`<div class="pr">${mini(18,[{v,c:'var(--blue)'}],{w:2.6})}<span class="n">${n}</span><span class="vv">${v} %</span></div>`).join('')}</div>
+  </div>`;
+}
+function popGPU(){
+  const hist=gen(8,60,24,{base:17,amp:9,noise:.5,bursts:[[12,20,2.5],[31,26,3],[47,9,2]]});
+  return `<div class="pop">${head('gpu','GPU','var(--purple)')}
+    ${hero([{r:74,w:9,total:100,items:[{v:24,c:lvl(24,'var(--purple)')}]}],big(24,'%'),'rgba(255,61,154,.5)')}
+    ${spark([{v:hist,c:'var(--purple)'}],{max:100})}
+    <div class="tiles">
+      ${tile('rendu',mini(26,[{v:21,c:'var(--purple)'}],{w:3.2}),'21',' %')}
+      ${tile('tuilage',mini(26,[{v:9,c:'var(--blue)'}],{w:3.2}),'9',' %')}
+    </div>
+    <div class="rows">${row('mémoire GPU','1,4 Go')}</div>
+  </div>`;
+}
+function popMem(){
+  const hist=gen(5,60,68,{base:62,amp:1.8,noise:.3,drift:5});
+  const items=[['App',14.2,'var(--blue)'],['Résid.',3.1,'var(--violet)'],['Compr.',2.4,'var(--purple)'],['Cache',6.0,'rgba(246,241,255,.5)']];
+  const legend=items.map(([l,v,c])=>`<div class="r"><span><i class="dot" style="background:${c}"></i>${l}</span><span>${String(v).replace('.',',')}${v===6?',0':''} Go</span></div>`).join('')
+    +`<div class="r"><span><i class="dot" style="background:${TRK};box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)"></i>Libre</span><span>6,3 Go</span></div>`;
+  const donut=(()=>{const sz=88,w=10,c=sz/2,r=(sz-w)/2;
+    const it=items.map(([l,v,col])=>({v,c:col}));
+    return `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">${circ(c,c,r,TRK,w)+segs(c,c,r,w,2,0,360,32,it)}<text x="${c}" y="${c+3}" text-anchor="middle" font-size="22" font-weight="300" fill="var(--text)" font-family="var(--font)">32</text><text x="${c}" y="${c+17}" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="var(--font)">Go</text></svg>`})();
+  const press=`<svg width="24" height="24" viewBox="0 0 24 24">${segs(12,12,9.4,3.2,1.2,-120,240,3,[{v:1,c:'var(--green)'},{v:1,c:TRK},{v:1,c:TRK}])}</svg>`;
+  return `<div class="pop">${head('mem','Mémoire','var(--blue)')}
+    ${hero([{r:74,w:9,total:100,items:[{v:68,c:lvl(68,'var(--blue)')}]}],big(68,'%')+cap('32 Go au total'),'rgba(63,176,255,.5)')}
+    ${spark([{v:hist,c:'var(--blue)'}],{lo:50,max:80})}
+    <div class="split">${donut}<div class="lg">${legend}</div></div>
+    <div class="tiles" style="margin-bottom:0">
+      ${tile('pression mémoire',press,'normale')}
+      ${tile('swap',mini(26,[{v:.4,c:'var(--blue)'}],{w:3.2,total:2}),'0,4',' Go')}
+    </div>
+  </div>`;
+}
+function popNet(){
+  const rx=gen(11,60,1.2e6,{base:.9e6,amp:.55e6,lo:5e4,hi:6e6,bursts:[[16,2.6e6,2.4],[36,3.4e6,2.8],[49,1.1e6,2]]});
+  const tx=gen(12,60,84e3,{base:60e3,amp:34e3,lo:4e3,hi:6e5,bursts:[[17,150e3,2.4],[37,260e3,2.6],[50,60e3,2]]});
+  const dn=1.2e6,up=84e3;
+  const ctr=`<text x="114" y="88" text-anchor="middle"><tspan font-size="25" font-weight="300" fill="var(--blue)">↓ 1,2</tspan><tspan font-size="10" dx="3" fill="var(--muted)">Mo/s</tspan></text>`
+    +`<text x="114" y="112" text-anchor="middle"><tspan font-size="19" font-weight="300" fill="var(--purple)">↑ 84</tspan><tspan font-size="10" dx="3" fill="var(--muted)">Ko/s</tspan></text>`;
+  const L=[{r:74,w:9,total:1,items:[{v:lg(dn),c:'var(--blue)'}]},{r:57,w:9,total:1,items:[{v:lg(up),c:'var(--purple)'}]}];
+  // l'échelle d'un arc de 240° : v est une fraction de 1 sur 240°
+  const ifc=[['en0',1.1e6,80e3,'1,1 Mo/s','80 Ko/s'],['utun3',120e3,4e3,'120 Ko/s','4 Ko/s']];
+  const sess=`<svg width="56" height="56" viewBox="0 0 56 56">${circ(28,28,23,TRK,6)+segs(28,28,23,6,1.6,0,360,2.3*1024+410,[{v:2.3*1024,c:'var(--blue)'},{v:410,c:'var(--purple)'}])}</svg>`;
+  return `<div class="pop">${head('net','Réseau','var(--blue)')}
+    ${hero(L,ctr,'rgba(63,176,255,.45)')}
+    ${spark([{v:rx,c:'var(--blue)'},{v:tx,c:'var(--purple)'}])}
+    <div class="ifaces">${ifc.map(([n,d,u,ds,us])=>`<div class="iface">${dual(24,d,u)}<span class="n">${n}</span><span class="vv"><b>↓ ${ds}</b> · ↑ ${us}</span></div>`).join('')}</div>
+    <div class="sec">Session</div>
+    <div class="split" style="margin-bottom:0">${sess}<div class="lg">
+      <div class="r"><span><i class="dot" style="background:var(--blue)"></i>reçu</span><span>2,3 Go</span></div>
+      <div class="r"><span><i class="dot" style="background:var(--purple)"></i>envoyé</span><span>410 Mo</span></div>
+    </div></div>
+  </div>`;
+}
+document.getElementById('popups').innerHTML=popCPU()+popGPU()+popMem()+popNet();
+
+// Seuils : le même héros à trois niveaux
+(function(){
+  const mk=(v,c,l,s)=>{const sz=56,w=5.6,cx=sz/2,r=(sz-w)/2;
+    return `<div class="a"><svg width="${sz}" height="${sz-8}" viewBox="0 0 ${sz} ${sz-8}" style="overflow:visible">${stroke(arc(cx,cx,r,-120,120),TRK,w)}<g style="filter:drop-shadow(0 0 3px ${c})">${stroke(arc(cx,cx,r,-120,-120+240*v/100),c,w)}</g><text x="${cx}" y="${cx+5}" text-anchor="middle" font-size="15" font-weight="300" fill="#f6f1ff" font-family="var(--font)">${v}</text></svg><span><b>${l}</b>${s}</span></div>`};
+  document.getElementById('alerts').innerHTML=mk(43,'var(--blue)','Normal','teinte de la métrique')+mk(87,'var(--amber)','Ambre','à partir de 80 %')+mk(96,'var(--danger)','Rouge','à partir de 95 %');
+})();
+</script>
+</body>
+</html>
