@@ -240,9 +240,10 @@ static NSImage *TMSparklineIcon(NSArray<NSNumber *> *series, BOOL hasValue, TMSe
 // `widthTemplate` : le texte le plus large que ce titre puisse prendre (« 100 % » quand la valeur
 // du moment est « 9 % »). Sans lui, l'élément rétrécit à chaque tick et décale toute la rangée
 // d'icônes — y compris celle sous laquelle un panneau vient d'être ancré.
-static NSAttributedString *TMMenuBarTitle(NSString *text, NSString *widthTemplate, TMSeverity severity) {
+static NSAttributedString *TMMenuBarTitle(NSString *text, NSString *widthTemplate, TMSeverity severity, CGFloat scale) {
+    // Le titre suit la taille des icônes (Réglages › Affichage) : 12 pt à l'échelle 1, arrondi au demi-point.
     NSMutableDictionary *attributes = [@{
-        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium]
+        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:TMMenuBarTitleFontSize(scale) weight:NSFontWeightMedium]
     } mutableCopy];
     // En régime normal, laisser macOS choisir la couleur du texte (thème, survol, contraste réduit).
     // On ne l'impose qu'en alerte, pour l'accorder à l'anneau.
@@ -675,11 +676,14 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
     [self.statusPopover close];
     self.iconPreviewItems = [NSMutableArray array];
     NSArray *ids = TMIconDesignIDs(), *names = TMIconDesignNames();
+    CGFloat scale = [self menuBarIconScale], spacing = [self menuBarIconSpacing];
     // Reverse insertion keeps designs 01–06 in reading order in the menu bar.
     for (NSInteger i = ids.count - 1; i >= 0; i--) {
         NSStatusItem *item = [NSStatusBar.systemStatusBar statusItemWithLength:30];
-        item.button.image = TMProviderGauge(ids[i], @0.72, [self.iconPreviewProvider isEqual:@"openai"]);
-        item.button.image.template = NO;
+        NSImage *preview = TMMenuBarImageWithLayout(TMProviderGauge(ids[i], @0.72, [self.iconPreviewProvider isEqual:@"openai"]), scale, spacing);
+        preview.template = NO;
+        item.button.image = preview;
+        item.length = MAX(30, preview.size.width + 12);  // l'aperçu suit la taille et l'espacement réglés
         item.button.identifier = ids[i];
         item.button.toolTip = TMTP(@"m.iconPreview", @{@"i": [NSString stringWithFormat:@"%02ld", (long)i + 1], @"name": TMTranslateFR(names[i]), @"provider": self.iconPreviewProvider});
         item.button.accessibilityLabel = item.button.toolTip;
@@ -734,7 +738,8 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
     for (NSString *wid in enabled.reverseObjectEnumerator) {
         if (self.widgetItems[wid]) continue;
         NSStatusItem *item = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
-        item.button.image = TMWidgetImage(TMWidgetReadout(wid, @{}));  // tiret en attendant le 1er tick
+        item.button.image = TMMenuBarImageWithLayout(TMWidgetImage(TMWidgetReadout(wid, @{})),
+                                                     [self menuBarIconScale], [self menuBarIconSpacing]);  // tiret en attendant le 1er tick
         item.button.imagePosition = NSImageLeading;
         item.button.target = self;
         item.button.action = @selector(widgetClicked:);
@@ -913,17 +918,18 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         NSDictionary *style = [self widgetStyleFor:wid];
         NSString *shape = [style[@"shape"] isKindOfClass:NSString.class] ? style[@"shape"] : nil;
         NSString *color = [style[@"color"] isKindOfClass:NSString.class] ? style[@"color"] : nil;
-        NSDictionary *signature = TMWidgetRenderSignature(readout, shape, color);
+        CGFloat scale = [self menuBarIconScale], spacing = [self menuBarIconSpacing];
+        NSDictionary *signature = TMWidgetRenderSignatureWithLayout(readout, shape, color, scale, spacing);
         if ([self.widgetSignatures[wid] isEqual:signature]) return;  // mêmes pixels : rien à redessiner
         self.widgetSignatures[wid] = signature;
-        item.button.image = TMWidgetImageStyled(readout, shape, color);
+        item.button.image = TMMenuBarImageWithLayout(TMWidgetImageStyled(readout, shape, color), scale, spacing);
         // Le titre système (valeur à côté) n'accompagne que les formes « graphe/jauge » ; les formes
         // qui portent déjà leur texte (twoLine/battery/text) n'ont pas de titre séparé.
         BOOL shapeCarriesText = TMWidgetShapeCarriesText(readout, shape);
         NSString *title = shapeCarriesText ? @"" : readout[@"title"];
         if ([title length]) {
             item.button.attributedTitle = TMMenuBarTitle(title, readout[@"valueTemplate"],
-                                                         (TMSeverity)[readout[@"severity"] integerValue]);
+                                                         (TMSeverity)[readout[@"severity"] integerValue], scale);
             item.button.imagePosition = NSImageLeading;
         } else {
             item.button.attributedTitle = [[NSAttributedString alloc] initWithString:@""];
@@ -1009,7 +1015,8 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
     self.statusItem.button.accessibilityLabel=[self.statusItem.button.toolTip stringByAppendingString:TMT(@"m.accessibility")];
     NSNumber *a=openAI ? @(1-TMNumber(openAI[@"usedPercent"])/100) : nil;
     NSNumber *c=claude ? @(1-TMNumber(claude[@"usedPercent"])/100) : nil;
-    NSDictionary *signature=@{@"openai":openAIStyle,@"claude":claudeStyle,@"a":a ?: NSNull.null,@"c":c ?: NSNull.null,@"openAIAccount":openAI[@"accountId"] ?: @"",@"claudeAccount":claude[@"accountId"] ?: @""};
+    CGFloat layoutScale=[self menuBarIconScale], layoutSpacing=[self menuBarIconSpacing];
+    NSDictionary *signature=@{@"openai":openAIStyle,@"claude":claudeStyle,@"a":a ?: NSNull.null,@"c":c ?: NSNull.null,@"openAIAccount":openAI[@"accountId"] ?: @"",@"claudeAccount":claude[@"accountId"] ?: @"",@"scale":@(layoutScale),@"spacing":@(layoutSpacing)};
     if ([self.statusMenuSignature isEqual:signature]) return;
     self.statusMenuSignature=signature;
     // One native item keeps the two independently configured icons adjacent, even near a notch.
@@ -1020,11 +1027,22 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
         return YES;
     }];
     pair.template=NO;
-    self.statusItem.button.image=pair;
+    NSImage *laidOut=TMMenuBarImageWithLayout(pair,layoutScale,layoutSpacing);  // identique à `pair` aux réglages par défaut
+    self.statusItem.button.image=laidOut;
     self.statusItem.button.imagePosition=NSImageOnly;
     self.statusItem.button.attributedTitle=[[NSAttributedString alloc] initWithString:@""];
     self.statusItem.button.title=@"";
-    self.statusItem.length=56;
+    self.statusItem.length=laidOut.size.width+12;  // 56 pour la paire 44 pt par défaut
+}
+
+#pragma mark - Taille et espacement des icônes
+
+- (CGFloat)menuBarIconScale {
+    return TMMenuBarIconScaleFromValue([NSUserDefaults.standardUserDefaults objectForKey:@"menuBarIconScale"]);
+}
+
+- (CGFloat)menuBarIconSpacing {
+    return TMMenuBarIconSpacingFromValue([NSUserDefaults.standardUserDefaults objectForKey:@"menuBarIconSpacing"]);
 }
 
 - (NSString *)iconStyleForProvider:(NSString *)provider {
@@ -1448,6 +1466,27 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         [self updateStatusMenu];
         [self pushData];
     }
+    if ([action isEqualToString:@"setMenuBarIconLayout"]) {
+        // Valeurs validées contre les listes autorisées : tout le reste est ignoré (une valeur
+        // inconnue ne doit ni changer le réglage ni le remettre au défaut).
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        BOOL changed = NO;
+        id scale = body[@"scale"], spacing = body[@"spacing"];
+        if (TMMenuBarIconScaleIsAllowed(scale)) {
+            [defaults setDouble:TMMenuBarIconScaleFromValue(scale) forKey:@"menuBarIconScale"]; changed = YES;
+        }
+        if (TMMenuBarIconSpacingIsAllowed(spacing)) {
+            [defaults setDouble:TMMenuBarIconSpacingFromValue(spacing) forKey:@"menuBarIconSpacing"]; changed = YES;
+        }
+        if (changed) {
+            [self.widgetSignatures removeAllObjects];  // forcer le redessin des widgets…
+            self.statusMenuSignature = nil;             // …et de la jauge quota
+            [self updateMenuBarWidgetsFromMonitor];
+            [self updateStatusMenu];
+            if (self.iconPreviewItems) [self showIconPreviews];
+        }
+        [self pushData];
+    }
     if ([action isEqualToString:@"setProviderMenuIconStyle"]) {
         NSString *provider=body[@"provider"], *style=body[@"value"];
         if ([@[@"openai",@"claude"] containsObject:provider] && [TMIconDesignIDs() containsObject:style]) {
@@ -1702,6 +1741,8 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             @"providerMenuMetrics":@{@"openai":[self metricForProvider:@"openai"],@"claude":[self metricForProvider:@"claude"]},
             @"providerIconStyles":@{@"openai":[self iconStyleForProvider:@"openai"],@"claude":[self iconStyleForProvider:@"claude"]},
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
+            @"menuBarIconScale": @([self menuBarIconScale]),
+            @"menuBarIconSpacing": @([self menuBarIconSpacing]),
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
             @"updates": @{ @"available": @(self.updater.available), @"automatic": @(self.updater.automatic),
