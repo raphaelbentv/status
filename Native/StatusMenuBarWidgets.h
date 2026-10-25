@@ -154,4 +154,31 @@ NSImage *_Nullable TMMenuBarImageWithLayout(NSImage *_Nullable image, CGFloat sc
 NSDictionary *TMWidgetRenderSignatureWithLayout(NSDictionary *readout, NSString *_Nullable shape,
                                                 NSString *_Nullable colorName, CGFloat scale, CGFloat spacing);
 
+#pragma mark - Icône et valeur indépendantes (Réglages › widget › Affichage)
+
+// Réglage `display` par widget (menuBarWidgetConfig[id]) : « auto » (défaut : comportement historique),
+// « both » (icône + valeur), « icon » (icône seule), « value » (valeur seule).
+extern NSArray<NSString *> *TMWidgetDisplayModes(void);              // auto, both, icon, value
+BOOL TMWidgetDisplayIsAllowed(id _Nullable value);                    // liste blanche stricte
+NSString *TMWidgetDisplayFromValue(id _Nullable value);               // valeur validée, sinon « auto »
+
+// Variante sans texte d'une forme (« icône seule »). Table de repli : voir le commentaire de l'implémentation.
+// Retourne un id que TMWidgetImageStyled sait dessiner (les formes des Réglages plus « batteryCell »,
+// « arcs », « sparkline », « tank », « tankBar »).
+NSString *TMWidgetTextlessShape(NSDictionary *readout, NSString *_Nullable shape);
+
+// Plan d'affichage : { display (effectif), imageShape (« » = pas d'image), title (« » = pas de titre
+// système), titleTemplate (gabarit de largeur du titre) }. Jamais ni image ni titre.
+NSDictionary *TMWidgetDisplayPlan(NSDictionary *readout, NSString *_Nullable shape, NSString *_Nullable display);
+
+// Signature de rendu complète (donnée, forme, couleur, affichage, taille, espacement).
+NSDictionary *TMWidgetRenderSignatureForDisplay(NSDictionary *readout, NSString *_Nullable shape,
+                                                NSString *_Nullable colorName, NSString *_Nullable display,
+                                                CGFloat scale, CGFloat spacing);
+
+// Titre sans image (valeur seule) : ajoute `spacing` points de part et d'autre, par moitié (une pièce
+// transparente en tête, un crénage en queue) — l'équivalent, pour le texte, de la marge que
+// TMMenuBarImageWithLayout pose autour d'une image. spacing ≤ 0 : le titre tel quel.
+NSAttributedString *TMTitleWithSpacing(NSAttributedString *title, CGFloat spacing);
+
 NS_ASSUME_NONNULL_END

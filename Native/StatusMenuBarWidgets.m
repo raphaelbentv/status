@@ -711,16 +711,16 @@ static NSImage *TMDrawDial(double fraction, BOOL hasValue, NSColor *ink, BOOL is
 
 // Deux arcs concentriques (↓ extérieur, ↑ intérieur, échelle logarithmique) puis le texte deux
 // lignes, calé à droite dans la largeur du pire cas (« ↓ 999 Mo/s ») comme la forme « 2 lignes ».
-static NSImage *TMDrawDualArc(NSDictionary *readout, NSColor *ink, BOOL isTemplate) {
+static NSImage *TMDrawDualArc(NSDictionary *readout, BOOL withText, NSColor *ink, BOOL isTemplate) {
     const CGFloat side = 18, h = 18, outer = 7.2, inner = 4.3, lineWidth = 1.8, gutter = 3;
     BOOL hasValue = [readout[@"hasValue"] boolValue];
     NSString *top = hasValue ? readout[@"primary"] : @"—", *bottom = hasValue ? readout[@"secondary"] : @"";
     NSFont *font = [NSFont monospacedDigitSystemFontOfSize:8.5 weight:NSFontWeightMedium];
     NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: ink };
     NSString *widthTemplate = readout[@"template"];
-    CGFloat textW = ceil(MAX(MAX([top sizeWithAttributes:attrs].width, [bottom sizeWithAttributes:attrs].width),
+    CGFloat textW = !withText ? 0 : ceil(MAX(MAX([top sizeWithAttributes:attrs].width, [bottom sizeWithAttributes:attrs].width),
                              widthTemplate.length ? [widthTemplate sizeWithAttributes:attrs].width : 0));
-    CGFloat w = side + gutter + textW + 1;
+    CGFloat w = withText ? side + gutter + textW + 1 : side;
     double rx = [readout[@"rxFraction"] doubleValue], tx = [readout[@"txFraction"] doubleValue];
     return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
         NSPoint c = NSMakePoint(side / 2, side / 2);
@@ -733,6 +733,7 @@ static NSImage *TMDrawDualArc(NSDictionary *readout, NSColor *ink, BOOL isTempla
         } else {
             TMDrawDashLen(ink, c.x, c.y, 1.4);
         }
+        if (!withText) return;
         NSSize topSize = [top sizeWithAttributes:attrs], botSize = [bottom sizeWithAttributes:attrs];
         [top drawAtPoint:NSMakePoint(w - 1 - topSize.width, h - topSize.height - 0.5) withAttributes:attrs];
         [bottom drawAtPoint:NSMakePoint(w - 1 - botSize.width, 0.5) withAttributes:attrs];
@@ -900,6 +901,33 @@ static NSImage *TMDrawChip(NSDictionary *readout, BOOL withBar, NSColor *ink, BO
     });
 }
 
+#pragma mark - Variantes sans texte (« icône seule »)
+
+// Le graphique d'une puce, seul : la sparkline (24 × 18) ou le réservoir vertical (12 × 18) /
+// horizontal (22 × 18). Mêmes tracés que dans la puce, cellule de 18 pt de haut.
+static NSImage *TMDrawSparkline(NSArray<NSNumber *> *series, BOOL autoScale, BOOL hasValue, NSColor *ink, BOOL isTemplate) {
+    return TMVectorImage(NSMakeSize(24, 18), isTemplate, ^{
+        TMDrawChipSpark(series, autoScale, hasValue, NSMakeRect(0.5, 3, 23, 12), ink, isTemplate);
+    });
+}
+
+static NSImage *TMDrawTank(double fraction, BOOL hasValue, BOOL horizontal, NSColor *ink, BOOL isTemplate) {
+    NSSize size = horizontal ? NSMakeSize(22, 18) : NSMakeSize(12, 18);
+    return TMVectorImage(size, isTemplate, ^{
+        TMDrawChipReservoir(fraction, hasValue, horizontal,
+                            horizontal ? NSMakeRect(0.5, 5.5, 21, 7) : NSMakeRect(2, 2.5, 8, 13), ink, isTemplate);
+    });
+}
+
+// Ids des variantes sans texte qui n'existent pas comme forme choisie : « batteryCell » (pile seule),
+// « arcs » (arcs ↓/↑ seuls), « sparkline », « tank » (réservoir vertical), « tankBar » (horizontal).
+static NSSet<NSString *> *TMTextlessShapeIDs(void) {
+    static NSSet<NSString *> *ids;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ ids = [NSSet setWithArray:@[@"batteryCell", @"arcs", @"sparkline", @"tank", @"tankBar"]]; });
+    return ids;
+}
+
 // Forme réellement dessinée : celle demandée si elle sait représenter la donnée de ce widget, sinon
 // la forme naturelle du readout. Les formes historiques passent telles quelles (inchangées pour les
 // utilisateurs existants) ; les formes ajoutées exigent les champs du readout qu'elles dessinent.
@@ -913,6 +941,8 @@ NSString *TMWidgetResolvedShape(NSDictionary *readout, NSString *shape) {
         needsFraction = [NSSet setWithArray:@[@"segments", @"dial", @"hub"]];
     });
     if ([legacy containsObject:shape]) return shape;
+    // Variantes sans texte (voir TMWidgetTextlessShape) : ids internes, jamais proposés aux Réglages.
+    if ([TMTextlessShapeIDs() containsObject:shape]) return shape;
     BOOL numeric = [readout[@"numeric"] boolValue], dual = [readout[@"dual"] boolValue];
     BOOL chip = [readout[@"chipLabel"] isKindOfClass:NSString.class] && [readout[@"chipLabel"] length];
     if ([shape isEqual:@"ringValue"]) return numeric ? shape : natural;
@@ -933,20 +963,28 @@ BOOL TMWidgetShapeCarriesText(NSDictionary *readout, NSString *shape) {
     return [carrying containsObject:TMWidgetResolvedShape(readout, shape)];
 }
 
-NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *shape, NSString *colorName) {
-    NSString *resolved = TMWidgetResolvedShape(readout, shape);
+// Signature d'une image déjà résolue : `drawn` est la forme réellement dessinée, `requested` celle des
+// Réglages (seule « spark », la jauge principale, ne passe pas par la résolution).
+static NSMutableDictionary *TMSignatureOf(NSDictionary *readout, NSString *drawn, NSString *requested, NSString *colorName) {
     // Chaque champ de détail n'entre dans la signature que si la forme choisie le dessine : la série
     // glisse à chaque tick, les débits et les parts mémoire bougent de quelques % — alors que les
     // pixels, eux, ne changent que quand une valeur affichée change.
-    BOOL sparkChip = [resolved isEqual:@"chip"] && [readout[@"chipKind"] isEqual:@"spark"];
-    BOOL usesSeries = [resolved isEqual:@"bars"] || [resolved isEqual:@"graph"] || [shape isEqual:@"spark"] || sparkChip;
+    BOOL sparkChip = [drawn isEqual:@"chip"] && [readout[@"chipKind"] isEqual:@"spark"];
+    BOOL usesSeries = [drawn isEqual:@"bars"] || [drawn isEqual:@"graph"] || [drawn isEqual:@"sparkline"]
+                      || [requested isEqual:@"spark"] || sparkChip;
     NSMutableDictionary *signature = [readout mutableCopy] ?: [NSMutableDictionary dictionary];
     if (!usesSeries) [signature removeObjectForKey:@"series"];
-    if (![resolved isEqual:@"segments"]) [signature removeObjectForKey:@"parts"];
-    if (![resolved isEqual:@"dualArc"]) { [signature removeObjectForKey:@"rxFraction"]; [signature removeObjectForKey:@"txFraction"]; }
-    signature[@"shape"] = resolved;
+    if (![drawn isEqual:@"segments"]) [signature removeObjectForKey:@"parts"];
+    if (![drawn isEqual:@"dualArc"] && ![drawn isEqual:@"arcs"]) {
+        [signature removeObjectForKey:@"rxFraction"]; [signature removeObjectForKey:@"txFraction"];
+    }
+    signature[@"shape"] = drawn;
     signature[@"color"] = colorName ?: @"";
     return signature;
+}
+
+NSDictionary *TMWidgetRenderSignature(NSDictionary *readout, NSString *shape, NSString *colorName) {
+    return TMSignatureOf(readout, TMWidgetResolvedShape(readout, shape), shape, colorName);
 }
 
 NSImage *TMWidgetImageStyled(NSDictionary *readout, NSString *shape, NSString *colorName) {
@@ -983,7 +1021,15 @@ NSImage *TMWidgetImageWithInk(NSDictionary *readout, NSString *shape, NSColor *i
     if ([shape isEqual:@"hub"])
         return TMDrawHub(fraction, hasValue, ink, isTemplate);
     if ([shape isEqual:@"dualArc"])
-        return TMDrawDualArc(readout, ink, isTemplate);
+        return TMDrawDualArc(readout, YES, ink, isTemplate);
+    if ([shape isEqual:@"arcs"])
+        return TMDrawDualArc(readout, NO, ink, isTemplate);
+    if ([shape isEqual:@"sparkline"])
+        return TMDrawSparkline(hasValue ? readout[@"series"] : @[], [readout[@"autoScale"] boolValue], hasValue, ink, isTemplate);
+    if ([shape isEqual:@"tank"] || [shape isEqual:@"tankBar"])
+        return TMDrawTank(fraction, hasValue, [shape isEqual:@"tankBar"], ink, isTemplate);
+    if ([shape isEqual:@"batteryCell"])
+        return TMDrawBattery(fraction, [readout[@"charging"] boolValue], hasValue, @"", @"", nil, ink, isTemplate);
     if ([shape isEqual:@"chip"] || [shape isEqual:@"chipBar"])
         return TMDrawChip(readout, [shape isEqual:@"chipBar"], ink, isTemplate);
     NSString *textTemplate = readout[@"template"], *valueTemplate = readout[@"valueTemplate"];
@@ -1094,4 +1140,124 @@ NSDictionary *TMWidgetRenderSignatureWithLayout(NSDictionary *readout, NSString 
     signature[@"scale"] = @(scale);
     signature[@"spacing"] = @(spacing);
     return signature;
+}
+
+#pragma mark - Icône et valeur indépendantes (Réglages › widget › Affichage)
+
+NSArray<NSString *> *TMWidgetDisplayModes(void) { return @[@"auto", @"both", @"icon", @"value"]; }
+
+BOOL TMWidgetDisplayIsAllowed(id value) {
+    return [value isKindOfClass:NSString.class] && [TMWidgetDisplayModes() containsObject:value];
+}
+
+NSString *TMWidgetDisplayFromValue(id value) { return TMWidgetDisplayIsAllowed(value) ? value : @"auto"; }
+
+// Table de repli « icône seule » : forme résolue → variante qui ne dessine AUCUN texte.
+//   bars graph ring pie bar segments dial hub  → elles-mêmes (déjà sans texte)
+//   ringValue                                  → ring            (l'anneau sans son chiffre)
+//   chip      (sparkline : cpu, gpu, réseau, temp.) → sparkline  (la courbe de la puce, seule)
+//   chip      (réservoir : mémoire, disque, bat.)   → tank       (réservoir vertical seul)
+//   chipBar                                    → tankBar         (réservoir horizontal seul)
+//   dualArc                                    → arcs            (les deux arcs ↓/↑, sans les débits)
+//   battery                                    → batteryCell     (la pile, sans « 1 h 20 » ni « 43 % »)
+//   text, twoLine (aucune icône dans l'image)  → forme naturelle graphique du widget : bars / pie / ring
+//                                                (cpu, gpu, mémoire, disque, quotas, crédits API) ; batteryCell
+//                                                (batterie) ; arcs (réseau) ; ring (température, 0-100 °C).
+NSString *TMWidgetTextlessShape(NSDictionary *readout, NSString *shape) {
+    NSString *resolved = TMWidgetResolvedShape(readout, shape);
+    if ([resolved isEqual:@"ringValue"]) return @"ring";
+    if ([resolved isEqual:@"chip"]) return [readout[@"chipKind"] isEqual:@"spark"] ? @"sparkline" : @"tank";
+    if ([resolved isEqual:@"chipBar"]) return @"tankBar";
+    if ([resolved isEqual:@"dualArc"]) return @"arcs";
+    if ([resolved isEqual:@"battery"]) return @"batteryCell";
+    if ([resolved isEqual:@"text"] || [resolved isEqual:@"twoLine"]) {
+        NSString *natural = [readout[@"style"] isKindOfClass:NSString.class] ? readout[@"style"] : @"";
+        if ([@[@"bars", @"pie", @"ring"] containsObject:natural]) return natural;
+        if ([natural isEqual:@"battery"]) return @"batteryCell";
+        return [readout[@"dual"] boolValue] ? @"arcs" : @"ring";
+    }
+    return resolved;
+}
+
+static NSDictionary *TMPlan(NSString *display, NSString *imageShape, NSString *title, NSDictionary *readout) {
+    return @{ @"display": display, @"imageShape": imageShape ?: @"", @"title": title ?: @"",
+              @"titleTemplate": title.length && [readout[@"valueTemplate"] isKindOfClass:NSString.class] ? readout[@"valueTemplate"] : @"" };
+}
+
+// Ce que montre un widget selon son réglage « Affichage » :
+//   auto  : comportement historique — image de la forme ; titre système seulement pour les formes
+//           graphiques (bars/pie/ring…), jamais pour celles qui dessinent leur texte.
+//   icon  : variante sans texte de la forme (TMWidgetTextlessShape), pas de titre.
+//   value : pas d'image ; la valeur en titre système, gabarit de largeur réservé (« — » tant que la
+//           source n'a pas répondu, jamais vide). Réseau (deux débits) : le texte deux lignes, sans icône.
+//   both  : variante sans texte + valeur en titre. Les widgets dont la valeur n'est pas dans le titre du
+//           readout (batterie, température, réseau) utilisent la valeur courte du readout ; la pile
+//           (icône ET texte d'état dans l'image) et les formes réseau déjà iconiques restent comme en auto,
+//           et le texte pur réseau (text, twoLine) devient « dualArc ».
+// Garde : jamais d'item sans image ni titre — retombe sur « auto ».
+NSDictionary *TMWidgetDisplayPlan(NSDictionary *readout, NSString *shape, NSString *display) {
+    display = TMWidgetDisplayFromValue(display);
+    NSString *resolved = TMWidgetResolvedShape(readout, shape);
+    NSString *autoTitle = TMWidgetShapeCarriesText(readout, shape) ? @"" : ([readout[@"title"] isKindOfClass:NSString.class] ? readout[@"title"] : @"");
+    // Forme résolue vide (readout sans style) : TMWidgetImageWithInk dessine alors le texte deux lignes.
+    NSDictionary *autoPlan = TMPlan(@"auto", resolved.length ? resolved : @"twoLine", autoTitle, readout);
+    if ([display isEqual:@"auto"]) return autoPlan;
+
+    BOOL dual = [readout[@"dual"] boolValue];
+    NSString *value = [readout[@"value"] isKindOfClass:NSString.class] ? readout[@"value"] : @"";
+    NSString *valueText = [readout[@"hasValue"] boolValue] && value.length ? value : @"—";
+    NSString *image = @"", *title = @"";
+    if ([display isEqual:@"value"]) {
+        if (dual) image = @"twoLine"; else title = valueText;
+    } else if ([display isEqual:@"icon"]) {
+        image = TMWidgetTextlessShape(readout, shape);
+    } else {  // both
+        if (dual) {
+            if (![resolved isEqual:@"text"] && ![resolved isEqual:@"twoLine"]) return TMPlan(@"both", autoPlan[@"imageShape"], autoPlan[@"title"], readout);
+            image = @"dualArc";
+        } else if ([resolved isEqual:@"battery"]) {
+            return TMPlan(@"both", autoPlan[@"imageShape"], autoPlan[@"title"], readout);
+        } else {
+            image = TMWidgetTextlessShape(readout, shape); title = valueText;
+        }
+    }
+    if (!image.length && !title.length) return autoPlan;
+    return TMPlan(display, image, title, readout);
+}
+
+NSDictionary *TMWidgetRenderSignatureForDisplay(NSDictionary *readout, NSString *shape, NSString *colorName,
+                                                NSString *display, CGFloat scale, CGFloat spacing) {
+    NSDictionary *plan = TMWidgetDisplayPlan(readout, shape, display);
+    NSString *drawn = plan[@"imageShape"];
+    NSMutableDictionary *signature;
+    if (drawn.length) {
+        signature = TMSignatureOf(readout, drawn, shape, colorName);
+    } else {
+        // Valeur seule : seuls le texte, son gabarit, sa couleur et la sévérité changent les pixels.
+        signature = [@{ @"shape": @"", @"color": colorName ?: @"", @"severity": readout[@"severity"] ?: @0 } mutableCopy];
+    }
+    signature[@"display"] = TMWidgetDisplayFromValue(display);
+    signature[@"title"] = plan[@"title"];
+    signature[@"titleTemplate"] = plan[@"titleTemplate"];
+    signature[@"scale"] = @(scale);
+    signature[@"spacing"] = @(spacing);
+    return signature;
+}
+
+NSAttributedString *TMTitleWithSpacing(NSAttributedString *title, CGFloat spacing) {
+    if (!(spacing > 0) || !isfinite(spacing) || !title.length) return title;
+    CGFloat half = spacing / 2;
+    NSMutableAttributedString *padded = [title mutableCopy];
+    NSRange last = NSMakeRange(padded.length - 1, 1);
+    NSNumber *kern = [padded attribute:NSKernAttributeName atIndex:last.location effectiveRange:NULL];
+    [padded addAttribute:NSKernAttributeName value:@(kern.doubleValue + half) range:last];
+    // Marge de tête : une espace ordinaire, recalée par crénage à la demi-marge exacte (le crénage peut
+    // être négatif). Ni pièce jointe (NSTextAttachment sans image : largeur ignorée), ni espace de
+    // largeur nulle (crénage ignoré) — seule une vraie espace honore le crénage partout.
+    NSMutableDictionary *lead = [[title attributesAtIndex:0 effectiveRange:NULL] mutableCopy];
+    [lead removeObjectForKey:NSKernAttributeName];
+    CGFloat blank = [@" " sizeWithAttributes:lead].width;
+    lead[NSKernAttributeName] = @(half - blank);
+    [padded insertAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:lead] atIndex:0];
+    return padded;
 }

@@ -2749,6 +2749,252 @@ static void TestMenuBarIconLayout(void) {
     Check(TMInkSum(TMMenuBarImageWithLayout(twoLine, 1.25, 0)) > TMInkSum(twoLine) * 1.2, @"texte deux lignes agrandi : plus d'encre");
 }
 
+#pragma mark - Icône et valeur indépendantes (Réglages › widget › Affichage)
+
+// Trois mesures par widget (faible, forte, source muette) : de quoi vérifier que rien ne bouge d'une valeur à l'autre.
+static NSDictionary<NSString *, NSArray<NSDictionary *> *> *TMDisplayScenarios(void) {
+    NSDictionary *none = @{ @"families": @[] };
+    NSDictionary *chargingMid = TMSnapshotWith(@"battery", @{ @"percent": @64, @"charging": @YES, @"minutesRemaining": @95 });
+    return @{
+        @"cpu": @[TMSnapshotWith(@"cpu", @{ @"total": @4 }), TMSnapshotWith(@"cpu", @{ @"total": @100 }), none],
+        @"gpu": @[TMSnapshotWith(@"gpu", @{ @"usage": @4 }), TMSnapshotWith(@"gpu", @{ @"usage": @100 }), none],
+        @"memory": @[TMRamSnapshot(4, nil), TMRamSnapshot(100, nil), none],
+        @"disk": @[TMSnapshotWith(@"disk", @{ @"usedPercent": @3 }), TMSnapshotWith(@"disk", @{ @"usedPercent": @100 }), none],
+        @"network": @[TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @8, @"txBytesPerSec": @8 }),
+                      TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @1048000000, @"txBytesPerSec": @1048000000 }), none],
+        @"temperature": @[TMSnapshotWith(@"sensors", @{ @"tempC": @5 }), TMSnapshotWith(@"sensors", @{ @"tempC": @100 }), none],
+        @"battery": @[TMSnapshotWith(@"battery", @{ @"percent": @100, @"fullyCharged": @YES }),
+                      TMSnapshotWith(@"battery", @{ @"percent": @7, @"minutesRemaining": @620 }), chargingMid, none],
+        @"claudeWeek": @[TMSnapshotWith(@"claudeWeek", @{ @"percent": @5 }), TMSnapshotWith(@"claudeWeek", @{ @"percent": @95 }), none],
+        @"anthropicApi": @[TMSnapshotWith(@"anthropicApi", @{ @"text": @"$12", @"fraction": @0.1, @"template": @"$9,999" }),
+                           TMSnapshotWith(@"anthropicApi", @{ @"text": @"$9,999", @"fraction": @0.9, @"template": @"$9,999" }), none],
+    };
+}
+
+static void TestWidgetDisplay(void) {
+    Section(@"Affichage d'un widget — icône et valeur indépendantes");
+    NSArray *allShapes = @[@"", @"bars", @"graph", @"ring", @"pie", @"bar", @"text", @"twoLine", @"battery", @"ringValue",
+                           @"segments", @"dial", @"hub", @"dualArc", @"chip", @"chipBar", @"inconnue"];
+    NSDictionary *scenarios = TMDisplayScenarios();
+    NSDictionary *fake = TMFakeSnapshot();
+    NSDictionary *(^readoutOf)(NSString *) = ^NSDictionary *(NSString *wid) { return TMWidgetReadout(wid, fake); };
+
+    // ── Validation : liste blanche stricte, tout le reste retombe sur « auto ».
+    CheckEqual(TMWidgetDisplayModes(), (@[@"auto", @"both", @"icon", @"value"]), @"modes d'affichage : auto, both, icon, value");
+    for (NSString *mode in TMWidgetDisplayModes())
+        Check(TMWidgetDisplayIsAllowed(mode) && [TMWidgetDisplayFromValue(mode) isEqual:mode], @"mode autorisé conservé");
+    for (id bad in @[@"AUTO", @"both ", @"", @"text", @"icône", @"1", @1, @YES, NSNull.null, @[], @{}]) {
+        Check(!TMWidgetDisplayIsAllowed(bad), @"mode inconnu refusé par l'action native");
+        CheckEqual(TMWidgetDisplayFromValue(bad), @"auto", @"mode inconnu : repli sur auto");
+    }
+    CheckEqual(TMWidgetDisplayFromValue(nil), @"auto", @"réglage absent : auto");
+
+    // ── Table de repli « icône seule » (forme résolue → variante sans texte).
+    void (^fallback)(NSString *, NSString *, NSString *) = ^(NSString *wid, NSString *shape, NSString *expected) {
+        CheckEqual(TMWidgetTextlessShape(readoutOf(wid), shape), expected,
+                   [NSString stringWithFormat:@"repli sans texte : %@ / %@ → %@", wid, shape.length ? shape : @"(naturelle)", expected]);
+    };
+    fallback(@"cpu", @"bars", @"bars");       fallback(@"cpu", @"graph", @"graph");   fallback(@"cpu", @"ring", @"ring");
+    fallback(@"cpu", @"text", @"bars");       fallback(@"cpu", @"ringValue", @"ring"); fallback(@"cpu", @"chip", @"sparkline");
+    fallback(@"cpu", @"dial", @"dial");       fallback(@"cpu", @"segments", @"segments");
+    fallback(@"gpu", @"text", @"bars");       fallback(@"gpu", @"chip", @"sparkline");
+    fallback(@"memory", @"text", @"pie");     fallback(@"memory", @"chip", @"tank");   fallback(@"memory", @"chipBar", @"tankBar");
+    fallback(@"memory", @"ringValue", @"ring"); fallback(@"memory", @"hub", @"hub");
+    fallback(@"disk", @"text", @"pie");       fallback(@"disk", @"chipBar", @"tankBar");
+    fallback(@"network", @"twoLine", @"arcs"); fallback(@"network", @"text", @"arcs");  fallback(@"network", @"dualArc", @"arcs");
+    fallback(@"network", @"chip", @"sparkline"); fallback(@"network", @"", @"arcs");
+    fallback(@"temperature", @"twoLine", @"ring"); fallback(@"temperature", @"text", @"ring");
+    fallback(@"temperature", @"ringValue", @"ring"); fallback(@"temperature", @"chip", @"sparkline"); fallback(@"temperature", @"bar", @"bar");
+    fallback(@"battery", @"battery", @"batteryCell"); fallback(@"battery", @"twoLine", @"batteryCell"); fallback(@"battery", @"text", @"batteryCell");
+    fallback(@"battery", @"ringValue", @"ring"); fallback(@"battery", @"chip", @"tank"); fallback(@"battery", @"chipBar", @"tankBar");
+    fallback(@"battery", @"ring", @"ring");
+    // Formes qui ne collent pas à la donnée : on repart de la forme naturelle avant de chercher la variante.
+    fallback(@"network", @"segments", @"arcs");   // pas de fraction pour le réseau → twoLine → arcs
+    fallback(@"cpu", @"dualArc", @"bars");        // dualArc exige le réseau → bars
+    fallback(@"cpu", @"inconnue", @"bars");
+    NSDictionary *quota = TMWidgetReadout(@"claudeWeek", scenarios[@"claudeWeek"][0]);
+    CheckEqual(TMWidgetTextlessShape(quota, @"text"), @"pie", @"repli sans texte : quota / text → pie");
+    NSDictionary *api = TMWidgetReadout(@"anthropicApi", scenarios[@"anthropicApi"][0]);
+    CheckEqual(TMWidgetTextlessShape(api, @"text"), @"ring", @"repli sans texte : crédit API / text → ring");
+    CheckEqual(TMWidgetTextlessShape(readoutOf(@"cpu"), nil), @"bars", @"repli sans texte : forme absente → naturelle");
+
+    // La variante est toujours sans texte, dessinable, et identique d'une mesure à l'autre à fraction égale
+    // (preuve par l'encre : changer tous les textes du readout ne change aucun pixel).
+    for (NSString *wid in scenarios) for (NSString *shape in allShapes) {
+        NSDictionary *readout = TMWidgetReadout(wid, scenarios[wid][0]);
+        NSString *textless = TMWidgetTextlessShape(readout, shape);
+        NSString *what = [NSString stringWithFormat:@"%@ / %@ → %@", wid, shape, textless];
+        Check(textless.length && !TMWidgetShapeCarriesText(readout, textless), [@"variante sans texte : ne porte pas de texte — " stringByAppendingString:what]);
+        NSMutableDictionary *other = [readout mutableCopy];
+        for (NSString *key in @[@"title", @"value", @"primary", @"secondary", @"chipValue", @"chipUnit", @"chipLabel"])
+            if ([other[key] isKindOfClass:NSString.class] && [other[key] length]) other[key] = @"ZZZZ ZZZZ";
+        NSImage *a = TMWidgetImageStyled(readout, textless, @"blue"), *b = TMWidgetImageStyled(other, textless, @"blue");
+        Check(a.size.width > 0 && a.size.height > 0 && NSEqualSizes(a.size, b.size) && fabs(TMInkSum(a) - TMInkSum(b)) < 1e-6,
+              [@"variante sans texte : aucun pixel de texte — " stringByAppendingString:what]);
+        Check(TMInkSum(a) > 0, [@"variante sans texte : dessine quelque chose — " stringByAppendingString:what]);
+    }
+
+    // ── Plan d'affichage : exemples précis.
+    void (^plan)(NSString *, NSString *, NSString *, NSString *, NSString *) =
+        ^(NSString *wid, NSString *shape, NSString *display, NSString *image, NSString *title) {
+            NSDictionary *p = TMWidgetDisplayPlan(readoutOf(wid), shape, display);
+            NSString *what = [NSString stringWithFormat:@"%@ / %@ / %@ → image « %@ », titre « %@ »", wid, shape.length ? shape : @"(naturelle)", display, image, title];
+            Check([p[@"imageShape"] isEqual:image] && [p[@"title"] isEqual:title], [@"plan : " stringByAppendingString:what]);
+        };
+    // auto : strictement le comportement d'avant (titre seulement pour les formes graphiques).
+    plan(@"cpu", @"bars", @"auto", @"bars", @"43 %");        plan(@"cpu", @"", @"auto", @"bars", @"43 %");
+    plan(@"cpu", @"text", @"auto", @"text", @"");            plan(@"cpu", @"chip", @"auto", @"chip", @"");
+    plan(@"cpu", @"ringValue", @"auto", @"ringValue", @"");  plan(@"memory", @"pie", @"auto", @"pie", @"68 %");
+    plan(@"network", @"", @"auto", @"twoLine", @"");         plan(@"network", @"dualArc", @"auto", @"dualArc", @"");
+    plan(@"battery", @"", @"auto", @"battery", @"");         plan(@"battery", @"ring", @"auto", @"ring", @"");
+    plan(@"temperature", @"", @"auto", @"twoLine", @"");     plan(@"temperature", @"ring", @"auto", @"ring", @"");
+    // icône seule : variante sans texte, jamais de titre.
+    plan(@"cpu", @"bars", @"icon", @"bars", @"");            plan(@"cpu", @"text", @"icon", @"bars", @"");
+    plan(@"cpu", @"ringValue", @"icon", @"ring", @"");       plan(@"cpu", @"chip", @"icon", @"sparkline", @"");
+    plan(@"network", @"", @"icon", @"arcs", @"");            plan(@"battery", @"", @"icon", @"batteryCell", @"");
+    plan(@"memory", @"chipBar", @"icon", @"tankBar", @"");   plan(@"temperature", @"twoLine", @"icon", @"ring", @"");
+    // valeur seule : pas d'image, la valeur du readout en titre ; réseau → le texte deux lignes.
+    plan(@"cpu", @"bars", @"value", @"", @"43 %");           plan(@"cpu", @"chip", @"value", @"", @"43 %");
+    plan(@"memory", @"pie", @"value", @"", @"68 %");         plan(@"disk", @"ring", @"value", @"", @"74 %");
+    plan(@"temperature", @"twoLine", @"value", @"", @"50°"); plan(@"battery", @"battery", @"value", @"", @"100 %");
+    plan(@"network", @"dualArc", @"value", @"twoLine", @"");  plan(@"network", @"", @"value", @"twoLine", @"");
+    // icône + valeur : la variante sans texte et le titre, même pour les formes qui portent leur texte.
+    plan(@"cpu", @"bars", @"both", @"bars", @"43 %");        plan(@"cpu", @"text", @"both", @"bars", @"43 %");
+    plan(@"cpu", @"ringValue", @"both", @"ring", @"43 %");   plan(@"cpu", @"chip", @"both", @"sparkline", @"43 %");
+    plan(@"memory", @"chipBar", @"both", @"tankBar", @"68 %"); plan(@"temperature", @"twoLine", @"both", @"ring", @"50°");
+    plan(@"battery", @"ring", @"both", @"ring", @"100 %");    plan(@"battery", @"chip", @"both", @"tank", @"100 %");
+    // Sans titre dans le readout ET icône + texte déjà dans l'image : identique à « auto ».
+    plan(@"battery", @"battery", @"both", @"battery", @"");
+    plan(@"network", @"dualArc", @"both", @"dualArc", @"");  plan(@"network", @"chip", @"both", @"chip", @"");
+    plan(@"network", @"twoLine", @"both", @"dualArc", @"");  plan(@"network", @"text", @"both", @"dualArc", @"");
+    // Valeur inconnue : « auto ».
+    for (id bad in @[@"bogus", @"", @3, NSNull.null]) {
+        for (NSString *wid in scenarios) for (NSString *shape in @[@"", @"text", @"chip", @"bars"]) {
+            NSDictionary *r = readoutOf(wid);
+            if (![TMWidgetDisplayPlan(r, shape, bad) isEqual:TMWidgetDisplayPlan(r, shape, @"auto")]) { Check(NO, @"affichage inconnu : plan identique à auto"); }
+        }
+    }
+    Check(YES, @"affichage inconnu : plan identique à auto (tous widgets)");
+    CheckEqual(TMWidgetDisplayPlan(readoutOf(@"cpu"), @"bars", nil)[@"display"], @"auto", @"affichage absent : auto");
+
+    // ── Garde : jamais d'item vide, quel que soit le widget, la forme, le mode et l'état de la source.
+    NSInteger combos = 0, empties = 0, undrawable = 0, titleNoTemplate = 0, valueBlank = 0;
+    for (NSString *wid in scenarios) for (NSDictionary *snapshot in scenarios[wid]) for (NSString *shape in allShapes)
+        for (NSString *display in TMWidgetDisplayModes()) {
+            NSDictionary *readout = TMWidgetReadout(wid, snapshot);
+            NSDictionary *p = TMWidgetDisplayPlan(readout, shape, display);
+            combos++;
+            if (![p[@"imageShape"] length] && ![p[@"title"] length]) empties++;
+            if ([p[@"imageShape"] length]) {
+                NSImage *image = TMWidgetImageStyled(readout, p[@"imageShape"], nil);
+                if (!(image.size.width > 0 && image.size.height > 0)) undrawable++;
+            }
+            if ([p[@"title"] length] && ![p[@"titleTemplate"] length]) titleNoTemplate++;
+            if ([display isEqual:@"value"] && ![readout[@"dual"] boolValue] && ![p[@"title"] length]) valueBlank++;
+        }
+    CheckEqual(@(empties), @0, [NSString stringWithFormat:@"jamais d'item sans image ni titre (%ld combinaisons)", (long)combos]);
+    CheckEqual(@(undrawable), @0, @"toute image du plan est dessinable");
+    CheckEqual(@(titleNoTemplate), @0, @"tout titre a son gabarit de largeur réservée");
+    CheckEqual(@(valueBlank), @0, @"valeur seule : jamais vide (« — » sans donnée)");
+    NSDictionary *noData = TMWidgetReadout(@"cpu", @{ @"families": @[] });
+    CheckEqual(TMWidgetDisplayPlan(noData, @"bars", @"value")[@"title"], @"—", @"valeur seule sans donnée : tiret");
+    CheckEqual(TMWidgetDisplayPlan(noData, @"bars", @"both")[@"title"], @"—", @"icône + valeur sans donnée : tiret");
+    Check([TMWidgetDisplayPlan(noData, @"bars", @"auto")[@"title"] length] == 0, @"auto sans donnée : comportement d'avant (image seule)");
+
+    // ── Tailles stables : image et titre gardent leur taille d'une valeur à l'autre, pour chaque mode.
+    NSDictionary *titleAttrs = @{ NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium] };
+    NSInteger sizeJumps = 0, titleJumps = 0, measured = 0;
+    for (NSString *wid in scenarios) for (NSString *shape in allShapes) for (NSString *display in TMWidgetDisplayModes()) {
+        NSSize firstSize = NSZeroSize; CGFloat firstTitle = -1; BOOL firstImage = NO, firstSet = NO;
+        for (NSDictionary *snapshot in scenarios[wid]) {
+            NSDictionary *readout = TMWidgetReadout(wid, snapshot);
+            NSDictionary *p = TMWidgetDisplayPlan(readout, shape, display);
+            BOOL hasImage = [p[@"imageShape"] length];
+            NSSize size = hasImage ? TMWidgetImageStyled(readout, p[@"imageShape"], nil).size : NSZeroSize;
+            CGFloat titleWidth = [p[@"title"] length] ? [TMTitleWithReservedWidth(p[@"title"], p[@"titleTemplate"], titleAttrs) size].width : 0;
+            // « auto » n'a pas de titre sans donnée (comportement d'avant) : on ne compare que les modes imposés.
+            if ([display isEqual:@"auto"] && [p[@"title"] length] == 0) titleWidth = -2;
+            if (!firstSet) { firstSize = size; firstTitle = titleWidth; firstImage = hasImage; firstSet = YES; continue; }
+            measured++;
+            if (hasImage != firstImage || !NSEqualSizes(size, firstSize)) sizeJumps++;
+            if (titleWidth != -2 && firstTitle != -2 && fabs(titleWidth - firstTitle) > 0.5) titleJumps++;
+        }
+    }
+    CheckEqual(@(sizeJumps), @0, [NSString stringWithFormat:@"image : même taille d'une mesure à l'autre (%ld comparaisons)", (long)measured]);
+    CheckEqual(@(titleJumps), @0, @"titre : même largeur d'une mesure à l'autre (gabarit réservé)");
+    // Les trois tailles d'icône et les quatre espacements : image enveloppée ET titre mis à l'échelle.
+    for (NSNumber *scale in TMMenuBarIconScales()) for (NSNumber *spacing in TMMenuBarIconSpacings()) {
+        NSDictionary *readout = readoutOf(@"cpu");
+        NSDictionary *p = TMWidgetDisplayPlan(readout, @"chip", @"both");
+        NSImage *wrapped = TMMenuBarImageWithLayout(TMWidgetImageStyled(readout, p[@"imageShape"], nil), scale.doubleValue, spacing.doubleValue);
+        NSImage *base = TMWidgetImageStyled(readout, p[@"imageShape"], nil);
+        Check(NSEqualSizes(wrapped.size, TMMenuBarLayoutSize(base.size, scale.doubleValue, spacing.doubleValue)), @"icône + valeur : image à la taille et à l'espacement réglés");
+    }
+
+    // ── Valeur seule : l'espacement des Réglages enveloppe le texte (moitié devant, moitié derrière).
+    NSAttributedString *title = TMTitleWithReservedWidth(@"43 %", @"100 %", titleAttrs);
+    CGFloat plainWidth = [title size].width;
+    Check(TMTitleWithSpacing(title, 0) == title, @"espacement 0 : le titre tel quel");
+    for (NSNumber *spacing in TMMenuBarIconSpacings()) {
+        NSAttributedString *padded = TMTitleWithSpacing(title, spacing.doubleValue);
+        Check(fabs([padded size].width - (plainWidth + spacing.doubleValue)) < 0.75,
+              [NSString stringWithFormat:@"valeur seule : espacement %@ → +%@ pt autour du texte", spacing, spacing]);
+        Check([[padded string] hasSuffix:@"43 %"], @"valeur seule : le texte lisible reste intact");
+    }
+    Check(TMTitleWithSpacing(title, NAN) == title && TMTitleWithSpacing(title, -3) == title, @"espacement invalide : titre inchangé");
+
+    // ── Signature de rendu : l'affichage y entre ; les champs inutiles au mode en sortent.
+    NSDictionary *cpu = readoutOf(@"cpu");
+    NSDictionary *sAuto = TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"auto", 1.0, 0);
+    for (NSString *mode in @[@"both", @"icon", @"value"])
+        Check(![sAuto isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", mode, 1.0, 0)], [@"signature : « auto » ≠ « " stringByAppendingFormat:@"%@ » (le changement redessine)", mode]);
+    NSDictionary *sBoth = TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"both", 1.0, 0);
+    NSDictionary *sIcon = TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"icon", 1.0, 0);
+    NSDictionary *sValue = TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"value", 1.0, 0);
+    Check(![sBoth isEqual:sIcon] && ![sBoth isEqual:sValue] && ![sIcon isEqual:sValue], @"signature : les trois modes se distinguent");
+    Check([sAuto isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"auto", 1.0, 0)], @"signature : stable à réglage égal");
+    Check([sAuto isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"bogus", 1.0, 0)]
+          && [sAuto isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", nil, 1.0, 0)], @"signature : mode inconnu ou absent = auto");
+    Check(![sAuto isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"auto", 1.25, 0)]
+          && ![sValue isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"blue", @"value", 1.0, 8)], @"signature : taille et espacement y entrent aussi");
+    Check(![sValue isEqual:TMWidgetRenderSignatureForDisplay(cpu, @"bars", @"red", @"value", 1.0, 0)], @"signature : la couleur colore aussi la valeur seule");
+    // Valeur seule : la série qui glisse ne redessine rien ; l'icône seule suit la série (histogramme).
+    NSDictionary *cpuA = TMWidgetReadout(@"cpu", @{ @"families": @[ @{ @"id": @"cpu", @"now": @{ @"total": @43 }, @"series": @{ @"total": @[@10, @20, @43] } } ] });
+    NSDictionary *cpuB = TMWidgetReadout(@"cpu", @{ @"families": @[ @{ @"id": @"cpu", @"now": @{ @"total": @43 }, @"series": @{ @"total": @[@70, @10, @43] } } ] });
+    Check([TMWidgetRenderSignatureForDisplay(cpuA, @"bars", nil, @"value", 1, 0) isEqual:TMWidgetRenderSignatureForDisplay(cpuB, @"bars", nil, @"value", 1, 0)],
+          @"signature valeur seule : la série n'y entre pas");
+    Check(![TMWidgetRenderSignatureForDisplay(cpuA, @"bars", nil, @"icon", 1, 0) isEqual:TMWidgetRenderSignatureForDisplay(cpuB, @"bars", nil, @"icon", 1, 0)],
+          @"signature icône seule : la série (histogramme) y entre");
+    Check(![TMWidgetRenderSignatureForDisplay(cpuA, @"chip", nil, @"icon", 1, 0) isEqual:TMWidgetRenderSignatureForDisplay(cpuB, @"chip", nil, @"icon", 1, 0)],
+          @"signature icône seule (puce → sparkline) : la série y entre");
+    Check([TMWidgetRenderSignatureForDisplay(cpuA, @"text", nil, @"auto", 1, 0) isEqual:TMWidgetRenderSignatureForDisplay(cpuB, @"text", nil, @"auto", 1, 0)],
+          @"signature auto (texte) : la série n'y entre toujours pas");
+    // Réseau : les arcs « icône seule » dépendent des débits, la valeur seule non (le texte les porte).
+    NSDictionary *netA = TMWidgetReadout(@"network", TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @75776, @"txBytesPerSec": @71680 }));
+    NSDictionary *netB = TMWidgetReadout(@"network", TMSnapshotWith(@"network", @{ @"rxBytesPerSec": @75776, @"txBytesPerSec": @5120000 }));
+    Check(![TMWidgetRenderSignatureForDisplay(netA, @"twoLine", nil, @"icon", 1, 0) isEqual:TMWidgetRenderSignatureForDisplay(netB, @"twoLine", nil, @"icon", 1, 0)],
+          @"signature réseau icône seule : les arcs suivent le débit");
+    Check([TMWidgetRenderSignatureForDisplay(netA, @"twoLine", nil, @"auto", 1, 0) isEqual:TMWidgetRenderSignatureForDisplay(netB, @"twoLine", nil, @"auto", 1, 0)] == NO,
+          @"signature réseau auto : le texte deux lignes change avec le débit");
+    // Signatures historiques inchangées (les anciens appels n'ont rien perdu).
+    Check([TMWidgetRenderSignature(cpu, @"bars", @"blue") isEqual:TMWidgetRenderSignature(cpu, @"bars", @"blue")]
+          && [TMWidgetRenderSignature(cpu, @"bars", nil)[@"shape"] isEqual:@"bars"], @"signature historique : inchangée");
+
+    // ── Aucune forme ajoutée n'est choisissable par erreur : les ids internes se résolvent d'eux-mêmes.
+    for (NSString *internal in @[@"batteryCell", @"arcs", @"sparkline", @"tank", @"tankBar"])
+        CheckEqual(TMWidgetResolvedShape(readoutOf(@"battery"), internal), internal, [@"id interne dessinable : " stringByAppendingString:internal]);
+    // « auto » = pixel pour pixel ce que dessinait le code d'avant : même image que TMWidgetImageStyled(forme demandée).
+    NSInteger autoDiffs = 0;
+    for (NSString *wid in scenarios) for (NSString *shape in allShapes) {
+        NSDictionary *readout = TMWidgetReadout(wid, scenarios[wid][0]);
+        NSDictionary *p = TMWidgetDisplayPlan(readout, shape, @"auto");
+        NSImage *before = TMWidgetImageStyled(readout, shape, @"purple"), *after = TMWidgetImageStyled(readout, p[@"imageShape"], @"purple");
+        NSString *beforeTitle = TMWidgetShapeCarriesText(readout, shape) ? @"" : readout[@"title"];
+        if (!NSEqualSizes(before.size, after.size) || fabs(TMInkSum(before) - TMInkSum(after)) > 1e-6 || ![beforeTitle isEqual:p[@"title"]]) autoDiffs++;
+    }
+    CheckEqual(@(autoDiffs), @0, @"« auto » : image et titre identiques au comportement d'avant (tous widgets et formes)");
+}
+
 int main(void) {
     @autoreleasepool {
         printf("\n\033[1mStatusQuota — tests\033[0m\n");
@@ -2811,6 +3057,7 @@ int main(void) {
         TestWidgetColors();
         TestWidgetNewShapes();
         TestMenuBarIconLayout();
+        TestWidgetDisplay();
         TestSystemMenuBarSpacing();
         TestApiRegistry();
         TestApiBaseline();
