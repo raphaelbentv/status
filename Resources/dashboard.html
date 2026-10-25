@@ -113,7 +113,11 @@
   .wc-toggle{border:1px solid var(--hair-strong);border-radius:var(--radius);padding:6px 12px;min-width:112px;text-align:left;flex:none;display:inline-flex;align-items:center;gap:7px}
   .wc-dot{width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;flex:none}
   .wc-toggle.on .wc-dot{background:currentColor}
-  .wc-shapes{flex:none}.wc-shapes .seg{font-size:12px;padding:5px 8px}
+  /* Jusqu'à 11 formes par widget : la rangée passe à la ligne au lieu d'être rognée, chaque bouton
+     garde son propre cadre (les séparateurs d'un segmenté n'ont de sens que sur une seule ligne). */
+  html .segmented.wc-shapes{flex:0 1 auto;flex-wrap:wrap;max-width:100%;gap:4px;border:0;border-radius:0;background:none;box-shadow:none;overflow:visible;padding:0}
+  .wc-shapes .seg{font-size:12px;padding:5px 8px;border:1px solid var(--hair-strong);border-radius:var(--radius)}
+  .wc-shapes .seg+.seg{border-left:1px solid var(--hair-strong)}
   .wc-move{display:flex;gap:0;border:1px solid var(--hair-strong);flex:none}
   .wc-move .seg{padding:5px 8px;font-size:12px;line-height:1}
   .wc-move .seg[disabled]{opacity:.28;cursor:default}
