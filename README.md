@@ -100,8 +100,8 @@ survol de l'icône ouvre le popover, ce qui déclenche un rafraîchissement.
 
 ## Installer sur un autre Mac
 
-L'app n'est pas notarisée (cela exigerait un compte Apple Developer payant) : Gatekeeper la
-bloquera au premier lancement. Procédure :
+Une version notarisée s'installe depuis le DMG de `./scripts/release.sh` (glisser dans Applications), puis se
+met à jour seule. Pour un build local non notarisé, Gatekeeper bloque le premier lancement. Procédure :
 
 1. Copiez `outputs/Status.zip` sur l'autre Mac (AirDrop, disque, etc.) et décompressez dans
    `/Applications`.
@@ -115,6 +115,27 @@ bloquera au premier lancement. Procédure :
 
 Le prérequis (Codex CLI) s'applique sur chaque machine pour les quotas OpenAI, et chaque compte
 Claude y ouvre la connexion officielle dans Terminal ; le Moniteur système, lui, fonctionne sans rien.
+
+## Mises à jour automatiques (0.9.0)
+
+Depuis la 0.9.0, Status se met à jour tout seul avec [Sparkle](https://sparkle-project.org). Toutes les
+6 h (et à chaque lancement), l'app lit `https://github.com/raphaelbentv/status/releases/latest/download/appcast.xml`,
+vérifie la signature EdDSA de la nouvelle version, la télécharge, puis l'installe à la fermeture suivante.
+Réglages › Mac : bouton « Rechercher » et interrupteur « Mises à jour automatiques ». Les autorisations
+(Accessibilité) survivent à une mise à jour, car elles sont liées au certificat Developer ID.
+
+Publier une version :
+
+1. Augmenter `CFBundleShortVersionString` **et** `CFBundleVersion` dans `Resources/Info.plist` (Sparkle compare
+   le numéro de build : il doit croître).
+2. Commiter et pousser.
+3. `STATUS_RELEASE_NOTES="…" ./scripts/release.sh --publish` : build Developer ID, notarisation, DMG, appcast,
+   puis GitHub Release (DMG + `appcast.xml`). Sans `--publish`, tout est préparé dans `outputs/` sans rien publier.
+
+La clé de signature des mises à jour (`SUPublicEDKey` dans Info.plist) a sa partie privée dans le Trousseau de
+session. **À sauvegarder une fois** : `vendor/Sparkle/bin/generate_keys -x sauvegarde-cle-sparkle.txt`, à ranger
+hors du dépôt. Perdue, plus aucune mise à jour ne pourrait être publiée pour les copies déjà installées.
+`vendor/` (Sparkle, figé et vérifié par empreinte) se récupère avec `scripts/fetch-sparkle.sh`, appelé par le build.
 
 ## Construire et lancer
 

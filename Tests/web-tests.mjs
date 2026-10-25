@@ -596,6 +596,14 @@ section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumul�
   checkEqual(dashboard('availability')(spark).remaining,98,'la synthèse standard ne mélange pas Spark avec le quota général');
   checkEqual(dashboard('sortedAccounts')([{...account,label:'Ancien',stale:true},account])[0].label,'Disponible','tri place les données exploitables en premier');
 }
+section('Réglages : mises à jour automatiques');
+{
+  const off=plain(dashboard('updateSettings')({updates:{available:false,version:'0.9.0'}}));
+  check(off.includes('Version 0.9.0')&&off.includes('Indisponible')&&!off.includes('Mises à jour automatiques'),'build sans Sparkle : version seule, aucun bouton inutile');
+  const on=dashboard('updateSettings')({updates:{available:true,automatic:true,version:'0.9.0'}});
+  check(on.includes("send('checkForUpdates')")&&on.includes("send('toggleAutoUpdates')"),'build avec Sparkle : recherche et interrupteur');
+  check(/button class="button on"[^>]*toggleAutoUpdates/.test(on),'interrupteur affiché actif quand les mises à jour sont automatiques');
+}
 section('Réglages regroupés, connexions compactes et données conditionnelles');
 {
   const fable={...claudeAccount('a','Perso',[]),windows:[{windowId:'seven_day_scoped_fable',label:'Fable',usedPercent:10,resetsAt:9999999999}]};

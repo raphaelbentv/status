@@ -19,9 +19,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.8.10</string>
+    <string>0.9.0</string>
     <key>CFBundleVersion</key>
-    <string>24</string>
+    <string>25</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSApplicationCategoryType</key>
@@ -30,6 +30,16 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Status utilise Terminal uniquement pour lancer la connexion officielle Claude Code à votre demande.</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/raphaelbentv/status/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>OMtpcbBQ1XfPm7LKFVUyffj5TrcbDTORtlPc7sX1VJA=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>21600</integer>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026</string>
 </dict>

@@ -22,6 +22,7 @@
 #import "StatusMenuBarWidgets.h"
 #import "StatusIconDesigns.h"
 #import "StatusI18n.h"
+#import "StatusUpdater.h"
 #import <ApplicationServices/ApplicationServices.h>  // AXIsProcessTrusted
 #import <IOKit/hidsystem/ev_keymap.h>  // NX_KEYTYPE_BRIGHTNESS_UP/DOWN
 #import <IOKit/hidsystem/IOLLEvent.h>  // NX_SYSDEFINED
@@ -350,6 +351,7 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 // États d'hystérésis des alertes système — un booléen par seuil surveillé.
 @property BOOL alertRAMAbove, alertTempAbove, alertDiskAbove;
 @property TMKeyboardLock *keyboardLock;
+@property TMUpdater *updater;
 // Le cookie claude.ai, lu une seule fois au lancement. Le relire à chaque rafraîchissement
 // déclenchait une demande d'accès au Trousseau à chaque fois — et comme le survol de l'icône
 // ouvre le popover, donc rafraîchit, cela produisait plusieurs demandes par minute.
@@ -425,6 +427,7 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @implementation TMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    self.updater = [TMUpdater new];
     self.awake = [TMAwake new];
     self.lidMode = [TMLidClient new];
     __weak typeof(self) weakSelf = self;
@@ -1426,6 +1429,11 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         [self.statusPopover close];  // l'overlay va tout recouvrir ; un popover transient resterait orphelin
         [self.keyboardLock toggle];
     }
+    if ([action isEqualToString:@"checkForUpdates"]) [self.updater checkForUpdates];
+    if ([action isEqualToString:@"toggleAutoUpdates"]) {
+        self.updater.automatic = !self.updater.automatic;
+        [self pushData];
+    }
     if ([action isEqualToString:@"toggleGlobalShortcut"]) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         [defaults setBool:![defaults boolForKey:@"globalShortcutEnabled"] forKey:@"globalShortcutEnabled"];
@@ -1681,6 +1689,8 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             @"menuBarIconColor": [NSUserDefaults.standardUserDefaults stringForKey:@"menuBarIconColor"] ?: @"auto",
             @"globalShortcut": @([NSUserDefaults.standardUserDefaults boolForKey:@"globalShortcutEnabled"]),
             @"accessibilityTrusted": @(AXIsProcessTrusted()),
+            @"updates": @{ @"available": @(self.updater.available), @"automatic": @(self.updater.automatic),
+                           @"version": NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"" },
             @"brightnessKeys": @([self brightnessKeysEnabled]),
             @"menuBarWidgets": [NSUserDefaults.standardUserDefaults arrayForKey:@"menuBarWidgets"] ?: @[],
             @"menuBarWidgetConfig": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{},

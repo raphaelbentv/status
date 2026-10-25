@@ -8,19 +8,35 @@ BUILD="${ROOT}/work/Status"
 
 cd "$ROOT"
 mkdir -p "$ROOT/work" "$ROOT/outputs"
-clang -fobjc-arc -O2 -I "$ROOT/Native" \
-  -framework Cocoa -framework WebKit -framework Security \
+"$ROOT/scripts/fetch-sparkle.sh" >/dev/null
+SPARKLE="$ROOT/vendor/Sparkle"
+clang -fobjc-arc -O2 -I "$ROOT/Native" -F "$SPARKLE" -Wl,-rpath,@executable_path/../Frameworks \
+  -framework Sparkle -framework Cocoa -framework WebKit -framework Security \
   -framework ServiceManagement -framework UserNotifications -framework IOKit \
   "$ROOT/Native/Status.m" "$ROOT/Native/StatusLidClient.m" "$ROOT/Native/StatusLidProtocol.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" "$ROOT/Native/StatusApiCredits.m" \
   "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusClaudeBridge.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusCost.m" \
-  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusI18n.m" -o "$BUILD"
+  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusI18n.m" "$ROOT/Native/StatusUpdater.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/fonts" "$OUTPUT/Contents/Resources/themes"
 cp "$BUILD" "$OUTPUT/Contents/MacOS/Status"
 cp "$ROOT/Resources/Info.plist" "$OUTPUT/Contents/Info.plist"
+# Flux de mises à jour de remplacement (tests de bout en bout sur un serveur local).
+if [[ -n "${STATUS_FEED_URL:-}" ]]; then
+  plutil -replace SUFeedURL -string "$STATUS_FEED_URL" "$OUTPUT/Contents/Info.plist"
+  # Un flux http local (jamais en production) demande l'exception ATS pour le réseau local.
+  [[ "$STATUS_FEED_URL" == http://* ]] && plutil -insert NSAppTransportSecurity -json '{"NSAllowsLocalNetworking":true}' "$OUTPUT/Contents/Info.plist"
+fi
+# Version de test (tests de mise à jour) : le numéro de build doit dépasser celui de la version installée.
+[[ -n "${STATUS_BUILD_NUMBER:-}" ]] && plutil -replace CFBundleVersion -string "$STATUS_BUILD_NUMBER" "$OUTPUT/Contents/Info.plist"
+[[ -n "${STATUS_VERSION_STRING:-}" ]] && plutil -replace CFBundleShortVersionString -string "$STATUS_VERSION_STRING" "$OUTPUT/Contents/Info.plist"
+mkdir -p "$OUTPUT/Contents/Frameworks"
+ditto "$SPARKLE/Sparkle.framework" "$OUTPUT/Contents/Frameworks/Sparkle.framework"
+# Les services XPC ne servent qu'aux apps sandboxées ; Status ne l'est pas. Les retirer évite deux
+# composants de plus à signer et à notariser.
+rm -rf "$OUTPUT/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$OUTPUT/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp "$ROOT/Resources/StatusIcon.icns" "$OUTPUT/Contents/Resources/StatusIcon.icns"
 cp "$ROOT/Resources/dashboard.html" "$OUTPUT/Contents/Resources/dashboard.html"
 cp "$ROOT/Resources/menubar.html" "$OUTPUT/Contents/Resources/menubar.html"
@@ -95,6 +111,10 @@ fi
 if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
   # Du plus profond au bundle : --deep ne pose pas l'horodatage ni le runtime de façon fiable.
   codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Resources/status-claude-collector"
+  SPK="$OUTPUT/Contents/Frameworks/Sparkle.framework"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Autoupdate"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Updater.app"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$SPK"
   codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$OUTPUT"
 else
   codesign --force --deep --sign - "$OUTPUT"
