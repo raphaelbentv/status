@@ -10,67 +10,121 @@
 <link rel="stylesheet" href="themes/widget.css">
 <script src="i18n.js"></script>
 <style>
-  /* Hauteur libre, pas 100 % : c'est le contenu qui décide, et sa mesure est poussée au natif
-     qui redimensionne le popover (voir syncPanelHeight). `overflow-y:auto` ne sert que de filet
-     pour un panneau plus haut que l'écran — le natif borne déjà la hauteur demandée. */
-  *{box-sizing:border-box}html,body{margin:0;width:100%;min-height:100%;overflow-x:hidden;overflow-y:auto;background:var(--bg);color:var(--text);font:11.5px/1.4 var(--font)}
-  .panel{padding:11px 13px;width:100%}
-  .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--hair-strong);padding-bottom:8px;margin-bottom:10px}
-  .head h1{margin:0;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--blue);font-weight:700}
-  .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);line-height:1;text-align:right}
-  .big .u{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
-  .big .sub{display:block;font-size:10px;color:var(--muted);font-weight:400;margin-top:2px;letter-spacing:0}
-  /* Deux valeurs de rang égal (débits ↓/↑) : même corps, alignées à droite. */
-  .dual{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
-  .dual b{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15;white-space:nowrap}
-  .badge{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--hair-strong);border-radius:var(--radius);padding:2px 7px;color:var(--muted)}
-  .badge.warn{color:var(--amber);border-color:var(--amber)}.badge.crit{color:var(--danger);border-color:var(--danger)}
-  svg.chart{display:block;width:100%;height:34px;margin:6px 0}
-  .chart .area{opacity:.14}.chart .line{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
-  .rows{display:flex;flex-direction:column;gap:5px;margin-top:4px}
-  /* Une ligne = une donnée, sur UNE ligne. Le libellé s'élide, la valeur ne se coupe jamais :
-     sans cela « SoC · 20 capteurs » et sa valeur passaient chacun à la ligne (4 lignes pour une
-     donnée) et la colonne de droite perdait son alignement. */
-  .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:11.5px;line-height:1.35}
-  .row .k{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;display:flex;align-items:center;gap:5px}
-  .row .v{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;flex:none}
-  .cores{display:flex;gap:14px;margin:8px 0 2px}
-  .cores .grp .lbl{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
-  .bars{display:flex;gap:2px;height:26px;align-items:flex-end}.bars i{width:7px;background:var(--chart-a);min-height:1px}
-  /* Deux colonnes fixes plutôt qu'auto-fit : à 236 px, auto-fit casait 4 cellules en 3 + 1
-     orphelin. En 2×2 la grille reste pleine, et une cellule seule en fin de liste impaire occupe
-     toute la largeur au lieu de laisser un trou. */
-  .stat-row{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border:1px solid var(--hair);margin:7px 0}
-  .stat{background:var(--soft);padding:6px 9px;min-width:0}
-  .stat:last-child:nth-child(odd){grid-column:1/-1}
-  .stat b{display:block;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .stat span{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);white-space:nowrap}
-  .stat.warn b{color:var(--amber)}.stat.crit b{color:var(--danger)}
-  .empty{color:var(--muted);padding:14px 0;text-align:center}
-  .track{height:12px;background:rgba(127,127,127,.12);border:1px solid var(--hair);margin:3px 0 8px;overflow:hidden}.track i{display:block;height:100%;background:var(--chart-a)}
-  .section{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:12px 0 6px;padding-top:9px;border-top:1px solid var(--hair)}
-  .split{display:flex;height:14px;border:1px solid var(--hair);overflow:hidden;margin:6px 0;background:rgba(127,127,127,.10)}
-  .split i{height:100%;min-width:0}
-  /* Légende en deux colonnes régulières : en flex libre, les entrées de largeurs inégales
-     produisaient des lignes bancales de 2 puis 3 éléments. */
-  .legend{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;margin-top:7px}
-  .legend .lg{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);min-width:0;white-space:nowrap;overflow:hidden}
-  .legend .lg b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:600;margin-left:auto}
-  .dot{width:8px;height:8px;border-radius:2px;flex:none}
-  .plist{display:flex;flex-direction:column;gap:5px}
-  .p{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline}
-  .p .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);font-size:11.5px}
-  .p .vv{font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px}
-  .p .pbar{grid-column:1/-1;height:3px;background:var(--hair);overflow:hidden;margin-top:1px}
-  .p .pbar i{display:block;height:100%;background:var(--chart-a)}
-  .vol{margin-top:8px}
-  .vol .vh{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;margin-bottom:3px}
-  .vol .vh .vn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  .vol .vh .vf{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none;font-size:10.5px}
+  /* Style « Affûté » : une échelle typographique sur grille de 4 pt (titre 11 px en capitales,
+     valeur héros 44 px fine, libellés 9,5–11 px, valeurs tabulaires 11,5 px), une couleur par sens
+     (accent du widget = charge, ambre = alerte, rouge = critique). Aucun hexadécimal : tout vient
+     des jetons du thème (--blue, --muted, --hair, --amber, --danger, --font…), d'où un rendu
+     correct dans chaque thème. Les classes sont préfixées « w- » pour ne jamais être captées par
+     les règles génériques des thèmes (.row, .badge, .stat…).
+     Hauteur libre, pas 100 % : c'est le contenu qui décide, et sa mesure est poussée au natif qui
+     redimensionne le popover (voir syncPanelHeight). `overflow-y:auto` ne sert que de filet pour
+     un panneau plus haut que l'écran — le natif borne déjà la hauteur demandée. */
+  *{box-sizing:border-box}html,body{margin:0;width:100%;min-height:100%;overflow-x:hidden;overflow-y:auto;background:var(--bg);color:var(--text);font:11.5px/20px var(--font);font-variant-numeric:tabular-nums}
+  html[data-theme="neon"] body{background:var(--bg-image),var(--bg)}
+  .panel{padding:12px 14px 14px;width:100%}
+  .w-hd{display:flex;align-items:center;gap:8px;height:24px}
+  .w-gl{width:24px;height:24px;border-radius:min(var(--radius),8px);display:grid;place-items:center;color:var(--k);flex:none;
+    background:color-mix(in srgb,var(--k) 16%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--k) 38%,transparent)}
+  .w-hd h1{margin:0;font:600 11px/24px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Sélecteur du niveau de détail : trois segments égaux, le segment actif prend la teinte du widget. */
+  .w-seg{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin:8px 0 0;padding:2px;background:var(--soft);border:1px solid var(--hair);border-radius:min(var(--radius),8px)}
+  .w-seg button{appearance:none;border:0;margin:0;padding:0 4px;height:20px;font:500 10px/20px var(--font);letter-spacing:.02em;color:var(--muted);background:transparent;
+    border-radius:min(var(--radius),6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-seg button:hover{color:var(--text)}
+  .w-seg button.on{color:var(--text);background:color-mix(in srgb,var(--k) 20%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--k) 42%,transparent)}
+  .w-seg button:focus-visible{outline:1px solid var(--k);outline-offset:1px}
+  .w-hero{display:flex;justify-content:space-between;align-items:flex-end;margin:12px 0 8px;min-height:44px}
+  .w-hv{font:300 44px/44px var(--font);letter-spacing:-.02em;color:var(--text);white-space:nowrap}
+  html[data-theme="neon"] .w-hv{text-shadow:0 0 18px color-mix(in srgb,var(--k) 28%,transparent)}
+  .w-hv small{font:400 16px/16px var(--font);color:var(--muted);letter-spacing:0;margin-left:2px}
+  .w-b[data-state=warn] .w-hv{color:var(--amber)}.w-b[data-state=crit] .w-hv{color:var(--danger)}
+  .w-facts{display:grid;grid-template-columns:8px auto auto;gap:0 8px;align-items:center;justify-items:start;font-size:11px;line-height:20px;color:var(--muted);padding-bottom:2px}
+  .w-facts b{justify-self:end;color:var(--text);font-weight:500;font-size:11.5px;margin-left:4px}
+  .w-dot{display:inline-block;width:8px;height:8px;border-radius:min(var(--radius),3px);flex:none}
+  .w-dot.rd{border-radius:50%}.w-dot.free{background:transparent;box-shadow:inset 0 0 0 1px var(--hair-strong)}
+  .w-f1{display:flex;flex-direction:column;align-items:flex-end;line-height:16px;font-size:11px;color:var(--muted);padding-bottom:4px;min-width:0;text-align:right}
+  .w-f1 b{font:500 15px/20px var(--font);color:var(--text);white-space:nowrap}
+  svg.w-chart{display:block;width:100%;height:auto;overflow:visible}
+  .w-chart .w-g{stroke:var(--hair-strong);stroke-width:1;stroke-dasharray:1 3;stroke-linecap:round;opacity:.7}
+  .w-chart .w-gb{stroke:var(--hair-strong);stroke-width:1}
+  .w-chart .w-line{fill:none;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+  .w-ticks{display:flex;justify-content:space-between;font-size:9.5px;line-height:16px;color:var(--muted);margin-top:2px}
+  .w-sec{border-top:1px solid var(--hair);margin-top:12px;padding-top:12px}
+  .w-sl{font:600 9.5px/16px var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .w-list{display:flex;flex-direction:column}
+  .w-br{display:grid;grid-template-columns:minmax(0,1fr) 56px minmax(36px,max-content);gap:8px;align-items:center;height:20px}
+  .w-br.w3{grid-template-columns:minmax(0,1fr) 36px minmax(34px,max-content) minmax(34px,max-content);gap:6px}
+  .w-bn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+  .w-bt{height:4px;border-radius:2px;background:var(--hair);overflow:hidden}
+  .w-bt i{display:block;height:100%;border-radius:2px;background:var(--k)}
+  .w-bv{text-align:right;color:var(--text);font-weight:500;white-space:nowrap}
+  .w-bv2{text-align:right;color:var(--muted);white-space:nowrap;font-size:10.5px}
+  .w-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .w-tile{background:var(--soft);border:1px solid var(--hair);border-radius:min(var(--radius),10px);padding:8px 10px;min-width:0;display:flex;flex-direction:column}
+  .w-tile.span2{grid-column:1/-1}
+  .w-tile.warn .w-tv{color:var(--amber)}.w-tile.crit .w-tv{color:var(--danger)}
+  .w-tl{font:600 9.5px/16px var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-tv{font:500 15px/20px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-trip{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .w-trip span{display:flex;flex-direction:column;min-width:0}
+  .w-trip b{font:500 15px/20px var(--font);color:var(--text)}
+  .w-trip span:not(:first-child) b{color:var(--muted)}
+  .w-trip em{font:400 10px/14px var(--font);font-style:normal;color:var(--muted)}
+  .w-cores{display:flex;gap:12px;align-items:flex-start}
+  .w-grp{min-width:0}
+  .w-gt{font:400 10px/16px var(--font);color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:4px;margin-bottom:4px}
+  .w-sq{width:8px;height:8px;border-radius:min(var(--radius),3px);background:var(--k);display:inline-block}.w-sq.e{background:color-mix(in srgb,var(--k) 50%,transparent)}
+  .w-cg{display:grid;gap:4px}
+  .w-core{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .w-core .w-ct{display:flex;align-items:flex-end;width:100%;border-radius:min(var(--radius),5px);background:var(--hair);overflow:hidden}
+  .w-core .w-ct i{display:block;width:100%;border-radius:min(var(--radius),5px);background:var(--k);min-height:4px}
+  .w-core.e .w-ct i{background:color-mix(in srgb,var(--k) 52%,transparent)}
+  .w-core.warn .w-ct i{background:var(--amber)}.w-core.crit .w-ct i{background:var(--danger)}
+  .w-core em{font:400 9.5px/12px var(--font);font-style:normal;color:var(--muted)}
+  .w-split{display:flex;gap:2px;height:10px}
+  .w-split i{display:block;height:100%;border-radius:min(var(--radius),3px);min-width:3px}
+  .w-split::after{content:"";flex:1;border-radius:min(var(--radius),3px);background:var(--hair)}
+  .w-lr{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:8px;align-items:center;height:20px}
+  .w-lr.p{grid-template-columns:8px minmax(0,1fr) auto 32px}
+  .w-lr span{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.w-lr b{font-weight:500;color:var(--text);white-space:nowrap}
+  .w-lr em{font-style:normal;color:var(--muted);text-align:right;font-size:10.5px}
+  .w-card{background:var(--soft);border:1px solid var(--hair);border-radius:min(var(--radius),10px);padding:4px 12px 8px}
+  .w-kv{display:flex;justify-content:space-between;align-items:center;gap:10px;height:20px}
+  .w-kv .k{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;display:flex;align-items:center;gap:8px}
+  .w-kv .v{font-weight:500;color:var(--text);white-space:nowrap;flex:none;text-align:right}
+  .w-kv.sw{border-top:1px solid var(--hair);margin-top:8px;padding-top:8px;height:28px}
+  .w-ok{display:inline-flex;align-items:center;gap:8px;font:500 11.5px/20px var(--font);white-space:nowrap;flex:none}
+  .w-ok.warn{color:var(--amber)}.w-ok.crit{color:var(--danger)}
+  .w-pg{display:flex;gap:4px;margin-top:4px}
+  .w-pg i{flex:1;height:4px;border-radius:2px;background:var(--hair)}
+  .w-dual{display:grid;grid-template-columns:1fr 1fr;margin:12px 0 8px}
+  .w-dc{padding-right:8px;min-width:0}.w-dc+.w-dc{padding:0 0 0 12px;border-left:1px solid var(--hair)}
+  .w-dcl{display:flex;align-items:center;gap:8px;font-size:11px;line-height:20px;color:var(--muted)}
+  .w-ab{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;color:var(--c);flex:none;
+    background:color-mix(in srgb,var(--c) 16%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 40%,transparent)}
+  .w-dv{font:300 28px/36px var(--font);letter-spacing:-.01em;white-space:nowrap;color:var(--text)}
+  .w-dv small{font:400 11px/16px var(--font);color:var(--muted);margin-left:2px;letter-spacing:0}
+  .w-if{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;height:20px}
+  .w-if .n{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-if .d,.w-if .u{text-align:right;white-space:nowrap;font-weight:500}
+  .w-if .d{color:var(--chart-a)}.w-if .u{color:var(--chart-b)}
+  .w-vol+.w-vol{margin-top:8px}
+  .w-vol .vh{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .w-vol .vn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .w-vol .vf{color:var(--muted);white-space:nowrap;flex:none;font-size:10.5px}
+  .w-vol .w-bt{height:6px;border-radius:3px;margin-top:2px}.w-vol .w-bt i{border-radius:3px}
+  .w-vol .cap{font-size:10px;line-height:16px;color:var(--muted);margin-top:2px}
+  .w-track{height:6px;border-radius:3px;background:var(--hair);overflow:hidden;margin:4px 0 8px}.w-track i{display:block;height:100%;border-radius:3px;background:var(--k)}
+  /* Fenêtre de la courbe : min / moy. / max, une ligne par série. */
+  .w-mam{display:grid;grid-template-columns:max-content repeat(3,1fr);gap:0 8px;align-items:center}
+  .w-mam .h{font:600 9.5px/16px var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:right}
+  .w-mam .l{display:flex;align-items:center;gap:6px;color:var(--muted);line-height:20px}
+  .w-mam b{font-weight:500;color:var(--text);text-align:right;white-space:nowrap;line-height:20px;font-size:11px}
+  .w-empty{color:var(--muted);padding:14px 0;text-align:center}
 </style>
 </head>
 <body>
-<div class="panel" id="panel"><div class="empty">…</div></div>
+<div class="panel" id="panel"><div class="w-empty">…</div></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 let widgetId=null,metrics=null;
@@ -79,6 +133,12 @@ const sysNow=()=>famGet('system')?.now||{};
 const procs=()=>metrics?.processes||[];
 // Sections activables par panneau (prefs.panels[widgetId][section]). Absent = affiché (défaut on).
 const on=section=>(metrics?.prefs?.panels?.[widgetId]||{})[section]!==false;
+// Niveau de détail du panneau : 0 résumé, 1 détaillé (défaut — le contenu historique), 2 hyper
+// détaillé. Mémorisé par widget côté natif (prefs.detail[widgetId]).
+const level=()=>{const v=metrics?.prefs?.detail?.[widgetId];return v===0||v===2?v:1};
+// Une section s'affiche si le niveau atteint son minimum ET qu'aucun interrupteur explicite des
+// Réglages ne la coupe : « off » l'emporte toujours, quel que soit le niveau.
+const vis=(key,min)=>level()>=min&&(!key||on(key));
 const I=StatusI18n;
 // Unités et nombres suivent la langue : « Ko » / « KB », « 12,5 » / « 12.5 », « j » / « d ».
 const pctN=v=>v==null?'—':Math.round(v);
@@ -91,182 +151,291 @@ const fmtGo=v=>{if(v==null||isNaN(v))return '—';return I.num(v/1073741824,1)+'
 const fmtMin=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} ${t('unit.hour')} ${String(mm).padStart(2,'0')}`:`${mm} ${t('unit.min')}`};
 const fmtDur=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
   if(d)return `${d} ${t('unit.day')} ${h} ${t('unit.hour')}`;if(h)return `${h} ${t('unit.hour')} ${String(m).padStart(2,'0')}`;return `${m} ${t('unit.min')}`};
-
-// Mini-courbe SVG, une ou deux séries, échelle % fixe (percent) ou auto (débits).
-// L'aire est toujours remplie : elle donne le niveau d'un coup d'œil et occupe le cadre. Sans
-// elle, une série plate (batterie pleine, CPU au repos) laissait un grand rectangle vide qui se
-// lisait comme une zone morte du panneau.
-function chart(list,{percent=true}={}){
-  const drawn=list.filter(s=>s.values&&s.values.length>1);
-  if(!drawn.length)return '';
-  const w=210,h=34,len=Math.max(...drawn.map(s=>s.values.length));
-  // Échelle auto (débits, températures) : 12 % d'air au-dessus de la crête. Calée pile sur le
-  // maximum, la courbe collait au bord haut du cadre et se lisait comme saturée en permanence.
-  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values))*1.12;
-  const paths=drawn.map(s=>{const off=len-s.values.length;
-    const d=s.values.map((v,j)=>`${j?'L':'M'}${((off+j)/(len-1)*w).toFixed(1)},${(h-Math.min(v,max)/max*h).toFixed(1)}`).join(' ');
-    const c=s.color||'var(--chart-a)';
-    return `<path class="area" fill="${c}" d="${d} L${w},${h} L${(off/(len-1)*w).toFixed(1)},${h} Z"/><path class="line" stroke="${c}" d="${d}"/>`}).join('');
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${paths}</svg>`;
-}
-const head=(title,rightHTML)=>`<div class="head"><h1>${title}</h1><div>${rightHTML||''}</div></div>`;
-const bigVal=(v,unit,sub)=>`<span class="big">${v}${unit?`<span class="u">${unit}</span>`:''}${sub?`<span class="sub">${sub}</span>`:''}</span>`;
-const series=(fam,key,color)=>({values:(fam?.series?.[key])||[],color});
-const section=t=>`<div class="section">${t}</div>`;
-const row=(k,v)=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+const fmtDeg=v=>v==null||isNaN(v)?'—':Math.round(v)+'°';
+const fin=v=>typeof v==='number'&&isFinite(v);
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Gravité d'une valeur en pourcentage : ambre dès `warn`, rouge dès `crit`. Même langage que
+// l'icône de la barre des menus : le popup et l'icône disent la même chose.
+const sev=(v,warn=80,crit=95)=>!fin(v)?'ok':v>=crit?'crit':v>=warn?'warn':'ok';
 
-// Barre empilée + légende. segs=[{label,value,color,fmt}]. total borne l'échelle ; le reste (libre)
-// est laissé vide dans la barre. showFree ajoute une entrée « libre » à la légende.
-function splitBar(segs,total,{free=null,freeLabel=''}={}){
+// ── Habillage commun ───────────────────────────────────────────────────────────
+// Une couleur d'accent et un glyphe par widget (--k alimente pastille, valeur, barres, segment actif).
+const KEYC={cpu:'var(--blue)',gpu:'var(--purple)',memory:'var(--green)',network:'var(--chart-a)',temperature:'var(--amber)',battery:'var(--green)',disk:'var(--chart-b)'};
+const GL=body=>`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const GLYPH={
+  cpu:GL('<rect x="4" y="4" width="8" height="8" rx="1.6"/><rect x="6.6" y="6.6" width="2.8" height="2.8" rx=".6"/><path d="M6 1.5v2.5M10 1.5v2.5M6 12v2.5M10 12v2.5M1.5 6h2.5M1.5 10h2.5M12 6h2.5M12 10h2.5"/>'),
+  gpu:GL('<rect x="1.5" y="3.5" width="13" height="8" rx="1.6"/><circle cx="8" cy="7.5" r="2.4"/><path d="M4 13.8h8"/>'),
+  memory:GL('<rect x="1.5" y="4.5" width="13" height="6" rx="1.2"/><path d="M4.5 10.5v3M8 10.5v3M11.5 10.5v3M4.5 7.5h2M9.5 7.5h2"/>'),
+  network:GL('<path d="M5 13V3M2.6 5.4 5 3l2.4 2.4M11 3v10M8.6 10.6 11 13l2.4-2.4"/>'),
+  temperature:GL('<path d="M6.5 9.2V3.6a1.5 1.5 0 0 1 3 0v5.6a3 3 0 1 1-3 0z"/><path d="M8 6.2v4.4"/>'),
+  battery:GL('<rect x="1.5" y="4.5" width="11.5" height="7" rx="1.6"/><path d="M14.5 7v2M7.4 5.9 5.8 8.2h2.4L6.6 10.5"/>'),
+  disk:GL('<circle cx="8" cy="8" r="5.8"/><circle cx="8" cy="8" r="1.7"/>')};
+const ARROW={dn:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg>',
+  up:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg>'};
+// Les trois niveaux : libellé court dans le segment, libellé complet en infobulle.
+const LV_SHORT=[()=>t('w.detail.l0'),()=>t('w.detail.l1'),()=>t('w.detail.l2')];
+const LV_LONG=[()=>t('w.detail.t0'),()=>t('w.detail.t1'),()=>t('w.detail.t2')];
+function levelSel(){
+  const cur=level();
+  return `<div class="w-seg" role="group" aria-label="${t('w.detail.label')}">${[0,1,2].map(i=>
+    `<button type="button" class="${i===cur?'on':''}" aria-pressed="${i===cur}" title="${LV_LONG[i]()}" onmousedown="setDetail(${i})" onclick="setDetail(${i})">${LV_SHORT[i]()}</button>`).join('')}</div>`;
+}
+// Le niveau choisi part au natif (mémorisé par widget) et s'applique tout de suite côté page ; la
+// mesure de hauteur repart de zéro pour que le popover se redimensionne au nouveau contenu.
+function setDetail(l){
+  if(!widgetId||l===level())return;
+  if(!metrics)metrics={};
+  metrics.prefs={...(metrics.prefs||{}),detail:{...(metrics.prefs?.detail||{}),[widgetId]:l}};
+  send('setWidgetDetail',{id:widgetId,level:l});
+  pushedHeight=0;
+  render();
+}
+// Un panneau = en-tête fixe (pastille, titre, sélecteur) + corps vivant. render() ne remplace que
+// le corps à chaque tick : le sélecteur survit, son infobulle et le clic ne se perdent pas.
+const MARK='<!--w-body-->';
+const topHTML=title=>`<div class="w-hd" style="--k:${KEYC[widgetId]||'var(--blue)'}"><span class="w-gl">${GLYPH[widgetId]||''}</span><h1>${title}</h1></div>${levelSel()}`;
+const popup=(title,state,body)=>`${topHTML(title)}${MARK}<div class="w-b" data-state="${state||'ok'}" data-lv="${level()}" style="--k:${KEYC[widgetId]||'var(--blue)'}">${body}</div>`;
+const hero=(val,unit,side)=>`<div class="w-hero"><div class="w-hv">${val}${unit?`<small>${unit}</small>`:''}</div>${side||''}</div>`;
+// Deux lignes « pastille · libellé · valeur » à droite de la valeur héros.
+const facts=list=>`<div class="w-facts">${list.map(([c,l,v])=>`<i class="w-dot" style="background:${c}"></i><span>${l}</span><b>${v}</b>`).join('')}</div>`;
+const f1=inner=>`<div class="w-f1">${inner}</div>`;
+const sec=(label,inner)=>inner?`<div class="w-sec">${label?`<div class="w-sl">${label}</div>`:''}${inner}</div>`:'';
+const kv=(k,v)=>`<div class="w-kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+const tile=(l,v,cls)=>`<div class="w-tile${cls?' '+cls:''}"><span class="w-tl">${l}</span><b class="w-tv">${v}</b></div>`;
+const dotted=(color,label)=>`<i class="w-dot" style="background:${color}"></i>${label}`;
+const barRow=(name,w,val,color)=>`<div class="w-br"><span class="w-bn">${name}</span><span class="w-bt"><i style="width:${Math.max(0,Math.min(100,w)).toFixed(1)}%${color?`;background:${color}`:''}"></i></span><span class="w-bv">${val}</span></div>`;
+const heightFor=()=>[44,56,64][level()];
+
+// Courbe en aire à dégradé discret, repères pointillés à 25/50/75 %, point terminal cerclé.
+// Une ou deux séries ; échelle % fixe (percent) ou auto (débits, températures). L'aire est toujours
+// remplie : elle donne le niveau d'un coup d'œil et occupe le cadre. Sans elle, une série plate
+// (batterie pleine, CPU au repos) laissait un grand rectangle vide qui se lisait comme une zone morte.
+let chartUid=0;
+function chart(list,{percent=true,h=heightFor()}={}){
+  const drawn=list.map(s=>({...s,values:(s.values||[]).filter(fin)})).filter(s=>s.values.length>1);
+  if(!drawn.length)return '';
+  const w=236,pw=w-6,y0=5,bot=h-2,span=bot-y0,len=Math.max(...drawn.map(s=>s.values.length)),uid=++chartUid;
+  // Échelle auto : 12 % d'air au-dessus de la crête. Calée pile sur le maximum, la courbe collait
+  // au bord haut du cadre et se lisait comme saturée en permanence.
+  const max=percent?100:Math.max(1,...drawn.flatMap(s=>s.values))*1.12;
+  const X=(off,j)=>(off+j)/(len-1)*pw,Y=v=>bot-Math.min(Math.max(v,0),max)/max*span;
+  let defs='',shapes='',dots='';
+  drawn.forEach((s,i)=>{const off=len-s.values.length,c=s.color||'var(--chart-a)',last=s.values.length-1;
+    const d='M'+s.values.map((v,j)=>`${X(off,j).toFixed(1)},${Y(v).toFixed(1)}`).join(' L');
+    defs+=`<linearGradient id="wg${uid}_${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${c};stop-opacity:.34"/><stop offset="1" style="stop-color:${c};stop-opacity:.02"/></linearGradient>`;
+    shapes+=`<path d="${d} L${X(off,last).toFixed(1)},${bot} L${X(off,0).toFixed(1)},${bot} Z" style="fill:url(#wg${uid}_${i})"/><path class="w-line" d="${d}" style="stroke:${c}"/>`;
+    const cx=X(off,last).toFixed(1),cy=Y(s.values[last]).toFixed(1);
+    dots+=`<circle cx="${cx}" cy="${cy}" r="4.5" style="fill:none;stroke:${c};stroke-opacity:.35"/><circle cx="${cx}" cy="${cy}" r="2.4" style="fill:${c}"/>`;
+  });
+  const grid=[.25,.5,.75].map(f=>`<line class="w-g" x1="0" x2="${w}" y1="${(bot-f*span).toFixed(1)}" y2="${(bot-f*span).toFixed(1)}"/>`).join('');
+  return `<svg class="w-chart" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true"><defs>${defs}</defs>${grid}<line class="w-gb" x1="0" x2="${w}" y1="${bot+.5}" y2="${bot+.5}"/>${shapes}${dots}</svg>`;
+}
+const series=(fam,key,color)=>({values:(fam?.series?.[key])||[],color});
+// Graduations temporelles sous la courbe (niveau hyper détaillé) : la fenêtre = nombre de points ×
+// cadence d'échantillonnage envoyée par le natif.
+function fmtAgo(sec){return sec>=90?`−${I.numMax(sec/60,1)} ${t('unit.min')}`:`−${Math.round(sec)} ${t('unit.sec')}`}
+function ticks(list){
+  const len=Math.max(0,...list.map(s=>(s.values||[]).filter(fin).length));
+  const sec=(len-1)*(metrics?.intervalSeconds>0?metrics.intervalSeconds:1);
+  if(len<2||!(sec>=2))return '';
+  return `<div class="w-ticks"><span>${fmtAgo(sec)}</span><span>${fmtAgo(sec/2)}</span><span>${t('w.detail.now')}</span></div>`;
+}
+// Min / moy. / max de la fenêtre affichée, une ligne par série. rows=[{label,color,values}].
+function winTable(rows,fmt){
+  const usable=rows.map(r=>({...r,v:(r.values||[]).filter(fin)})).filter(r=>r.v.length>1);
+  if(!usable.length)return '';
+  return `<div class="w-mam"><span></span><span class="h">${t('w.detail.min')}</span><span class="h">${t('w.detail.avg')}</span><span class="h">${t('w.detail.max')}</span>`
+    +usable.map(r=>{const mn=Math.min(...r.v),mx=Math.max(...r.v),av=r.v.reduce((a,b)=>a+b,0)/r.v.length;
+      return `<span class="l">${r.color&&r.label?`<i class="w-dot" style="background:${r.color}"></i>`:''}${r.label||''}</span><b>${fmt(mn)}</b><b>${fmt(av)}</b><b>${fmt(mx)}</b>`}).join('')+`</div>`;
+}
+// Courbe + (niveau 2) graduations et statistiques de la fenêtre.
+const plot=(list,fmt,{percent=true,labels=[]}={})=>{
+  const c=chart(list,{percent});
+  if(!c)return '';
+  return c+(level()>=2?ticks(list)+`<div style="margin-top:8px">${winTable(list.map((s,i)=>({...s,label:labels[i]||'',color:labels[i]?s.color:null})),fmt)}</div>`:'');
+};
+
+// Barre empilée (segments de la mémoire) + lignes de légende. segs=[{label,value,color,fmt}].
+function splitBar(segs,total,{free=null,freeLabel='',shares=false}={}){
   if(!total)return '';
   const bar=segs.map(s=>`<i style="width:${(100*s.value/total).toFixed(2)}%;background:${s.color}"></i>`).join('');
-  const legend=segs.map(s=>`<span class="lg"><span class="dot" style="background:${s.color}"></span>${s.label} <b>${s.fmt(s.value)}</b></span>`).join('')
-    +(free!=null?`<span class="lg"><span class="dot" style="background:rgba(127,127,127,.22)"></span>${freeLabel} <b>${fmtGo(free)}</b></span>`:'');
-  return `<div class="split">${bar}</div><div class="legend">${legend}</div>`;
+  const share=v=>shares?`<em>${I.pct(Math.round(100*v/total))}</em>`:'';
+  const row=(dot,label,v,fmt)=>`<div class="w-lr${shares?' p':''}">${dot}<span>${label}</span><b>${fmt(v)}</b>${share(v)}</div>`;
+  const legend=segs.map(s=>row(`<i class="w-dot" style="background:${s.color}"></i>`,s.label,s.value,s.fmt)).join('')
+    +(free!=null?row('<i class="w-dot free"></i>',freeLabel,free,fmtGo):'');
+  return `<div class="w-split">${bar}</div><div class="w-list" style="margin-top:12px">${legend}</div>`;
 }
-// Liste de processus : top `n` triés par `key`, valeur formatée par `fmt`, barre normalisée au max.
-function procList(key,fmt,n=5){
-  const list=procs().filter(p=>p[key]!=null).sort((a,b)=>b[key]-a[key]).slice(0,n);
-  if(!list.length)return `<div class="empty">${t('w.measuring')}</div>`;
+// Liste de processus : top `n` triés par `key`, valeur formatée par `fmt`, barre normalisée au
+// max. `second` ({key,fmt}) ajoute une colonne (niveau hyper détaillé).
+function procList(key,fmt,n=5,second=null){
+  const list=procs().filter(p=>fin(p[key])).sort((a,b)=>b[key]-a[key]).slice(0,n);
+  if(!list.length)return `<div class="w-empty">${t('w.measuring')}</div>`;
   const max=Math.max(1,...list.map(p=>p[key]));
-  return `<div class="plist">${list.map(p=>`<div class="p"><span class="nm">${esc(p.name||'—')}</span><span class="vv">${fmt(p[key])}</span><div class="pbar"><i style="width:${(100*p[key]/max).toFixed(1)}%"></i></div></div>`).join('')}</div>`;
+  return `<div class="w-list">${list.map(p=>`<div class="w-br${second?' w3':''}"><span class="w-bn">${esc(p.name||'—')}</span><span class="w-bt"><i style="width:${(100*p[key]/max).toFixed(1)}%"></i></span><span class="w-bv">${fmt(p[key])}</span>${second?`<span class="w-bv2">${fin(p[second.key])?second.fmt(p[second.key]):'—'}</span>`:''}</div>`).join('')}</div>`;
+}
+const procCount=()=>level()>=2?10:5;
+
+function coresBlock(n){
+  const L=level(),idx=Object.keys(n).filter(k=>/^core\d+$/.test(k)).map(k=>+k.slice(4)).sort((a,b)=>a-b);
+  if(!idx.length)return '';
+  const types=typeof n.coreTypes==='string'?n.coreTypes:null;
+  const cell=(i,e)=>{const v=n['core'+i];
+    return `<span class="w-core${e?' e':''}${sev(v)==='ok'?'':' '+sev(v)}"><span class="w-ct" style="height:${L>=2?44:34}px"><i style="height:${Math.max(4,Math.min(100,fin(v)?v:0))}%"></i></span>${L>=2?`<em>${fin(v)?Math.round(v):'—'}</em>`:''}</span>`};
+  if(!types)return `<div class="w-cg" style="grid-template-columns:repeat(${Math.min(idx.length,12)},1fr)">${idx.map(i=>cell(i,false)).join('')}</div>`;
+  const P=idx.filter(i=>types[i]!=='E'),E=idx.filter(i=>types[i]==='E');
+  // Côte à côte jusqu'à 16 cœurs (une grille de colonnes égales) ; au-delà, un groupe par rangée.
+  const side=idx.length<=16;
+  const grp=(label,list,e)=>list.length?`<div class="w-grp" style="${side?`flex:${list.length} 1 0`:''}"><div class="w-gt"><i class="w-sq${e?' e':''}"></i>${label} · ${list.length}</div><div class="w-cg" style="grid-template-columns:repeat(${side?list.length:12},1fr)">${list.map(i=>cell(i,e)).join('')}</div></div>`:'';
+  return `<div class="w-cores" style="${side?'':'flex-direction:column;align-items:stretch;gap:12px'}">${grp(t('w.cores.performance'),P,false)}${grp(t('w.cores.efficiency'),E,true)}</div>`;
 }
 
 function renderCPU(){
-  const f=famGet('cpu');if(!f)return empty(t('w.cpu'));const n=f.now,s=sysNow();
-  const cores=Object.keys(n).filter(k=>k.startsWith('core')&&k!=='coreTypes').sort((a,b)=>+a.slice(4)-+b.slice(4));
-  const types=n.coreTypes;
-  const bar=i=>`<i style="height:${Math.max(4,n['core'+i]??0)}%"></i>`;
-  let coresHTML='';
-  if(types){const P=[],E=[];for(let i=0;i<types.length;i++)(types[i]==='E'?E:P).push(i);
-    const grp=(l,idx)=>idx.length?`<div class="grp"><div class="lbl">${l} · ${idx.length}</div><div class="bars">${idx.map(bar).join('')}</div></div>`:'';
-    coresHTML=`<div class="cores">${grp(t('w.cores.performance'),P)}${grp(t('w.cores.efficiency'),E)}</div>`;
-  }else coresHTML=`<div class="bars" style="margin:8px 0">${cores.map(c=>bar(+c.slice(4))).join('')}</div>`;
-  // Découpe utilisateur/système : barre proportionnelle + deux lignes ordinaires. En légende
-  // compacte, « Utilisateur 10 % » dépassait la demi-largeur et se faisait rogner ; en lignes, le
-  // libellé tient en toutes lettres et s'aligne sur le reste du panneau.
-  let splitHTML='';
-  if(n.userPercent!=null){
-    const u=n.userPercent,s=n.systemPercent||0;
-    splitHTML=`<div class="split"><i style="width:${u}%;background:var(--chart-a)"></i><i style="width:${s}%;background:var(--amber)"></i></div>`
-      +`<div class="rows">${row('<span class="dot" style="background:var(--chart-a)"></span> '+t('w.cpu.user'),I.pct(Math.round(u)))}`
-      +`${row('<span class="dot" style="background:var(--amber)"></span> '+t('w.cpu.system'),I.pct(Math.round(s)))}</div>`;
-  }
-  const loads=(s.load1!=null)?row(t('w.cpu.load'),`${I.numMax(s.load1,2)} · ${I.numMax(s.load5,2)} · ${I.numMax(s.load15,2)}`):'';
-  const procN=(s.processCount!=null)?row(t('w.cpu.processes'),s.processCount):'';
-  const up=(s.uptimeSec!=null)?row(t('w.cpu.uptime'),fmtDur(s.uptimeSec)):'';
-  const loadRows=(loads||procN||up)?`<div class="rows" style="margin-top:8px">${loads}${procN}${up}</div>`:'';
-  return head(t('w.cpu'),bigVal(pctN(n.total),'%'))
-    +chart([series(f,'total','var(--chart-a)')])
-    +(on('cores')?coresHTML:'')
-    +(on('split')?(splitHTML||''):'')
-    +(on('load')?loadRows:'')
-    +(on('processes')?section(t('w.cpu.processSection'))+procList('cpuPercent',v=>I.pct(Math.round(v))):'');
+  const f=famGet('cpu');if(!f)return empty(t('w.cpu'));const n=f.now,s=sysNow(),L=level();
+  // Découpe utilisateur/système à droite de la valeur héros (au lieu d'une barre séparée : la courbe
+  // montre déjà la charge, les deux lignes disent d'où elle vient).
+  const side=on('split')&&n.userPercent!=null?facts([['var(--chart-a)',t('w.cpu.user'),I.pct(Math.round(n.userPercent))],['var(--amber)',t('w.cpu.system'),I.pct(Math.round(n.systemPercent||0))]]):'';
+  const sysSeries=on('split')&&(f.series?.systemPercent||[]).length>1?[series(f,'systemPercent','var(--amber)')]:[];
+  const list=[series(f,'total','var(--chart-a)'),...sysSeries];
+  const loads=s.load1!=null?`<div class="w-tile span2"><span class="w-tl">${t('w.cpu.load')}</span><span class="w-trip"><span><b>${I.numMax(s.load1,2)}</b><em>1 ${t('unit.min')}</em></span><span><b>${I.numMax(s.load5,2)}</b><em>5 ${t('unit.min')}</em></span><span><b>${I.numMax(s.load15,2)}</b><em>15 ${t('unit.min')}</em></span></span></div>`:'';
+  const tiles=loads+(s.processCount!=null?tile(t('w.cpu.processes'),s.processCount):'')+(s.uptimeSec!=null?tile(t('w.cpu.uptime'),fmtDur(s.uptimeSec)):'');
+  return popup(t('w.cpu'),sev(n.total),
+    hero(pctN(n.total),'%',side)
+    +plot(list,pct,{labels:L>=2?[t('w.cpu'),t('w.cpu.system')]:[]})
+    +(vis('cores',1)?sec('',coresBlock(n)):'')
+    +(vis('load',1)&&tiles?sec('',`<div class="w-tiles">${tiles}</div>`):'')
+    +(vis('processes',1)?sec(t('w.cpu.processSection'),procList('cpuPercent',v=>I.pct(Math.round(v)),procCount(),L>=2?{key:'rssBytes',fmt:fmtSize}:null)):''));
 }
 function renderMemory(){
-  const f=famGet('ram');if(!f)return empty(t('w.memory'));const n=f.now;
-  const P={1:[t('w.mem.pressure.normal'),''],2:[t('w.mem.pressure.high'),'warn'],4:[t('w.mem.pressure.critical'),'crit']}[n.pressureLevel]||['',''];
+  const f=famGet('ram');if(!f)return empty(t('w.memory'));const n=f.now,L=level();
+  const lv=n.pressureLevel,pcol=lv===4?'var(--danger)':lv===2?'var(--amber)':'var(--green)',pcls=lv===4?'crit':lv===2?'warn':'';
+  const P={1:t('w.mem.pressure.normal'),2:t('w.mem.pressure.high'),4:t('w.mem.pressure.critical')}[lv]||'';
+  // Pression : l'indicateur qui compte sur macOS (un pourcentage utilisé élevé est normal, le cache
+  // se remplit). Trois crans : vert, ambre, rouge.
+  const swapLine=L>=2&&n.swapUsedBytes!=null?`<div class="w-kv sw"><span class="k">${t('w.mem.swap')}</span><span class="v">${n.swapTotalBytes!=null?`${fmtSize(n.swapUsedBytes)} / ${fmtSize(n.swapTotalBytes)}`:fmtSize(n.swapUsedBytes)}</span></div>`:'';
+  const pressure=P?`<div class="w-card"><div class="w-kv"><span class="k">${t('w.mem.pressure')}</span><span class="w-ok ${pcls}" style="${pcls?'':'color:var(--green)'}"><i class="w-dot rd" style="background:${pcol}"></i>${P}</span></div><span class="w-pg" style="color:${pcol}">${[0,1,2].map(i=>`<i style="${i<(lv===4?3:lv===2?2:1)?`background:${pcol}`:''}"></i>`).join('')}</span>${swapLine}</div>`:'';
   let breakdown='';
   if(n.totalBytes){
-    // Libellés abrégés : en toutes lettres, « Compressée 7,8 Go » dépassait la demi-largeur de la
-    // légende et le « Go » sortait du panneau.
+    // Au niveau détaillé, libellés abrégés (historique) ; en hyper détaillé, libellés complets et part de chaque segment.
+    const full=L>=2;
     const segs=[
-      {label:t('w.mem.app'),value:n.appBytes||0,color:'var(--blue)',fmt:fmtGo},
-      {label:t('w.mem.wired'),value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
-      {label:t('w.mem.compressed'),value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
-      {label:t('w.mem.cache'),value:n.cachedBytes||0,color:'rgba(127,140,160,.55)',fmt:fmtGo},
+      {label:full?t('w.detail.mem.app'):t('w.mem.app'),value:n.appBytes||0,color:'var(--blue)',fmt:fmtGo},
+      {label:full?t('w.detail.mem.wired'):t('w.mem.wired'),value:n.wiredBytes||0,color:'var(--purple)',fmt:fmtGo},
+      {label:full?t('w.detail.mem.compressed'):t('w.mem.compressed'),value:n.compressedBytes||0,color:'var(--amber)',fmt:fmtGo},
+      {label:full?t('w.detail.mem.cache'):t('w.mem.cache'),value:n.cachedBytes||0,color:'var(--muted)',fmt:fmtGo},
     ];
-    breakdown=splitBar(segs,n.totalBytes,{free:n.freeBytes,freeLabel:t('w.mem.free')});
+    breakdown=splitBar(segs,n.totalBytes,{free:n.freeBytes,freeLabel:full?t('w.detail.mem.free'):t('w.mem.free'),shares:full});
   }
   const stats=[];
-  const cell=(v,l,cls)=>`<div class="stat${cls?' '+cls:''}"><b>${v}</b><span>${l}</span></div>`;
-  if(n.usedBytes!=null)stats.push(cell(fmtGo(n.usedBytes),t('w.mem.used')));
-  if(n.freeBytes!=null)stats.push(cell(fmtGo(n.freeBytes),t('w.mem.freeLower')));
-  if(n.cachedBytes!=null)stats.push(cell(fmtGo(n.cachedBytes),t('w.mem.cacheLower')));
-  if(n.swapUsedBytes!=null)stats.push(cell(fmtSize(n.swapUsedBytes),t('w.mem.swap'),n.swapUsedBytes>2147483648?'warn':''));
-  return head(t('w.memory'),bigVal(pctN(n.usedPercent),'%',n.totalBytes?t('w.total',{v:fmtGo(n.totalBytes)}):''))
-    +(P[0]?`<div class="row"><span class="k">${t('w.mem.pressure')}</span><span class="badge ${P[1]}">${P[0]}</span></div>`:'')
-    +chart([series(f,'usedPercent','var(--chart-a)')])
-    +(on('breakdown')?breakdown:'')
-    +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
-    +(on('processes')?section(t('w.mem.processSection'))+procList('rssBytes',fmtSize):'');
+  if(n.usedBytes!=null)stats.push(tile(t('w.mem.used'),fmtGo(n.usedBytes)));
+  if(n.freeBytes!=null)stats.push(tile(t('w.mem.freeLower'),fmtGo(n.freeBytes)));
+  if(n.cachedBytes!=null)stats.push(tile(t('w.mem.cacheLower'),fmtGo(n.cachedBytes)));
+  if(n.swapUsedBytes!=null)stats.push(tile(t('w.mem.swap'),fmtSize(n.swapUsedBytes),n.swapUsedBytes>2147483648?'warn':''));
+  return popup(t('w.memory'),lv===4?'crit':lv===2?'warn':'ok',
+    hero(pctN(n.usedPercent),'%',n.totalBytes?f1(`<b>${fmtGo(n.totalBytes)}</b><span>${t('w.total',{v:''}).trim()}</span>`):'')
+    +plot([series(f,'usedPercent','var(--chart-a)')],pct)
+    +sec('',pressure)
+    +(vis('breakdown',1)?sec('',breakdown):'')
+    +(vis('stats',1)&&stats.length?sec('',`<div class="w-tiles">${stats.join('')}</div>`):'')
+    +(vis('processes',1)?sec(t('w.mem.processSection'),procList('rssBytes',fmtSize,procCount(),L>=2?{key:'cpuPercent',fmt:v=>I.pct(Math.round(v))}:null)):''));
 }
 function renderGPU(){
-  const f=famGet('gpu');if(!f)return empty(t('w.gpu'));const n=f.now;
+  const f=famGet('gpu');if(!f)return empty(t('w.gpu'));const n=f.now,L=level();
   // Pas de liste de processus ici : aucune API n'expose la charge GPU par processus sur Apple
   // Silicon. On s'en tient à ce qui est mesurable — charge globale, étages, mémoire.
-  return head(t('w.gpu'),bigVal(pctN(n.usage),'%'))
-    +chart([series(f,'usage','var(--chart-a)')])
-    +(on('stages')?`<div class="rows">
-      ${n.renderer!=null?row(t('w.gpu.renderer'),pct(n.renderer)):''}
-      ${n.tiler!=null?row(t('w.gpu.tiler'),pct(n.tiler)):''}
-      ${n.memInUse!=null?row(t('w.gpu.memory'),fmtSize(n.memInUse)):''}
-    </div>`:'');
+  const stages=[];
+  if(n.renderer!=null)stages.push(barRow(t('w.gpu.renderer'),n.renderer,pct(n.renderer),'var(--k)'));
+  if(n.tiler!=null)stages.push(barRow(t('w.gpu.tiler'),n.tiler,pct(n.tiler),'var(--k)'));
+  const rows=L>=2?[series(f,'usage','var(--chart-a)'),series(f,'renderer','var(--purple)'),series(f,'tiler','var(--amber)')]:[];
+  const stats=L>=2?winTable([{label:t('w.gpu'),color:'var(--chart-a)',values:rows[0].values},{label:t('w.gpu.renderer'),color:'var(--purple)',values:rows[1].values},{label:t('w.gpu.tiler'),color:'var(--amber)',values:rows[2].values}],pct):'';
+  return popup(t('w.gpu'),sev(n.usage),
+    hero(pctN(n.usage),'%',n.memInUse!=null?f1(`<span>${t('w.gpu.memory')}</span><b>${fmtSize(n.memInUse)}</b>`):'')
+    +chart([series(f,'usage','var(--chart-a)')])+(L>=2?ticks([series(f,'usage')]):'')
+    +(vis('stages',1)&&stages.length?sec('',`<div class="w-list">${stages.join('')}</div>`):'')
+    +(stats?sec('',stats):''));
 }
 function renderNetwork(){
-  const f=famGet('network');if(!f)return empty(t('w.network'));const n=f.now;
+  const f=famGet('network');if(!f)return empty(t('w.network'));const n=f.now,L=level();
   // Seules les interfaces qui transmettent réellement. Sans ce filtre, six tunnels VPN (utun*) à
   // 0 o/s noyaient la seule interface active — la liste ne disait plus rien.
-  const ifaces=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))]
-    .filter(nm=>(n['rx:'+nm]||0)+(n['tx:'+nm]||0)>0)
-    .sort((a,b)=>((n['rx:'+b]||0)+(n['tx:'+b]||0))-((n['rx:'+a]||0)+(n['tx:'+a]||0))).slice(0,4);
-  const hidden=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))].length-ifaces.length;
-  // Deux débits de même importance : deux lignes de même poids, plutôt qu'un chiffre géant et un
-  // second relégué en sous-titre.
-  const dual=`<span class="dual"><b>↓ ${fmtRate(n.rxBytesPerSec)}</b><b>↑ ${fmtRate(n.txBytesPerSec)}</b></span>`;
-  return head(t('w.network'),dual)
-    +chart([series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')],{percent:false})
-    +(on('interfaces')?`<div class="rows">${ifaces.map(nm=>row(nm,`↓ ${fmtRate(n['rx:'+nm])} · ↑ ${fmtRate(n['tx:'+nm])}`)).join('')
-      ||`<div class="row"><span class="k">${t('w.net.noTraffic')}</span></div>`}${hidden>0&&ifaces.length?`<div class="row"><span class="k">${t('w.net.inactive',{n:hidden})}</span></div>`:''}</div>`:'')
-    +(on('session')&&n.rxSessionBytes!=null?section(t('w.net.session'))
-      +`<div class="rows">${row(t('w.net.received'),fmtSize(n.rxSessionBytes))}${row(t('w.net.sent'),fmtSize(n.txSessionBytes))}</div>`:'');
+  const all=[...new Set(Object.keys(n).filter(k=>k.startsWith('rx:')).map(k=>k.slice(3)))];
+  const ifaces=all.filter(nm=>(n['rx:'+nm]||0)+(n['tx:'+nm]||0)>0)
+    .sort((a,b)=>((n['rx:'+b]||0)+(n['tx:'+b]||0))-((n['rx:'+a]||0)+(n['tx:'+a]||0))).slice(0,L>=2?all.length:4);
+  const hidden=all.length-ifaces.length;
+  const split=v=>{const s=fmtRate(v),i=s.lastIndexOf(' ');return i<0?[s,'']:[s.slice(0,i),s.slice(i+1)]};
+  const col=(dir,c,label,v)=>{const [x,u]=split(v);return `<div class="w-dc"><div class="w-dcl"><span class="w-ab" style="--c:${c}">${ARROW[dir]}</span>${label}</div><div class="w-dv">${x}<small>${u}</small></div></div>`};
+  // Deux débits de même importance : deux colonnes de même poids, chacune avec sa flèche.
+  const dual=`<div class="w-dual">${col('dn','var(--chart-a)',t('w.net.received'),n.rxBytesPerSec)}${col('up','var(--chart-b)',t('w.net.sent'),n.txBytesPerSec)}</div>`;
+  const list=[series(f,'rxBytesPerSec','var(--chart-a)'),series(f,'txBytesPerSec','var(--chart-b)')];
+  const ifRows=ifaces.map(nm=>`<div class="w-if"><span class="n">${esc(nm)}</span><span class="d">↓ ${fmtRate(n['rx:'+nm])}</span><span class="u">↑ ${fmtRate(n['tx:'+nm])}</span></div>`).join('')
+    ||`<div class="w-kv"><span class="k">${t('w.net.noTraffic')}</span></div>`;
+  const inactive=hidden>0&&ifaces.length?`<div class="w-kv"><span class="k">${t('w.net.inactive',{n:hidden})}</span></div>`:'';
+  return popup(t('w.network'),'ok',
+    dual
+    +chart(list,{percent:false})+(L>=2?ticks(list):'')
+    +(L>=2?sec('',winTable([{label:'↓',color:'var(--chart-a)',values:list[0].values},{label:'↑',color:'var(--chart-b)',values:list[1].values}],fmtRate)):'')
+    +(vis('interfaces',1)?sec('',`<div class="w-list">${ifRows}${inactive}</div>`):'')
+    +(vis('session',1)&&n.rxSessionBytes!=null?sec(t('w.net.session'),`<div class="w-tiles">${tile(t('w.net.received'),fmtSize(n.rxSessionBytes))}${tile(t('w.net.sent'),fmtSize(n.txSessionBytes))}</div>`):''));
 }
 function renderTemperature(){
-  const f=famGet('sensors');if(!f)return empty(t('w.sensors'));const n=f.now;
-  const T=[[t('w.temp.normal'),''],[t('w.temp.high'),'warn'],[t('w.temp.serious'),'warn'],[t('w.temp.throttled'),'crit']][n.thermalState]||[t('w.temp.normal'),''];
-  const fans=Object.keys(n).filter(k=>k.startsWith('fan')).sort();
+  const f=famGet('sensors');if(!f)return empty(t('w.sensors'));const n=f.now,L=level();
+  const th=n.thermalState,T=[[t('w.temp.normal'),''],[t('w.temp.high'),'warn'],[t('w.temp.serious'),'warn'],[t('w.temp.throttled'),'crit']][th]||[t('w.temp.normal'),''];
+  const fans=Object.keys(n).filter(k=>/^fan\d+$/.test(k)).sort();
   // Détail par famille. Les noms de capteurs Apple Silicon sont opaques (« PMU tdie3 ») : on ne
   // peut pas honnêtement étiqueter « CPU » ou « GPU », d'où « SoC » / « périphériques ».
-  // Libellés courts et valeurs compactes « max / moy. » : la forme longue débordait et cassait
-  // la ligne en deux, libellé comme valeur.
   const det=[];
-  if(n.dieMaxC!=null)det.push(row(t('w.temp.soc'),t('w.temp.maxAvg',{max:Math.round(n.dieMaxC),avg:Math.round(n.dieAvgC)})));
-  if(n.deviceMaxC!=null)det.push(row(t('w.temp.devices'),t('w.temp.maxAvg',{max:Math.round(n.deviceMaxC),avg:Math.round(n.deviceAvgC)})));
+  if(n.dieMaxC!=null)det.push(kv(t('w.temp.soc'),t('w.temp.maxAvg',{max:Math.round(n.dieMaxC),avg:Math.round(n.dieAvgC)})));
+  if(n.deviceMaxC!=null)det.push(kv(t('w.temp.devices'),t('w.temp.maxAvg',{max:Math.round(n.deviceMaxC),avg:Math.round(n.deviceAvgC)})));
   const batt=famGet('battery')?.now;
-  if(batt?.temperatureC!=null)det.push(row(t('w.battery').toLowerCase(),Math.round(batt.temperatureC)+' °C'));
-  return head(t('w.sensors'),bigVal(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?t('w.temp.hotspot'):''))
-    +(on('chart')?chart([series(f,'tempC','var(--amber)')],{percent:false}):'')
-    +(on('detail')&&det.length?`<div class="rows">${det.join('')}</div>`:'')
-    +`<div class="rows"${det.length?' style="margin-top:8px"':''}>
-      <div class="row"><span class="k">${t('w.temp.state')}</span><span class="badge ${T[1]}">${T[0]}</span></div>
-      ${on('fans')?(fans.length?fans.map((k,i)=>row(fans.length>1?t('w.temp.fanN',{n:i+1}):t('w.temp.fan'),I.num(Math.round(n[k]),0)+' '+t('unit.rpm'))).join(''):row(t('w.temp.fans'),t('w.temp.noFans'))):''}
-    </div>`;
+  if(batt?.temperatureC!=null)det.push(kv(t('w.battery').toLowerCase(),Math.round(batt.temperatureC)+' °C'));
+  if(L>=2){
+    if(n.dieCount!=null)det.push(kv(t('w.detail.temp.dieCount'),n.dieCount));
+    if(n.deviceCount!=null)det.push(kv(t('w.detail.temp.deviceCount'),n.deviceCount));
+  }
+  const fanRows=fans.length?fans.map((k,i)=>kv(fans.length>1?t('w.temp.fanN',{n:i+1}):t('w.temp.fan'),I.num(Math.round(n[k]),0)+' '+t('unit.rpm'))).join(''):kv(t('w.temp.fans'),t('w.temp.noFans'));
+  const state=Math.max(th>=3?2:th>=1?1:0,fin(n.tempC)?(n.tempC>=95?2:n.tempC>=85?1:0):0);
+  const list=[series(f,'tempC','var(--amber)')];
+  return popup(t('w.sensors'),['ok','warn','crit'][state],
+    hero(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?f1(`<span>${t('w.temp.hotspot')}</span>`):'')
+    +(vis('chart',0)?chart(list,{percent:false})+(L>=2?ticks(list)+`<div style="margin-top:8px">${winTable(list,fmtDeg)}</div>`:''):'')
+    +sec('',kv(t('w.temp.state'),`<span class="w-ok ${T[1]}"><i class="w-dot rd" style="background:${T[1]==='crit'?'var(--danger)':T[1]==='warn'?'var(--amber)':'var(--green)'}"></i>${T[0]}</span>`))
+    +(vis('detail',1)&&det.length?sec('',det.join('')):'')
+    +(vis('fans',1)?sec('',fanRows):''));
 }
 function renderBattery(){
-  const f=famGet('battery');if(!f)return empty(t('w.battery'));const n=f.now;
+  const f=famGet('battery');if(!f)return empty(t('w.battery'));const n=f.now,L=level();
   const state=n.charging?t('w.bat.charging'):n.externalConnected?(n.fullyCharged?t('w.bat.pluggedFull'):t('w.bat.plugged')):t('w.bat.onBattery');
-  const cell=(v,l,warn)=>`<div class="stat${warn?' warn':''}"><b>${v}</b><span>${l}</span></div>`;
   const stats=[];
-  if(n.healthPercent!=null)stats.push(cell(I.pct(Math.round(n.healthPercent)),t('w.bat.health'),n.healthPercent<80));
-  if(n.cycleCount!=null)stats.push(cell(n.cycleCount,t('w.bat.cycles')));
-  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${I.numMax(Math.abs(n.powerWatts),1)} W`,n.powerWatts<0?t('w.bat.discharge'):t('w.bat.charge')));
-  if(n.minutesRemaining!=null)stats.push(cell(fmtMin(n.minutesRemaining),n.charging?t('w.bat.untilFull'):t('w.bat.runtime')));
+  if(n.healthPercent!=null)stats.push(tile(t('w.bat.health'),I.pct(Math.round(n.healthPercent)),n.healthPercent<80?'warn':''));
+  if(n.cycleCount!=null)stats.push(tile(t('w.bat.cycles'),n.cycleCount));
+  if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(tile(n.powerWatts<0?t('w.bat.discharge'):t('w.bat.charge'),`${n.powerWatts<0?'↓':'↑'} ${I.numMax(Math.abs(n.powerWatts),1)} W`));
+  if(n.minutesRemaining!=null)stats.push(tile(n.charging?t('w.bat.untilFull'):t('w.bat.runtime'),fmtMin(n.minutesRemaining)));
   const rows=[];
-  if(n.temperatureC!=null)rows.push(row(t('w.bat.temperature'),Math.round(n.temperatureC)+' °C'));
-  if(n.voltageV!=null)rows.push(row(t('w.bat.voltage'),I.num(n.voltageV,2)+' V'));
-  if(n.fullCapacity!=null&&n.designCapacity!=null)rows.push(row(t('w.bat.capacity'),`${I.num(n.fullCapacity,0)} / ${I.num(n.designCapacity,0)} mAh`));
-  if(n.adapterWatts!=null&&n.adapterWatts>0)rows.push(row(t('w.bat.charger'),n.adapterWatts+' W'));
-  if(n.conditionOK!=null)rows.push(row(t('w.bat.condition'),'<span class="badge'+(n.conditionOK?'':' warn')+'">'+(n.conditionOK?t('w.bat.conditionOK'):t('w.bat.conditionCheck'))+'</span>'));
+  if(n.temperatureC!=null)rows.push(kv(t('w.bat.temperature'),Math.round(n.temperatureC)+' °C'));
+  if(n.voltageV!=null)rows.push(kv(t('w.bat.voltage'),I.num(n.voltageV,2)+' V'));
+  if(n.fullCapacity!=null&&n.designCapacity!=null)rows.push(kv(t('w.bat.capacity'),`${I.num(n.fullCapacity,0)} / ${I.num(n.designCapacity,0)} mAh`));
+  if(n.adapterWatts!=null&&n.adapterWatts>0)rows.push(kv(t('w.bat.charger'),n.adapterWatts+' W'));
+  if(n.conditionOK!=null)rows.push(kv(t('w.bat.condition'),`<span class="w-ok ${n.conditionOK?'':'warn'}">${n.conditionOK?t('w.bat.conditionOK'):t('w.bat.conditionCheck')}</span>`));
+  // Hyper détaillé : l'état brut de la batterie, tel que le système le rapporte.
+  const yn=v=>v?t('w.detail.yes'):t('w.detail.no');
+  const raw=[];
+  if(n.charging!=null)raw.push(kv(t('w.detail.bat.charging'),yn(n.charging)));
+  if(n.externalConnected!=null)raw.push(kv(t('w.detail.bat.plugged'),yn(n.externalConnected)));
+  if(n.fullyCharged!=null)raw.push(kv(t('w.detail.bat.full'),yn(n.fullyCharged)));
+  const low=n.percent!=null&&!n.charging&&!n.externalConnected?(n.percent<=10?'crit':n.percent<=20?'warn':'ok'):'ok';
+  const remain=n.minutesRemaining!=null?`<span>${fmtMin(n.minutesRemaining)} · ${n.charging?t('w.bat.untilFull'):t('w.bat.runtime')}</span>`:'';
   // Pas de barre de niveau ici : le grand pourcentage la double déjà, et la courbe en donne
-  // l'historique. Trois représentations de la même valeur encombraient le panneau.
-  return head(t('w.battery'),bigVal(n.percent==null?'—':Math.round(n.percent),'%',state))
-    +(on('chart')?chart([series(f,'percent','var(--green)')]):`<div class="track"><i style="width:${n.percent??0}%"></i></div>`)
-    +(on('stats')&&stats.length?`<div class="stat-row">${stats.join('')}</div>`:'')
-    +(on('details')&&rows.length?`<div class="rows" style="margin-top:8px">${rows.join('')}</div>`:'');
+  // l'historique. (Sans courbe — réglage « historique » coupé — la barre reprend ce rôle.)
+  const list=[series(f,'percent','var(--green)')];
+  return popup(t('w.battery'),low,
+    hero(n.percent==null?'—':Math.round(n.percent),'%',f1(`<b>${state}</b>${remain}`))
+    +(vis('chart',0)?chart(list)+(L>=2?ticks(list)+`<div style="margin-top:8px">${winTable(list,pct)}</div>`:''):`<div class="w-track"><i style="width:${n.percent??0}%"></i></div>`)
+    +(vis('stats',1)&&stats.length?sec('',`<div class="w-tiles">${stats.join('')}</div>`):'')
+    +(vis('details',1)&&rows.length?sec('',rows.join('')):'')
+    +(L>=2&&n.healthPercent!=null?sec(t('w.bat.health'),`<div class="w-track"><i style="width:${Math.max(0,Math.min(100,n.healthPercent))}%"></i></div>`):'')
+    +(L>=2&&raw.length?sec('',raw.join('')):''));
 }
 function renderDisk(){
-  const f=famGet('disk');if(!f)return empty(t('w.disk'));const n=f.now;
+  const f=famGet('disk');if(!f)return empty(t('w.disk'));const n=f.now,L=level();
   const vols=Object.keys(n).filter(k=>k.startsWith('vol:')).sort();
   const volHTML=vols.map(k=>{const mnt=k.slice(4);const p=Math.round(n[k]);
     const tot=n['volTotal:'+mnt],free=n['volFree:'+mnt];
@@ -276,20 +445,25 @@ function renderDisk(){
     // à celle du total — sinon « 800 / 1,2 To » ferait lire 800 To au lieu de 800 Mo.
     const [freeNum,freeUnit]=fmtSize(free).split(' '),totalUnit=fmtSize(tot).split(' ')[1];
     const foot=tot!=null?`${freeUnit===totalUnit?freeNum:fmtSize(free)} / ${fmtSize(tot)}`:I.pct(p);
-    return `<div class="vol"><div class="vh"><span class="vn">${esc(label)}</span><span class="vf">${foot}</span></div><div class="track"><i style="width:${p}%;background:${p>=90?'var(--danger)':'var(--chart-a)'}"></i></div></div>`;
+    const color=sev(p,80,90)==='crit'?'var(--danger)':sev(p,80,90)==='warn'?'var(--amber)':'var(--k)';
+    const cap=L>=2&&tot!=null&&free!=null?`<div class="cap">${t('w.detail.disk.used')} ${fmtSize(tot-free)} · ${t('w.mem.freeLower')} ${fmtSize(free)} · ${I.pct(p)}</div>`:'';
+    return `<div class="w-vol"><div class="vh"><span class="vn">${esc(label)}</span><span class="vf">${foot}</span></div><div class="w-bt"><i style="width:${Math.max(0,Math.min(100,p))}%;background:${color}"></i></div>${cap}</div>`;
   }).join('');
-  return head(t('w.disk'),bigVal(pctN(n.usedPercent),'%',n.totalBytes?t('w.total',{v:fmtSize(n.totalBytes)}):''))
-    +(on('chart')?chart([series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')],{percent:false})
-      +`<div class="rows">${row(t('w.disk.read'),fmtRate(n.readBytesPerSec))}${row(t('w.disk.write'),fmtRate(n.writeBytesPerSec))}</div>`:'')
-    +(on('volumes')?section(t('w.disk.volumes'))+volHTML:'');
+  const list=[series(f,'readBytesPerSec','var(--chart-a)'),series(f,'writeBytesPerSec','var(--chart-b)')];
+  return popup(t('w.disk'),sev(n.usedPercent,80,90),
+    hero(pctN(n.usedPercent),'%',n.totalBytes?f1(`<b>${fmtSize(n.totalBytes)}</b><span>${t('w.total',{v:''}).trim()}</span>`):'')
+    +(vis('chart',0)?chart(list,{percent:false})+(L>=2?ticks(list):'')
+      +sec('',kv(dotted('var(--chart-a)',t('w.disk.read')),fmtRate(n.readBytesPerSec))+kv(dotted('var(--chart-b)',t('w.disk.write')),fmtRate(n.writeBytesPerSec)))
+      +(L>=2?sec('',winTable([{label:t('w.disk.read'),color:'var(--chart-a)',values:list[0].values},{label:t('w.disk.write'),color:'var(--chart-b)',values:list[1].values}],fmtRate)):''):'')
+    +(vis('volumes',1)&&volHTML?sec(t('w.disk.volumes'),volHTML):''));
 }
-function empty(title){return head(title,'')+`<div class="empty">${t('w.measuring')}</div>`}
+function empty(title){return popup(title,'ok',`<div class="w-empty">${t('w.measuring')}</div>`)}
 const RENDERERS={cpu:renderCPU,memory:renderMemory,gpu:renderGPU,network:renderNetwork,temperature:renderTemperature,battery:renderBattery,disk:renderDisk};
-// Le panneau se dimensionne sur son contenu : sections activables, nombre d'interfaces réseau ou
-// de volumes, liste de processus… d'un widget à l'autre la hauteur va du simple au triple. Une
-// taille figée côté natif coupait net les panneaux longs. On mesure donc après chaque rendu et on
-// pousse la hauteur ; le natif borne et ne redimensionne que sur changement réel.
-let pushedHeight=0;
+// Le panneau se dimensionne sur son contenu : niveau de détail, sections activables, nombre
+// d'interfaces réseau ou de volumes, liste de processus… d'un widget à l'autre la hauteur va du
+// simple au triple. Une taille figée côté natif coupait net les panneaux longs. On mesure donc après
+// chaque rendu et on pousse la hauteur ; le natif borne et ne redimensionne que sur changement réel.
+let pushedHeight=0,renderedKey=null,renderedTop=null;
 function syncPanelHeight(){
   const el=document.querySelector('#panel');
   if(!el)return;
@@ -301,7 +475,16 @@ function syncPanelHeight(){
 function render(){
   if(metrics?.prefs?.theme)document.documentElement.dataset.theme=metrics.prefs.theme;
   const r=RENDERERS[widgetId];
-  document.querySelector('#panel').innerHTML=r?r():`<div class="empty">—</div>`;
+  const panel=document.querySelector('#panel');
+  // Changement de niveau (clic ici ou réglage poussé par le natif) : l'ancienne mesure ne vaut plus.
+  const key=widgetId+':'+level();
+  if(key!==renderedKey){pushedHeight=0;renderedKey=key}
+  const [top,body]=(r?r():`<div class="w-empty">—</div>`).split(MARK);
+  if(body===undefined){panel.innerHTML=top;renderedTop=null}
+  else{
+    if(top!==renderedTop){panel.innerHTML=`<div id="w-top">${top}</div><div id="w-body"></div>`;renderedTop=top}
+    document.querySelector('#w-body').innerHTML=body;
+  }
   // Après le calcul de mise en page, sinon on mesure la hauteur d'avant.
   if(typeof requestAnimationFrame==='function')requestAnimationFrame(syncPanelHeight);else syncPanelHeight();
 }
@@ -325,10 +508,10 @@ function mergeMetricsDelta(state,payload){
   delete merged.delta;
   return merged;
 }
-StatusI18n.onChange(()=>{pushedHeight=0;if(metrics)render()});
+StatusI18n.onChange(()=>{pushedHeight=0;renderedTop=null;if(metrics)render()});
 window.StatusWidget={
   // Changement de widget : la hauteur précédente n'a plus de sens, on force une remesure.
-  show(id,data){if(id!==widgetId)pushedHeight=0;widgetId=id;metrics=mergeMetricsDelta(metrics,data)||metrics;render()},
+  show(id,data){if(id!==widgetId){pushedHeight=0;renderedTop=null}widgetId=id;metrics=mergeMetricsDelta(metrics,data)||metrics;render()},
   updateMetrics(data){const m=mergeMetricsDelta(metrics,data);if(m){metrics=m;render()}}
 };
 </script>

@@ -185,7 +185,7 @@ const noJunk = h => !/NaN|undefined/.test(h) && !/>null</.test(h);
 const wCPU = widget('renderCPU()');
 check(noJunk(wCPU), 'CPU : aucun NaN/undefined/null');
 check(/utilisateur/.test(wCPU) && /système/.test(wCPU), 'CPU : découpe utilisateur/système présente');
-check(/2,66 · 3,16 · 3,68/.test(wCPU), 'CPU : charge moyenne en décimales françaises');
+check(/<b>2,66<\/b>/.test(wCPU) && /<b>3,16<\/b>/.test(wCPU) && /<b>3,68<\/b>/.test(wCPU), 'CPU : charge moyenne (1, 5, 15 min) en décimales françaises');
 check(wCPU.indexOf('Gros CPU') > -1 && wCPU.indexOf('Gros CPU') < wCPU.indexOf('Grosse RAM'),
   'CPU : liste des processus triée par CPU (le plus gros d’abord)');
 
@@ -265,12 +265,156 @@ checkEqual(widget('window.__sent[1].height'), 268, 'la nouvelle hauteur est cell
 widget('window.__setH(0)'); widget('syncPanelHeight()');
 checkEqual(widget('window.__sent.length'), 2, 'hauteur nulle : rien n’est poussé');
 
+// ── Trois niveaux de détail (widget.html) ────────────────────────────────────
+// Le niveau décide de la visibilité par défaut de chaque section ; un interrupteur « off » des
+// Réglages la masque toujours. Défaut = Détaillé (1) : rien de perdu pour les utilisateurs actuels.
+section('widget.html — trois niveaux de détail');
+const ramp = (a, b, n = 30) => Array.from({ length: n }, (_, i) => Math.round(a + (b - a) * i / (n - 1)));
+const richSnap = {
+  families: [
+    { id: 'cpu', now: { total: 43, userPercent: 31, systemPercent: 12, coreTypes: 'EEEEPPPP',
+        core0: 5, core1: 9, core2: 12, core3: 4, core4: 78, core5: 52, core6: 41, core7: 96 },
+      series: { total: ramp(20, 43), systemPercent: ramp(5, 12), userPercent: ramp(15, 31) } },
+    { id: 'ram', now: { usedPercent: 68, pressureLevel: 2, totalBytes: 34359738368, usedBytes: 23339012096,
+        appBytes: 15246721024, wiredBytes: 3328599654, compressedBytes: 2576980377, cachedBytes: 6442450944,
+        freeBytes: 6764573491, swapUsedBytes: 429496730, swapTotalBytes: 2147483648 }, series: { usedPercent: ramp(60, 68) } },
+    { id: 'gpu', now: { usage: 24, renderer: 21, tiler: 9, memInUse: 1503238553 },
+      series: { usage: ramp(10, 24), renderer: ramp(8, 21), tiler: ramp(2, 9) } },
+    { id: 'network', now: { rxBytesPerSec: 1153434, txBytesPerSec: 86016, 'rx:en0': 1153434, 'tx:en0': 86016,
+        'rx:utun3': 122880, 'tx:utun3': 4096, 'rx:awdl0': 0, 'tx:awdl0': 0, rxSessionBytes: 2469606195, txSessionBytes: 429496729 },
+      series: { rxBytesPerSec: ramp(100000, 1153434), txBytesPerSec: ramp(9000, 86016) } },
+    { id: 'sensors', now: { tempC: 50, dieMaxC: 50, dieAvgC: 44, dieCount: 20, deviceMaxC: 38, deviceAvgC: 33, deviceCount: 6,
+        thermalState: 0, fan0: 1820 }, series: { tempC: ramp(40, 50) } },
+    { id: 'battery', now: { percent: 82, charging: true, externalConnected: true, fullyCharged: false, healthPercent: 91,
+        cycleCount: 218, powerWatts: 21.5, minutesRemaining: 48, temperatureC: 31, voltageV: 12.9, fullCapacity: 5673,
+        designCapacity: 6249, adapterWatts: 94, conditionOK: true }, series: { percent: ramp(60, 82) } },
+    { id: 'disk', now: { usedPercent: 90, totalBytes: 994662584320, freeBytes: 98784247808, readBytesPerSec: 129024,
+        writeBytesPerSec: 1677721, 'vol:/': 90, 'volTotal:/': 994662584320, 'volFree:/': 98784247808,
+        'vol:/Volumes/Data': 41, 'volTotal:/Volumes/Data': 2000398934016, 'volFree:/Volumes/Data': 1180235131904 },
+      series: { readBytesPerSec: ramp(1000, 129024), writeBytesPerSec: ramp(5000, 1677721) } },
+    { id: 'system', now: { load1: 2.14, load5: 1.87, load15: 1.52, processCount: 612, uptimeSec: 356400 }, series: {} },
+  ],
+  processes: Array.from({ length: 14 }, (_, i) => ({ pid: String(i + 1), name: `Proc ${i + 1}`, cpuPercent: 40 - i * 2,
+    rssBytes: (1500 - i * 80) * 1048576, energyWatts: 0.2 })),
+  intervalSeconds: 1, prefs: { theme: 'neon' } };
+const RENDER = { cpu: 'renderCPU()', memory: 'renderMemory()', gpu: 'renderGPU()', network: 'renderNetwork()',
+  temperature: 'renderTemperature()', battery: 'renderBattery()', disk: 'renderDisk()' };
+function renderAt(id, lv, { snap = richSnap, panels } = {}) {
+  const m = JSON.parse(JSON.stringify(snap));
+  m.prefs = { theme: 'neon', ...(lv == null ? {} : { detail: { [id]: lv } }), ...(panels ? { panels } : {}) };
+  widget('metrics = ' + JSON.stringify(m)); widget(`widgetId = ${JSON.stringify(id)}`);
+  return widget(RENDER[id]);
+}
+const count = (html, re) => (html.match(re) || []).length;
+
+// Défaut = Détaillé ; valeurs hors bornes ramenées au défaut ; sélecteur à 3 segments, un seul actif.
+for (const id of Object.keys(RENDER)) {
+  const def = renderAt(id, null);
+  checkEqual(widget('level()'), 1, `${id} : niveau par défaut = Détaillé`);
+  check(count(def, /<button type="button"/g) === 3, `${id} : sélecteur à 3 segments`);
+  check(count(def, /aria-pressed="true"/g) === 1 && /class="on" aria-pressed="true" title="[^"]*" onmousedown="setDetail\(1\)"/.test(def),
+    `${id} : le segment « Détaillé » est marqué actif par défaut`);
+  check(/title="Résumé[^"]*"/.test(def) && /title="Hyper détaillé[^"]*"/.test(def), `${id} : infobulles complètes`);
+  for (const bad of [7, -1, 1.5]) { renderAt(id, bad); checkEqual(widget('level()'), 1, `${id} : niveau ${bad} hors bornes → défaut`); }
+  for (const lv of [0, 2]) {
+    const html = renderAt(id, lv);
+    check(new RegExp(`class="on" aria-pressed="true"[^>]*setDetail\\(${lv}\\)`).test(html), `${id} : segment ${lv} actif quand choisi`);
+  }
+}
+
+// Visibilité des sections par niveau : [motif, niveau minimal].
+const GATES = {
+  cpu: [[/w-cores/, 1], [/w-tile span2/, 1], [/Processus · CPU/, 1], [/w-mam/, 2], [/w-ticks/, 2], [/<em>96<\/em>/, 2], [/w-facts/, 0]],
+  memory: [[/w-split/, 1], [/w-tiles/, 1], [/Processus · mémoire/, 1], [/w-mam/, 2], [/>Système</, 2], [/w-pg/, 0]],
+  gpu: [[/w-bt/, 1], [/w-mam/, 2], [/w-f1/, 0]],
+  network: [[/class="w-if"/, 1], [/Session/, 1], [/w-mam/, 2], [/w-dual/, 0]],
+  temperature: [[/tr\/min/, 1], [/>SoC</, 1], [/capteurs SoC/, 2], [/w-mam/, 2], [/état thermique/, 0]],
+  battery: [[/w-tiles/, 1], [/tension/i, 1], [/pleine charge/, 2], [/w-mam/, 2], [/en charge/, 0]],
+  disk: [[/Volumes/, 1], [/class="w-vol"/, 1], [/utilisé/, 2], [/w-mam/, 2], [/lecture/, 0]],
+};
+for (const [id, gates] of Object.entries(GATES))
+  for (const [re, min] of gates)
+    checkEqual([0, 1, 2].map(lv => re.test(plain(renderAt(id, lv)))), [0, 1, 2].map(lv => lv >= min),
+      `${id} : ${re} visible à partir du niveau ${min}`);
+
+// Résumé compact, hyper détaillé plus long que détaillé.
+for (const id of Object.keys(RENDER)) {
+  const [a, b, c] = [0, 1, 2].map(lv => renderAt(id, lv).length);
+  check(a < b && b < c, `${id} : le contenu grandit du résumé au détaillé puis à l’hyper détaillé (${a} < ${b} < ${c})`);
+}
+
+// Listes de processus : 5 en détaillé, 10 en hyper détaillé (le 11e n'apparaît jamais).
+checkEqual(count(renderAt('cpu', 1), /class="w-br"/g), 5, 'CPU détaillé : cinq processus');
+checkEqual(count(renderAt('cpu', 2), /class="w-br w3"/g), 10, 'CPU hyper détaillé : dix processus');
+check(!/Proc 11/.test(renderAt('cpu', 2)), 'CPU hyper détaillé : pas plus de dix');
+checkEqual(count(renderAt('memory', 2), /class="w-br w3"/g), 10, 'Mémoire hyper détaillé : dix processus');
+check(/utun3/.test(renderAt('network', 2)) && !/awdl0/.test(renderAt('network', 2)), 'Réseau hyper détaillé : interfaces actives, pas les muettes');
+// Hyper détaillé CPU : valeur numérique de chaque cœur (8) ; graduations de la fenêtre (30 points à 1 Hz).
+checkEqual(count(renderAt('cpu', 2), /<em>\d+<\/em>/g), 8, 'CPU hyper détaillé : une valeur par cœur');
+check(/−29 s/.test(renderAt('cpu', 2)) && /maintenant/.test(renderAt('cpu', 2)), 'CPU hyper détaillé : graduations temporelles (−29 s … maintenant)');
+check(/>min<\/span>/.test(renderAt('cpu', 2)) && /moy\./.test(renderAt('cpu', 2)) && />max</.test(renderAt('cpu', 2)), 'hyper détaillé : min / moy. / max');
+
+// Un interrupteur explicite « off » masque toujours la section, quel que soit le niveau.
+for (const lv of [0, 1, 2]) {
+  const off = (id, panels) => renderAt(id, lv, { panels });
+  check(!/Processus · CPU/.test(off('cpu', { cpu: { processes: false } })), `niveau ${lv} : processus CPU « off » masqués`);
+  check(!/w-cores/.test(off('cpu', { cpu: { cores: false } })), `niveau ${lv} : cœurs « off » masqués`);
+  check(!/w-facts/.test(off('cpu', { cpu: { split: false } })), `niveau ${lv} : user/sys « off » masqué même au résumé`);
+  check(!/w-split/.test(off('memory', { memory: { breakdown: false } })), `niveau ${lv} : répartition mémoire « off » masquée`);
+  check(!/w-chart/.test(off('temperature', { temperature: { chart: false } })), `niveau ${lv} : courbe température « off » masquée`);
+  check(!/w-chart/.test(off('disk', { disk: { chart: false } })) && !/lecture/.test(off('disk', { disk: { chart: false } })), `niveau ${lv} : débits disque « off » masqués`);
+  check(!/Volumes/.test(off('disk', { disk: { volumes: false } })), `niveau ${lv} : volumes « off » masqués`);
+  check(!/class="w-if"/.test(off('network', { network: { interfaces: false } })), `niveau ${lv} : interfaces « off » masquées`);
+  check(!/tr\/min/.test(off('temperature', { temperature: { fans: false } })), `niveau ${lv} : ventilateurs « off » masqués`);
+  check(!/w-tiles/.test(off('battery', { battery: { stats: false, details: false } })), `niveau ${lv} : indicateurs batterie « off » masqués`);
+  check(!/w-bt/.test(off('gpu', { gpu: { stages: false } })), `niveau ${lv} : étages GPU « off » masqués`);
+}
+// … et un « on » explicite ne force pas une section au-dessus de son niveau minimal.
+check(!/Processus · CPU/.test(renderAt('cpu', 0, { panels: { cpu: { processes: true } } })), 'résumé : « on » explicite ne dépasse pas le niveau minimal');
+
+// Aucun undefined/NaN/null, aux 3 niveaux, données complètes puis partielles ou absentes.
+const sparse = JSON.parse(JSON.stringify(richSnap));
+for (const f of sparse.families) {
+  f.series = {};
+  if (f.id !== 'system') for (const k of Object.keys(f.now)) if (!['percent', 'total', 'usedPercent', 'usage', 'tempC'].includes(k)) delete f.now[k];
+}
+const bare = { families: richSnap.families.map(f => ({ id: f.id, now: {}, series: {} })), prefs: {} };
+const cleanNull = h => noJunk(h) && !/Infinity/.test(h);
+for (const id of Object.keys(RENDER)) for (const lv of [0, 1, 2]) {
+  check(cleanNull(renderAt(id, lv)), `${id} niveau ${lv} : données complètes, aucun undefined/NaN`);
+  check(cleanNull(renderAt(id, lv, { snap: sparse })), `${id} niveau ${lv} : données partielles, aucun undefined/NaN`);
+  check(cleanNull(renderAt(id, lv, { snap: bare })), `${id} niveau ${lv} : valeurs absentes, aucun undefined/NaN`);
+  check(cleanNull(renderAt(id, lv, { snap: { families: [], prefs: {} } })), `${id} niveau ${lv} : famille absente, aucun undefined/NaN`);
+}
+// Champs absents : la ligne disparaît au lieu d'afficher une valeur inventée.
+check(!/capteurs SoC|capteurs périph/.test(renderAt('temperature', 2, { snap: sparse })), 'capteurs : lignes de comptage absentes sans donnée');
+check(!/>SoC</.test(renderAt('temperature', 1, { snap: sparse })), 'capteurs : ligne SoC absente sans donnée');
+check(!/w-tiles/.test(renderAt('battery', 1, { snap: sparse })), 'batterie : aucune tuile sans donnée');
+
+// Changer de niveau : message natif, et nouvelle mesure de hauteur même si la hauteur est inchangée.
+renderAt('cpu', 1);
+widget('window.__setH(300)'); widget('pushedHeight = 0; syncPanelHeight()');
+widget('window.__sent = []');
+widget('setDetail(2)');
+const sentAfter = widget('window.__sent');
+checkEqual(sentAfter[0], { action: 'setWidgetDetail', id: 'cpu', level: 2 }, 'setDetail : le niveau part au natif avec l’identifiant du widget');
+checkEqual(widget('level()'), 2, 'setDetail : appliqué tout de suite côté page');
+check(sentAfter.some(m => m.action === 'resizeWidgetPanel' && m.height === 300), 'setDetail : la mesure repart de zéro (hauteur renvoyée même inchangée)');
+widget('window.__sent = []'); widget('setDetail(2)');
+checkEqual(widget('window.__sent.length'), 0, 'setDetail : même niveau, rien n’est envoyé');
+// Niveau poussé par le natif (prefs.detail) : même remise à zéro de la mesure.
+widget('window.__sent = []');
+widget('StatusWidget.show("cpu", ' + JSON.stringify({ ...richSnap, prefs: { theme: 'neon', detail: { cpu: 0 } } }) + ')');
+check(widget('window.__sent').some(m => m.action === 'resizeWidgetPanel'), 'niveau changé par le natif : hauteur remesurée et renvoyée');
+widget('metrics = ' + JSON.stringify(wsnap)); widget('widgetId = null');  // restaure
+
 // Échelle auto : la crête ne doit pas toucher le bord haut, sinon la courbe se lit comme saturée.
 section('widget.html — échelle des courbes sans pourcentage');
 const autoScale = widget('chart([{values:[10,50],color:"var(--chart-a)"}],{percent:false})');
-check(!/,0\.0/.test(autoScale), 'échelle auto : la crête garde de l’air au-dessus');
+// Le tracé garde 5 px de marge haute (point terminal cerclé) : « 5.0 » = bord haut du tracé.
+check(!/,5\.0[ "]/.test(autoScale), 'échelle auto : la crête garde de l’air au-dessus');
 const pctScale = widget('chart([{values:[0,100],color:"var(--chart-a)"}])');
-check(/,0\.0/.test(pctScale), 'échelle 0-100 : 100 % touche bien le haut du cadre');
+check(/,5\.0[ "]/.test(pctScale), 'échelle 0-100 : 100 % touche bien le haut du cadre');
 
 // Le tick incrémental : le natif n'envoie les séries qu'à l'ouverture d'une surface ; ensuite
 // chaque tick n'apporte que `now`, et la série glisse côté client — même sémantique que l'anneau
