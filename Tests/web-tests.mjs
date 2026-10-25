@@ -740,6 +740,27 @@ section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumul�
   checkEqual(dashboard('availability')(spark).remaining,98,'la synthèse standard ne mélange pas Spark avec le quota général');
   checkEqual(dashboard('sortedAccounts')([{...account,label:'Ancien',stale:true},account])[0].label,'Disponible','tri place les données exploitables en premier');
 }
+section('Popup : capot fermé démarrable directement');
+{
+  const strip=(lidMode)=>menubar('lidStrip')({lidMode});
+  checkEqual(strip(undefined),'','sans donnée : rien');
+  checkEqual(strip({available:false,authorized:false}),'','service indisponible : rien à proposer');
+  const idle=strip({authorized:true,active:false});
+  check(idle.includes("startLid()")&&idle.includes('Démarrer')&&idle.includes('>120<'),'autorisé et inactif : durées et bouton Démarrer');
+  check(/seg on[^>]*aria-pressed="true"[^>]*setLidMinutes\(30\)/.test(idle),'durée par défaut 30 min sélectionnée');
+  const run=strip({authorized:true,active:true,remainingSeconds:2520});
+  check(run.includes('42 min restantes')&&run.includes("send('stopLidMode')")&&!run.includes('startLid()'),'actif : temps restant et arrêt, pas de démarrage');
+  const check1=strip({authorized:true,active:false,unconfirmed:true});
+  check(check1.includes('État à vérifier')&&check1.includes('Arrêter et restaurer'),'état à vérifier : restauration proposée');
+  const auth=strip({authorized:false,active:false});
+  check(auth.includes("send('authorizeLidMode')")&&!auth.includes('startLid()'),'non autorisé : autorisation, jamais de démarrage');
+  check(strip({authorized:true,busy:true}).includes('disabled'),'occupé : bouton désactivé');
+  menubar('window.sent=[]; window.webkit={messageHandlers:{native:{postMessage:m=>window.sent.push(m)}}}');
+  menubar('setLidMinutes(60)');menubar('startLid()');
+  checkEqual(menubar('window.sent[0]'),{action:'startLidMode',minutes:60},'démarrage envoyé au natif avec la durée choisie');
+  menubar('setLidMinutes(7)');menubar('startLid()');
+  checkEqual(menubar('window.sent[1]'),{action:'startLidMode',minutes:60},'durée hors liste ignorée : la précédente est conservée');
+}
 section('Réglages : mises à jour automatiques');
 {
   const off=plain(dashboard('updateSettings')({updates:{available:false,version:'0.9.0'}}));

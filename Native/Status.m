@@ -642,7 +642,7 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
     self.statusItem.button.action = @selector(toggleStatusPopover:);
     [self installHoverTracking];
 
-    NSRect frame = NSMakeRect(0, 0, 480, MIN(640, NSScreen.mainScreen.visibleFrame.size.height - 80));  // jauges et sélecteurs de comptes, contenu défilant
+    NSRect frame = NSMakeRect(0, 0, 480, MIN(700, NSScreen.mainScreen.visibleFrame.size.height - 80));  // jauges, liste des comptes, capot fermé ; contenu défilant
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     [configuration.userContentController addScriptMessageHandler:self name:@"native"];
     self.menuWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];

@@ -160,6 +160,14 @@
   .al-row>small{color:var(--muted);text-align:right;white-space:nowrap}
   .al-row>b{text-align:right}.al-row>b.warning{color:var(--amber)}.al-row>b.critical{color:var(--danger)}
   .al-row.off>span,.al-row.off>b{color:var(--muted)}
+.lid-strip{flex:none;display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--hair-strong);background:var(--panel-bg-strong);font-size:12px}
+  .lid-strip .lid-title{color:var(--text);font-weight:700;white-space:nowrap;display:inline-block}.lid-strip .lid-title::first-letter{text-transform:uppercase}
+  .lid-strip .lid-state{flex:1;min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lid-strip .lid-state.on{color:var(--blue)}
+  /* Préfixe html : les thèmes donnent aux segments un padding large qui tronquait « 120 » en « 1… ». */
+  .lid-strip .segmented{flex:none}html .lid-strip .seg{flex:none;min-width:32px;padding:4px 6px;font-size:12px;overflow:visible;text-overflow:clip}
+  .lid-strip .lid-go{flex:none;margin:0;padding:5px 10px}
+  .lid-strip .lid-go:disabled{opacity:.5;cursor:default}
   .api-credits{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:10px 12px}
   .api-credits>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:2px}
   .api-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:7px 0;border-top:1px solid var(--hair);font-size:12px}
@@ -172,7 +180,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary data-i18n="menu.macTools"></summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><div id="fanControls"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" data-i18n-title="menu.syncTip">…</button><button class="go" onclick="send('openDashboard')" data-i18n="menu.open"></button><button onclick="send('quit')" style="color:var(--danger)" data-i18n-title="menu.quit">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><div id="lidStrip"></div><details class="mac-tools"><summary data-i18n="menu.macTools"></summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><div id="fanControls"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" data-i18n-title="menu.syncTip">…</button><button class="go" onclick="send('openDashboard')" data-i18n="menu.open"></button><button onclick="send('quit')" style="color:var(--danger)" data-i18n-title="menu.quit">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 document.querySelector('.mac-tools').addEventListener('toggle',event=>
@@ -332,6 +340,32 @@ function tools(tl){
     +btn('toggleAwake','☾',awake.active?t('menu.awakeOn'):t('menu.awake'),awake.active)
     +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?t('menu.allowAccess'):t('menu.cleaning'),lock.state==='locked');
 }
+// Capot fermé : démarrage direct depuis le popup, sans passer par le tableau de bord. Mêmes états
+// et mêmes garde-fous que Réglages › Mac (service autorisé, session active, état à vérifier) ;
+// le natif borne et revalide tout (durée entière de 1 à 240 min).
+const LID_DURATIONS=[15,30,60,120];
+let lidMinutes=30;
+try{const saved=Number(localStorage.getItem('lidMinutes'));if(LID_DURATIONS.includes(saved))lidMinutes=saved;}catch(e){}
+function setLidMinutes(m){
+  if(!LID_DURATIONS.includes(m))return;
+  lidMinutes=m;
+  try{localStorage.setItem('lidMinutes',String(m));}catch(e){}
+  if(lastData)renderMenu(lastData);
+}
+function startLid(){if(LID_DURATIONS.includes(lidMinutes))send('startLidMode',{minutes:lidMinutes});}
+function lidStrip(tl){
+  const lid=tl?.lidMode;
+  if(!lid||lid.available===false&&!lid.authorized)return '';  // machine sans le service : rien à proposer
+  const active=lid.active===true&&!lid.unconfirmed,pending=(lid.restorationPending&&!active)||lid.unconfirmed;
+  const title=`<span class="lid-title">${t('menu.lid')}</span>`;
+  const go=(action,label,extra='')=>`<button class="account-action lid-go" ${lid.busy?'disabled':''} onclick="${action}">${label}</button>${extra}`;
+  let body;
+  if(active)body=`<span class="lid-state on">${t('lid.remaining',{n:Math.ceil((lid.remainingSeconds||0)/60)})}</span>${go("send('stopLidMode')",t('lid.stopNow'))}`;
+  else if(pending)body=`<span class="lid-state">${t('lid.toCheck')}</span>${go("send('stopLidMode')",t('lid.stopRestore'))}`;
+  else if(lid.authorized)body=`<span class="segmented" role="group" aria-label="${t('lid.durationAria')}">${LID_DURATIONS.map(m=>`<button class="seg ${lidMinutes===m?'on':''}" aria-pressed="${lidMinutes===m}" onclick="setLidMinutes(${m})">${m}</button>`).join('')}</span><span class="lid-state">${t('unit.min')}</span>${go('startLid()',t('lid.start'))}`;
+  else body=`<span class="lid-state">${t('lid.authNote')}</span>${go("send('authorizeLidMode')",lid.approvalRequired?t('lid.openAuth'):t('lid.authorize'))}`;
+  return `<div class="lid-strip" style="--provider:var(--blue)">${title}${body}</div>`;
+}
 // Ventilateurs : palier (60 %, 80 %, max) et durée choisis d'un geste, sans champ à saisir. Le
 // natif borne et revalide tout ; le service vérifie la vitesse réelle et rend la main à macOS.
 let fanPercent=100,fanMinutes=15;
@@ -410,6 +444,7 @@ function renderMenu(data){
   setHTML('#notificationNotice',data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>${t('notice.title')}</span><button onclick="send('openNotificationSettings')">${t('set.title')}</button></div>`:'');
   setHTML('#providers',provider('openai','OpenAI',of('openai'),data.prefs?.providerMenuMetrics?.openai||metric)+provider('claude','Claude',of('claude'),data.prefs?.providerMenuMetrics?.claude||metric)+accountList(data.accounts)+apiCredits(data.apiAccounts));
   setHTML('#brightness',brightnessRow(data.displays));
+  setHTML('#lidStrip',lidStrip(data.tools));
   setHTML('#tools',tools(data.tools));
   setHTML('#fanControls',fanControls(data.tools));
   const sync=document.querySelector('#sync');
