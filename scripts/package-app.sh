@@ -13,7 +13,7 @@ SPARKLE="$ROOT/vendor/Sparkle"
 clang -fobjc-arc -O2 -I "$ROOT/Native" -F "$SPARKLE" -Wl,-rpath,@executable_path/../Frameworks \
   -framework Sparkle -framework Cocoa -framework WebKit -framework Security \
   -framework ServiceManagement -framework UserNotifications -framework IOKit \
-  "$ROOT/Native/Status.m" "$ROOT/Native/StatusLidClient.m" "$ROOT/Native/StatusLidProtocol.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" "$ROOT/Native/StatusApiCredits.m" \
+  "$ROOT/Native/Status.m" "$ROOT/Native/StatusLidClient.m" "$ROOT/Native/StatusLidProtocol.m" "$ROOT/Native/StatusFanCurve.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" "$ROOT/Native/StatusApiCredits.m" \
   "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusClaudeBridge.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
   "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusCost.m" \
