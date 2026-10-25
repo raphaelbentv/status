@@ -29,7 +29,7 @@ clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework Security -fr
 
 echo "── Tests des surfaces web (JavaScript) ──"
 clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit \
-  "$ROOT/Tests/fan-boost-tests.m" "$ROOT/Native/StatusFanBoost.m" -o "$BUILD/fan-boost-tests"
+  "$ROOT/Tests/fan-boost-tests.m" "$ROOT/Native/StatusFanBoost.m" "$ROOT/Native/StatusFanCurve.m" -o "$BUILD/fan-boost-tests"
 "$BUILD/fan-boost-tests"
 if command -v node >/dev/null; then
   node "$ROOT/Tests/web-tests.mjs"

@@ -131,6 +131,33 @@
   .w-mam .l{display:flex;align-items:center;gap:6px;color:var(--muted);line-height:20px}
   .w-mam b{font-weight:500;color:var(--text);text-align:right;white-space:nowrap;line-height:20px;font-size:11px}
   .w-empty{color:var(--muted);padding:14px 0;text-align:center}
+  /* Pilotage des ventilateurs (panneau Température) : sélecteur Auto / Courbe / Manuel, mêmes segments
+     que le niveau de détail ; le mode réellement en vigueur porte une pastille, le segment teinté est
+     la vue affichée. Boutons d'action pleine largeur, teintés par l'accent du widget. */
+  .w-seg.w-fm{margin:0 0 8px}
+  .w-seg button:disabled{opacity:.4;cursor:default}.w-seg button:disabled:hover{color:var(--muted)}
+  .w-seg button.cur::after{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--k);margin-left:5px;vertical-align:1px}
+  .w-frow{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;align-items:center;margin-top:6px}
+  .w-frow>span{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-frow .w-seg{margin:0}
+  .w-btn{appearance:none;display:block;width:100%;height:24px;margin:8px 0 0;padding:0 8px;border-radius:min(var(--radius),6px);cursor:pointer;
+    font:500 11px/22px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    background:color-mix(in srgb,var(--k) 18%,transparent);border:1px solid color-mix(in srgb,var(--k) 46%,transparent)}
+  .w-btn:hover{background:color-mix(in srgb,var(--k) 26%,transparent)}
+  .w-btn.ghost{background:transparent;border-color:var(--hair-strong);color:var(--muted)}.w-btn.ghost:hover{color:var(--text)}
+  .w-btn:focus-visible{outline:1px solid var(--k);outline-offset:1px}
+  .w-note{font-size:10.5px;line-height:15px;color:var(--muted);margin-top:6px}
+  .w-note.warn{color:var(--amber)}
+  svg.w-fc{display:block;width:100%;height:auto;margin-top:8px;overflow:visible}
+  .w-fc text{font:500 8.5px var(--font);fill:var(--muted)}
+  svg.w-fc+.w-kv{margin-top:4px}
+  .w-fc .z{fill:color-mix(in srgb,var(--muted) 10%,transparent)}
+  .w-fc .a{fill:color-mix(in srgb,var(--k) 14%,transparent)}
+  .w-fc .l{fill:none;stroke:var(--k);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+  .w-fc .zl{fill:none;stroke:var(--muted);stroke-width:1.2;stroke-dasharray:2 3;stroke-linecap:round}
+  .w-fc .cr{stroke:var(--danger);stroke-width:1;stroke-dasharray:2 3;opacity:.7}
+  .w-fc .g{stroke:var(--hair-strong);stroke-width:1;stroke-dasharray:1 3;stroke-linecap:round}
+  .w-fc .m{fill:var(--text);stroke:var(--bg);stroke-width:1.5}.w-fc .mh{fill:none;stroke:var(--text);stroke-opacity:.35}
   /* Popup « Regroupé » : tous les widgets activés dans un seul panneau de 300 px. L'en-tête (titre +
      sélecteur global) reste collé en haut pendant que le corps défile ; chaque widget est une carte
      compacte au niveau Résumé, une section empilée aux niveaux Détaillé et Hyper détaillé. */
@@ -459,6 +486,127 @@ function renderNetwork(){
     +(vis('interfaces',1)?sec('',`<div class="w-list">${ifRows}${inactive}</div>`):'')
     +(vis('session',1)&&n.rxSessionBytes!=null?sec(t('w.net.session'),`<div class="w-tiles">${tile(t('w.net.received'),fmtSize(n.rxSessionBytes))}${tile(t('w.net.sent'),fmtSize(n.txSessionBytes))}</div>`):''));
 }
+// ── Pilotage des ventilateurs : Auto / Courbe / Manuel ─────────────────────────
+// Toute la logique (interpolation, plancher, hystérésis, seuil critique, garde-fous) vit dans le natif
+// (StatusFanCurve) : la page ne fait qu'afficher metrics.fan — mode, palier voulu, points des
+// préréglages et valeur de chaque courbe à la température actuelle — et envoyer setFanMode.
+const FAN_MODES=['auto','curve','manual'],FAN_LEVELS=[60,80,100],FAN_DURATIONS=[15,30,60];
+// Vue affichée (segment teinté) : suit le mode réel tant que l'utilisateur n'en choisit pas une autre.
+let fanView=null,fanViewMode=null,fanPick={percent:100,minutes:15},fanPresetPick=null,fanLastOp={key:'',at:0};
+const fanData=()=>metrics?.fan||{};
+const fanSvc=()=>fanData().service||{};
+const fanBoost=()=>fanSvc().fanBoost||{};
+// Même règle que le popup quota et les Réglages : service autorisé, protocole v2, état confirmé.
+const fanServiceOK=()=>fanSvc().authorized===true&&fanBoost().version===2&&!fanSvc().unconfirmed;
+const fanMode=()=>{const m=metrics?.prefs?.fanMode??fanData().mode;return FAN_MODES.includes(m)?m:'auto'};
+const fanPresetIds=()=>Array.isArray(fanData().presetIds)?fanData().presetIds.filter(id=>Array.isArray(fanData().presets?.[id])):[];
+const fanPreset=()=>{const ids=fanPresetIds(),p=fanPresetPick||metrics?.prefs?.fanCurvePreset||fanData().preset;return ids.includes(p)?p:ids[0]||null};
+const fanLevel=p=>fin(p)?(p>=100?t('fan.max'):I.pct(Math.round(p))):'—';
+const fanMinutesLeft=b=>Math.max(1,Math.ceil((b.remainingSeconds||0)/60));
+// Un bouton est recréé à chaque tick (innerHTML) : on agit dès l'appui (mousedown) pour ne pas perdre
+// un clic à cheval sur un rendu, et on garde onclick pour le clavier ; le doublon est filtré.
+const fanAct=(op,arg='')=>`onmousedown="fanUi('${op}','${arg}')" onclick="fanUi('${op}','${arg}')"`;
+function fanUi(op,arg){
+  const key=op+':'+arg,now=Date.now();
+  if(fanLastOp.key===key&&now-fanLastOp.at<600)return;
+  fanLastOp={key,at:now};
+  if(op==='view'&&FAN_MODES.includes(arg))fanView=arg;
+  else if(op==='preset'&&fanPresetIds().includes(arg)){fanPresetPick=arg;if(fanMode()==='curve')send('setFanMode',{mode:'curve',preset:arg})}
+  else if(op==='pct'&&FAN_LEVELS.includes(+arg))fanPick.percent=+arg;
+  else if(op==='min'&&FAN_DURATIONS.includes(+arg))fanPick.minutes=+arg;
+  else if(op==='apply')send('setFanMode',{mode:'manual',percent:fanPick.percent,minutes:fanPick.minutes});
+  else if(op==='curve'&&fanPreset())send('setFanMode',{mode:'curve',preset:fanPreset()});
+  // « Revenir en auto » passe par stopFanBoost : le natif repasse le mode en Auto ET le service rend
+  // à macOS un ventilateur resté en manuel, comme le bouton « Auto Apple » du popup quota.
+  else if(op==='auto')send('stopFanBoost');
+  else if(op==='authorize')send('authorizeLidMode');
+  else return;
+  pushedHeight=0;
+  render();
+}
+// État du mode en une ligne (niveau Résumé, et ligne d'état des vues).
+function fanModeLine(){
+  const F=fanData(),b=fanBoost(),mode=fanMode(),name=id=>t('fan.curve.preset.'+id);
+  if(mode==='manual')return b.active?t('fan.mode.manualState',{level:fanLevel(b.percent),n:fanMinutesLeft(b)}):t('fan.mode.starting');
+  if(mode==='curve'){
+    // Préréglage en vigueur côté natif (pas celui qu'on prévisualise).
+    const id=fanPresetIds().includes(metrics?.prefs?.fanCurvePreset)?metrics.prefs.fanCurvePreset:F.preset,preset=name(id||'balanced');
+    if(F.reason==='critical')return t('fan.curve.critical',{level:fanLevel(100)});
+    if(F.reason==='idle'||!(F.target>0))return t('fan.curve.idle',{preset,t:F.presets?.[id]?.[0]?.[0]??'—'});
+    return b.active?t('fan.curve.state',{preset,level:fanLevel(b.percent)}):t('fan.curve.starting',{preset,level:fanLevel(F.target)});
+  }
+  return t('fan.mode.autoState');
+}
+// Niveau Résumé : le mode en quelques mots, assez court pour tenir à côté de son libellé.
+function fanSummary(){
+  const F=fanData(),b=fanBoost(),mode=fanMode();
+  if(mode==='manual')return b.active?t('fan.mode.manualShort',{level:fanLevel(b.percent),n:fanMinutesLeft(b)}):`${t('fan.mode.manual')} · ${t('fan.mode.starting')}`;
+  if(mode==='curve'){
+    const id=fanPresetIds().includes(metrics?.prefs?.fanCurvePreset)?metrics.prefs.fanCurvePreset:F.preset||'balanced';
+    const level=F.reason==='critical'?fanLevel(100):!(F.target>0)?t('fan.curve.macos'):b.active?fanLevel(b.percent):fanLevel(F.target);
+    return t('fan.curve.menu',{preset:t('fan.curve.preset.'+id),level});
+  }
+  return t('fan.mode.autoState');
+}
+// Aperçu de la courbe : 40 → 100 °C en abscisse, 40 → 100 % en ordonnée. Zone « macOS » sous le
+// premier point, plancher à 50 %, seuil critique pointillé, marqueur à la température actuelle.
+function fanCurveSVG(points,tempC,value){
+  if(!Array.isArray(points)||!points.length)return '';
+  const w=chartWidth(),h=76,T0=40,T1=100,P0=40,P1=100,top=6,bot=h-14;
+  const X=c=>4+(Math.min(T1,Math.max(T0,c))-T0)/(T1-T0)*(w-8),Y=p=>bot-(Math.min(P1,Math.max(P0,p))-P0)/(P1-P0)*(bot-top);
+  const pts=[...points,[T1,points[points.length-1][1]]].map(([c,p])=>`${X(c).toFixed(1)},${Y(p).toFixed(1)}`);
+  const x0=X(points[0][0]),line='M'+pts.join(' L'),area=`${line} L${X(T1).toFixed(1)},${bot} L${x0.toFixed(1)},${bot} Z`;
+  const grid=[50,75,100].map(p=>`<line class="g" x1="4" x2="${w-4}" y1="${Y(p).toFixed(1)}" y2="${Y(p).toFixed(1)}"/>`).join('');
+  let mark='';
+  if(fin(tempC)){const mx=X(tempC).toFixed(1),my=(fin(value)?Y(value):bot).toFixed(1);
+    mark=`<line class="g" x1="${mx}" x2="${mx}" y1="${bot}" y2="${my}"/><circle class="mh" cx="${mx}" cy="${my}" r="5"/><circle class="m" cx="${mx}" cy="${my}" r="3"/>`}
+  return `<svg class="w-fc" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${t('fan.curve.preview')}">`
+    +`<rect class="z" x="4" y="${top}" width="${Math.max(0,x0-4).toFixed(1)}" height="${bot-top}" rx="2"/>${grid}`
+    +`<line class="cr" x1="${X(95).toFixed(1)}" x2="${X(95).toFixed(1)}" y1="${top}" y2="${bot}"/>`
+    +`<path class="a" d="${area}"/><path class="zl" d="M4,${bot} L${x0.toFixed(1)},${bot}"/><path class="l" d="${line}"/>${mark}`
+    // Repères d'échelle et nom de la zone dans la bande « macOS », à gauche : la courbe et le seuil
+    // critique occupent la droite.
+    +`<text x="7" y="${(Y(100)+9).toFixed(1)}">${esc(I.pct(100))}</text><text x="7" y="${(Y(50)-3).toFixed(1)}">${esc(I.pct(50))}</text>`
+    +(x0>34?`<text x="${((4+x0)/2).toFixed(1)}" y="${((top+bot)/2+3).toFixed(1)}" text-anchor="middle">${t('fan.curve.macos')}</text>`:'')
+    +`<text x="4" y="${h-2}">40 °C</text><text x="${X(70).toFixed(1)}" y="${h-2}" text-anchor="middle">70 °C</text><text x="${X(95).toFixed(1)}" y="${h-2}" text-anchor="middle">95 °C</text></svg>`;
+}
+function fanSection(){
+  const mode=fanMode(),ok=fanServiceOK(),F=fanData(),b=fanBoost(),svc=fanSvc();
+  if(fanViewMode!==mode){fanView=null;fanViewMode=mode;fanPresetPick=null}  // le natif a changé de mode : la vue suit
+  const view=ok?(fanView||mode):'auto';
+  const seg=`<div class="w-seg w-fm" role="group" aria-label="${t('fan.mode.label')}">${FAN_MODES.map(m=>{const off=!ok&&m!=='auto';
+    return `<button type="button" class="${m===view?'on':''}${m===mode?' cur':''}" aria-pressed="${m===view}"${off?' disabled':''} title="${m===mode?t('fan.mode.current'):''}" ${fanAct('view',m)}>${t('fan.mode.'+m)}</button>`}).join('')}</div>`;
+  const back=`<button type="button" class="w-btn ghost" ${fanAct('auto')}>${t('fan.mode.backToAuto')}</button>`;
+  const state=v=>`<span class="w-ok"><i class="w-dot rd" style="background:var(--k)"></i>${v}</span>`;
+  let body='',note='';
+  if(view==='auto'){
+    body=kv(t('fan.mode.autoDesc'),mode==='auto'?state(t('fan.mode.active')):'');
+    if(mode!=='auto')body+=kv(t('fan.mode.'+mode),fanModeLine())+back;
+    else if(b.manualOutsideBoost)body+=back;
+    if(!ok){body+=`<button type="button" class="w-btn" ${fanAct('authorize')}>${svc.authorized?t('fan.updateService'):t('lid.authorize')}</button>`;note=t('fan.mode.unavailable')}
+  }else if(view==='manual'){
+    if(mode==='manual')body=kv(t('fan.mode.manual'),fanModeLine())+back;
+    else body=`<div class="w-frow"><span>${t('fan.mode.speed')}</span><div class="w-seg">${FAN_LEVELS.map(p=>`<button type="button" class="${fanPick.percent===p?'on':''}" aria-pressed="${fanPick.percent===p}" ${fanAct('pct',p)}>${fanLevel(p)}</button>`).join('')}</div></div>`
+      +`<div class="w-frow"><span>${t('fan.mode.duration')}</span><div class="w-seg">${FAN_DURATIONS.map(m=>`<button type="button" class="${fanPick.minutes===m?'on':''}" aria-pressed="${fanPick.minutes===m}" ${fanAct('min',m)}>${m} ${t('unit.min')}</button>`).join('')}</div></div>`
+      +`<button type="button" class="w-btn" ${fanAct('apply')}>${t('fan.mode.apply')}</button>`;
+    note=t('fan.mode.manualNote');
+  }else{
+    const ids=fanPresetIds(),p=fanPreset();
+    if(!p)body=`<div class="w-empty">${t('w.measuring')}</div>`;
+    else{
+      const v=F.values?.[p],temp=F.tempC;
+      body=`<div class="w-seg" role="group" aria-label="${t('fan.curve.presetLabel')}">${ids.map(id=>`<button type="button" class="${id===p?'on':''}" aria-pressed="${id===p}" ${fanAct('preset',id)}>${t('fan.curve.preset.'+id)}</button>`).join('')}</div>`
+        +fanCurveSVG(F.presets[p],temp,v)
+        +(mode==='curve'?kv(t('fan.mode.curve'),fanModeLine())+back
+          :kv(t('fan.curve.atTemp',{t:fin(temp)?Math.round(temp):'—'}),fin(v)?fanLevel(v):t('fan.curve.macos'))+`<button type="button" class="w-btn" ${fanAct('curve')}>${t('fan.curve.activate')}</button>`);
+    }
+    note=t('fan.curve.note');
+  }
+  // Retour en Auto décidé par le natif (capteur muet, service perdu, palier refusé…) : prioritaire.
+  const notice=typeof F.notice==='string'&&F.notice?t('fan.mode.notice.'+F.notice):'';
+  const svcMsg=view!=='auto'&&mode!=='auto'&&b.message&&b.message!=='Auto Apple'?I.tm(b.message):'';
+  return seg+body+`<div class="w-note${notice?' warn':''}" role="status">${esc(notice||svcMsg||note)}</div>`;
+}
 function renderTemperature(){
   const f=famGet('sensors');if(!f)return empty(t('w.sensors'));const n=f.now,L=level();
   const th=n.thermalState,T=thermalLabel(th);
@@ -479,9 +627,10 @@ function renderTemperature(){
   return popup(t('w.sensors'),tempState(th,n.tempC),
     hero(n.tempC==null?'—':Math.round(n.tempC),'°C',n.dieMaxC!=null?f1(`<span>${t('w.temp.hotspot')}</span>`):'')
     +(vis('chart',0)?chart(list,{percent:false})+(L>=2?ticks(list)+`<div style="margin-top:8px">${winTable(list,fmtDeg)}</div>`:''):'')
-    +sec('',kv(t('w.temp.state'),`<span class="w-ok ${T[1]}"><i class="w-dot rd" style="background:${T[1]==='crit'?'var(--danger)':T[1]==='warn'?'var(--amber)':'var(--green)'}"></i>${T[0]}</span>`))
+    +sec('',kv(t('w.temp.state'),`<span class="w-ok ${T[1]}"><i class="w-dot rd" style="background:${T[1]==='crit'?'var(--danger)':T[1]==='warn'?'var(--amber)':'var(--green)'}"></i>${T[0]}</span>`)
+      +(L===0&&on('fans')?kv(t('fan.mode.row'),fanSummary()):''))
     +(vis('detail',1)&&det.length?sec('',det.join('')):'')
-    +(vis('fans',1)?sec('',fanRows):''));
+    +(vis('fans',1)?sec('',fanRows)+sec(t('fan.mode.title'),fanSection()):''));
 }
 function renderBattery(){
   const f=famGet('battery');if(!f)return empty(t('w.battery'));const n=f.now,L=level();

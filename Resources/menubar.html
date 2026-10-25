@@ -373,15 +373,18 @@ const FAN_LEVELS=[60,80,100],FAN_DURATIONS=[15,30,60];
 function setFanChoice(kind,value){if(kind==='percent')fanPercent=value;else fanMinutes=value;if(lastData)renderMenu(lastData);}
 function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.includes(fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
 const fanLevelLabel=p=>p>=100?t('mon.maxCap'):I.pct(p);
+// Mode Courbe (panneau Température) : son boost court n'est pas un « Boost N min » ; « Auto Apple » le coupe aussi.
+const fanCurveLabel=(fm,f)=>t('fan.curve.menu',{preset:t('fan.curve.preset.'+(['silent','performance'].includes(fm.preset)?fm.preset:'balanced')),level:f.active?fanLevelLabel(f.percent||100):t('fan.curve.macos')});
 function fanControls(tools){
   const lid=tools?.lidMode||{},f=lid.fanBoost||{},service=lid.authorized&&f.version===2&&!lid.unconfirmed;
-  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost;
+  const fm=tools?.fanMode||{},curve=fm.mode==='curve';
+  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost||curve;
   const rpm=(f.fans||[]).map(v=>I.num(Math.round(v.rpm),0)).join(' · ');
   const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="setFanChoice('${kind}',${value})">${label}</button>`;
   let body,note=f.message?I.tm(f.message):'';
   if(needsStop){
-    const state=lid.unconfirmed?t('lid.toCheck'):active?t('mon.fanState',{state:f.verified?t('mon.boost'):t('mon.ramp'),level:fanLevelLabel(f.percent||100),n:Math.ceil((f.remainingSeconds||0)/60)}):f.manualOutsideBoost?t('mon.fanManual'):t('fan.backToCheck');
-    body=`<div class="fan-row"><span class="fan-state ${active&&f.verified?'on':''}">${state}</span><button class="account-action" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button></div>`;
+    const state=lid.unconfirmed?t('lid.toCheck'):curve?fanCurveLabel(fm,f):active?t('mon.fanState',{state:f.verified?t('mon.boost'):t('mon.ramp'),level:fanLevelLabel(f.percent||100),n:Math.ceil((f.remainingSeconds||0)/60)}):f.manualOutsideBoost?t('mon.fanManual'):t('fan.backToCheck');
+    body=`<div class="fan-row"><span class="fan-state ${(active&&f.verified)||curve?'on':''}">${state}</span><button class="account-action" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button></div>`;
     if(lid.unconfirmed)note=I.tm(lid.message||note);
   }else if(service){
     body=`<div class="fan-row"><span class="segmented">${FAN_LEVELS.map(p=>seg('percent',p,fanLevelLabel(p),fanPercent===p)).join('')}</span></div>
