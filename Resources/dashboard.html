@@ -850,14 +850,17 @@ const FAN_LEVELS=[60,80,100],FAN_DURATIONS=[15,30,60];
 const fanLevelLabel=p=>p>=100?t('fan.max'):I.pct(p);
 function setFanChoice(kind,value){if(kind==='percent')fanPercent=value;else fanMinutes=value;render();}
 function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.includes(fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
+// Mode Courbe (panneau Température) : son boost court n'est pas un « Boost N min » ; « Auto Apple » le coupe aussi.
+const fanCurveLabel=(fm,f)=>t('fan.curve.menu',{preset:t('fan.curve.preset.'+(['silent','performance'].includes(fm.preset)?fm.preset:'balanced')),level:f.active?((f.percent||100)>=100?t('fan.maxLower'):I.pct(f.percent)):t('fan.curve.macos')});
 function fanBoostSettings(data){
   const lid=data.tools?.lidMode||{},f=lid.fanBoost||{},service=lid.authorized&&f.version===2&&!lid.unconfirmed;
-  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost;
+  const fm=data.tools?.fanMode||{},curve=fm.mode==='curve';
+  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost||curve;
   const rpm=(f.fans||[]).map((v,i)=>t('fan.rpmLine',{n:i+1,rpm:I.num(Math.round(v.rpm),0)+' '+t('unit.rpm'),manual:v.mode===1?t('fan.manualSuffix'):''})).join(' · ');
   const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="setFanChoice('${kind}',${value})">${label}</button>`;
   let controls,note=f.message?I.tm(f.message):'';
   if(needsStop){
-    const state=lid.unconfirmed?t('lid.toCheck'):active?t('fan.state',{state:f.verified?t('fan.boostActive'):t('fan.rampUp'),level:(f.percent||100)>=100?t('fan.maxLower'):I.pct(f.percent),n:Math.ceil((f.remainingSeconds||0)/60)}):f.manualOutsideBoost?t('fan.leftManual'):t('fan.backToCheck');
+    const state=lid.unconfirmed?t('lid.toCheck'):curve?fanCurveLabel(fm,f):active?t('fan.state',{state:f.verified?t('fan.boostActive'):t('fan.rampUp'),level:(f.percent||100)>=100?t('fan.maxLower'):I.pct(f.percent),n:Math.ceil((f.remainingSeconds||0)/60)}):f.manualOutsideBoost?t('fan.leftManual'):t('fan.backToCheck');
     controls=`<button class="button" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button><strong>${state}</strong>`;
     if(lid.unconfirmed)note=I.tm(lid.message||note);
   }else if(service){
@@ -1388,10 +1391,11 @@ function fanPanel(rpms){
   if(!fans.length)return '';
   const rows=fans.map((fan,i)=>{const max=fan.maxRPM||0,share=max?Math.min(100,fan.rpm/max*100):0;
     return `<div class="fan-meter"><span>${t('w.temp.fanN',{n:i+1})}${fan.mode===1?' · '+t('mon.manual'):''}</span><b>${I.num(Math.round(fan.rpm),0)} ${t('unit.rpm')}</b>${max?`<div class="quota-track" style="--provider:var(--chart-a)"><i style="width:${share}%"></i></div>`:''}</div>`;}).join('');
-  const service=lid.authorized&&f.version===2&&!lid.unconfirmed,stop=f.active||f.restorationPending||f.manualOutsideBoost;
+  const fm=appData?.tools?.fanMode||{},curve=fm.mode==='curve';
+  const service=lid.authorized&&f.version===2&&!lid.unconfirmed,stop=f.active||f.restorationPending||f.manualOutsideBoost||curve;
   const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="event.stopPropagation();setFanChoice('${kind}',${value});renderMonitor()">${label}</button>`;
   const controls=!service?'':stop
-    ?`<div class="fan-actions"><strong>${f.active?t('mon.fanState',{state:f.verified?t('mon.boost'):t('mon.ramp'),level:(f.percent||100)>=100?t('mon.maxShort'):I.pct(f.percent),n:Math.ceil((f.remainingSeconds||0)/60)}):t('mon.fanManual')}</strong><button class="button" ${lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button></div>`
+    ?`<div class="fan-actions"><strong>${curve?fanCurveLabel(fm,f):f.active?t('mon.fanState',{state:f.verified?t('mon.boost'):t('mon.ramp'),level:(f.percent||100)>=100?t('mon.maxShort'):I.pct(f.percent),n:Math.ceil((f.remainingSeconds||0)/60)}):t('mon.fanManual')}</strong><button class="button" ${lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button></div>`
     :`<div class="fan-actions"><div class="segmented">${FAN_LEVELS.map(p=>seg('percent',p,p>=100?t('mon.maxCap'):I.pct(p),fanPercent===p)).join('')}</div><div class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' '+t('unit.min'),fanMinutes===m)).join('')}</div><button class="button" ${lid.busy?'disabled':''} onclick="startFanBoost()">${t('mon.boost')}</button></div>`;
   return `<div class="fan-panel">${rows}${controls}</div>`;
 }
