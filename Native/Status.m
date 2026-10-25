@@ -810,8 +810,11 @@ static const CGFloat TMWidgetPanelDefaultHeight = 220;
 - (NSDictionary *)widgetMetricsPayload {
     NSMutableDictionary *payload = [[self.systemMonitor snapshot] mutableCopy];
     payload[@"prefs"] = @{ @"theme": [NSUserDefaults.standardUserDefaults stringForKey:@"theme"] ?: @"blueprint",
-                           @"panels": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{} };
+                           @"panels": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetPanelConfig"] ?: @{},
+                           // widgetId → niveau de détail du panneau (0 résumé, 1 détaillé, 2 hyper détaillé).
+                           @"detail": [NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{} };
     payload[@"processes"] = self.topProcesses ?: @[];  // top consommateurs, pour les panneaux CPU/Mémoire
+    payload[@"intervalSeconds"] = @([self metricsInterval]);  // cadence des séries : graduations du niveau « hyper détaillé »
     return payload;
 }
 
@@ -1522,6 +1525,19 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             [self pushData];
         }
     }
+    // Niveau de détail d'un panneau d'info (0 résumé · 1 détaillé · 2 hyper détaillé), mémorisé par
+    // widget dans widgetDetail. Identifiant limité aux widgets système, niveau borné à 0…2.
+    if ([action isEqualToString:@"setWidgetDetail"]) {
+        NSString *wid = [body[@"id"] isKindOfClass:NSString.class] ? body[@"id"] : nil;
+        if (wid && [TMMenuBarWidgetIDs() containsObject:wid] && !TMWidgetUsesAccounts(wid)
+            && [body[@"level"] isKindOfClass:NSNumber.class]) {
+            NSInteger level = MAX(0, MIN(2, [body[@"level"] integerValue]));
+            NSMutableDictionary *detail = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"widgetDetail"] ?: @{}) mutableCopy];
+            detail[wid] = @(level);
+            [NSUserDefaults.standardUserDefaults setObject:detail forKey:@"widgetDetail"];
+            [self pushWidgetMetrics];  // rafraîchit le panneau ouvert au nouveau niveau
+        }
+    }
     // Alerte système : activation et/ou seuil. Le seuil est borné pour rester utile — une alerte
     // température à 5 °C ou un disque à 300 % ne préviendrait de rien.
     if ([action isEqualToString:@"setAlert"]) {
@@ -2073,7 +2089,7 @@ static NSDictionary *TMAlertDefaults(void) {
     }
     if (processSample && self.previousProcessSample) {
         self.topProcesses = TMTopProcesses(self.previousProcessSample, processSample,
-                                           now - self.previousProcessAt, 8);
+                                           now - self.previousProcessAt, 10);  // 10 : le niveau « hyper détaillé » des panneaux en liste dix
     }
     self.previousProcessSample = processSample;
     self.previousProcessAt = now;
