@@ -308,6 +308,7 @@
  "m.tooltip.remaining": "{provider} · {label} · {short}: {v} % restante",
  "m.tooltip.unavailable": "{provider} · cuota no disponible",
  "menu.account": "Cuenta {name}",
+ "menu.accountList": "Cuentas · semana restante",
  "menu.addAccount": "añadir cuenta",
  "menu.allowAccess": "permitir acceso",
  "menu.awake": "reposo",

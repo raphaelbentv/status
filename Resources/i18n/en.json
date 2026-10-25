@@ -308,6 +308,7 @@
  "m.tooltip.remaining": "{provider} · {label} · {short}: {v}% left",
  "m.tooltip.unavailable": "{provider} · quota unavailable",
  "menu.account": "{name} account",
+ "menu.accountList": "Accounts · weekly left",
  "menu.addAccount": "add account",
  "menu.allowAccess": "allow access",
  "menu.awake": "stay awake",

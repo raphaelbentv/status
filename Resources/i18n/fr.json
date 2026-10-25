@@ -308,6 +308,7 @@
  "m.tooltip.remaining": "{provider} · {label} · {short} : {v} % restant",
  "m.tooltip.unavailable": "{provider} · quota indisponible",
  "menu.account": "Compte {name}",
+ "menu.accountList": "Comptes · reste hebdo",
  "menu.addAccount": "ajouter un compte",
  "menu.allowAccess": "autoriser l’accès",
  "menu.awake": "veille",
