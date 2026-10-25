@@ -253,14 +253,17 @@ static void TMWriteSystemStatusItemPref(NSString *key, id value) {
     CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
 }
 
-static NSAttributedString *TMMenuBarTitle(NSString *text, NSString *widthTemplate, TMSeverity severity, CGFloat scale) {
+static NSAttributedString *TMMenuBarTitle(NSString *text, NSString *widthTemplate, TMSeverity severity, CGFloat scale,
+                                          NSColor *chosenColor) {
     // Le titre suit la taille des icônes (Réglages › Affichage) : 12 pt à l'échelle 1, arrondi au demi-point.
     NSMutableDictionary *attributes = [@{
         NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:TMMenuBarTitleFontSize(scale) weight:NSFontWeightMedium]
     } mutableCopy];
     // En régime normal, laisser macOS choisir la couleur du texte (thème, survol, contraste réduit).
     // On ne l'impose qu'en alerte, pour l'accorder à l'anneau.
+    // `chosenColor` : la couleur du widget quand la valeur est seule (aucune image pour la porter).
     if (severity != TMSeverityNormal) attributes[NSForegroundColorAttributeName] = TMSeverityColor(severity);
+    else if (chosenColor) attributes[NSForegroundColorAttributeName] = chosenColor;
     return TMTitleWithReservedWidth(text, widthTemplate, attributes);
 }
 
@@ -1010,22 +1013,29 @@ static NSString *const TMGroupedWidgetId = @"grouped";  // identifiant du pannea
         NSString *shape = [style[@"shape"] isKindOfClass:NSString.class] ? style[@"shape"] : nil;
         NSString *color = [style[@"color"] isKindOfClass:NSString.class] ? style[@"color"] : nil;
         CGFloat scale = [self menuBarIconScale], spacing = [self menuBarIconSpacing];
-        NSDictionary *signature = TMWidgetRenderSignatureWithLayout(readout, shape, color, scale, spacing);
+        // Icône et valeur indépendantes (« display ») : le plan dit quelle image et quel titre montrer.
+        NSString *display = TMWidgetDisplayFromValue(style[@"display"]);
+        NSDictionary *signature = TMWidgetRenderSignatureForDisplay(readout, shape, color, display, scale, spacing);
         if ([self.widgetSignatures[wid] isEqual:signature]) return;  // mêmes pixels : rien à redessiner
         self.widgetSignatures[wid] = signature;
-        item.button.image = TMMenuBarImageWithLayout(TMWidgetImageStyled(readout, shape, color), scale, spacing);
-        // Le titre système (valeur à côté) n'accompagne que les formes « graphe/jauge » ; les formes
-        // qui portent déjà leur texte (twoLine/battery/text) n'ont pas de titre séparé.
-        BOOL shapeCarriesText = TMWidgetShapeCarriesText(readout, shape);
-        NSString *title = shapeCarriesText ? @"" : readout[@"title"];
+        NSDictionary *plan = TMWidgetDisplayPlan(readout, shape, display);
+        NSString *imageShape = plan[@"imageShape"], *title = plan[@"title"];
+        // Image : absente en « valeur seule ». Titre système : formes graphiques en « auto », la valeur
+        // en « valeur seule » / « icône + valeur » ; les formes qui portent déjà leur texte n'en ont pas.
+        item.button.image = [imageShape length]
+            ? TMMenuBarImageWithLayout(TMWidgetImageStyled(readout, imageShape, color), scale, spacing) : nil;
         if ([title length]) {
-            item.button.attributedTitle = TMMenuBarTitle(title, readout[@"valueTemplate"],
-                                                         (TMSeverity)[readout[@"severity"] integerValue], scale);
-            item.button.imagePosition = NSImageLeading;
+            NSColor *chosen = [plan[@"display"] isEqual:@"value"] ? TMWidgetNamedColor(color) : nil;
+            NSAttributedString *text = TMMenuBarTitle(title, plan[@"titleTemplate"],
+                                                      (TMSeverity)[readout[@"severity"] integerValue], scale, chosen);
+            // Sans image, la marge d'espacement des Réglages se pose autour du texte.
+            item.button.attributedTitle = [imageShape length] ? text : TMTitleWithSpacing(text, spacing);
+            item.button.imagePosition = [imageShape length] ? NSImageLeading : NSNoImage;
         } else {
             item.button.attributedTitle = [[NSAttributedString alloc] initWithString:@""];
             item.button.imagePosition = NSImageOnly;
         }
+        item.button.accessibilityLabel = TMMenuBarWidgetLabel(wid);
         item.button.image.accessibilityDescription = TMMenuBarWidgetLabel(wid);
     }];
 }
@@ -1631,11 +1641,14 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             NSMutableDictionary *config = [([NSUserDefaults.standardUserDefaults dictionaryForKey:@"menuBarWidgetConfig"] ?: @{}) mutableCopy];
             NSMutableDictionary *one = [([config[wid] isKindOfClass:NSDictionary.class] ? config[wid] : @{}) mutableCopy];
             if ([body[@"shape"] isKindOfClass:NSString.class]) one[@"shape"] = body[@"shape"];
+            // Icône et/ou valeur : liste blanche (auto, both, icon, value) ; toute autre valeur est ignorée.
+            if (TMWidgetDisplayIsAllowed(body[@"display"])) one[@"display"] = body[@"display"];
             // Nom de palette, « #RRGGBB » ou « auto » ; toute autre valeur est ignorée.
             NSString *color = TMWidgetNormalizedColor(body[@"color"], YES);
             if (color) one[@"color"] = color;
             config[wid] = one;
             [NSUserDefaults.standardUserDefaults setObject:config forKey:@"menuBarWidgetConfig"];
+            [self.widgetSignatures removeObjectForKey:wid];  // forcer le redessin de ce widget
             [self refreshQuotaWidgetFamilies];        // la forme choisie décide si la série est lue
             [self updateMenuBarWidgetsFromMonitor];  // redessine tout de suite avec le nouveau style
             [self pushData];
