@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+plist=/Library/LaunchDaemons/com.raphael.status.lid-service.plist
+helper=/Library/PrivilegedHelperTools/com.raphael.status.lid-helper
+/usr/bin/codesign --verify --strict "$helper"
+/bin/launchctl bootstrap system "$plist"
+# Un enregistrement sans processus n'est pas une installation fonctionnelle.
+tries=0
+while [ "$tries" -lt 10 ]; do
+  if /bin/launchctl print system/com.raphael.status.lid-service | /usr/bin/grep -Eq 'pid = [1-9][0-9]*'; then
+    echo 'Service Status démarré. Aucune session capot fermé activée.'
+    exit 0
+  fi
+  tries=$((tries + 1))
+  /bin/sleep 1
+done
+/bin/launchctl bootout system/com.raphael.status.lid-service || true
+echo 'Le service ne démarre pas. Installation non confirmée ; aucun réglage de veille modifié.' >&2
+exit 1

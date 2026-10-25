@@ -53,9 +53,142 @@ NSString *TMQuotaWindowLabel(long long minutes) {
 NSDictionary *TMDisconnectedOpenAIAccount(NSString *error) {
     return @{
         @"connected": @NO, @"connecting": @NO, @"email": @"", @"plan": @"",
-        @"windows": @[], @"availableCredits": @0, @"source": @"Codex app-server",
+        @"windows": @[], @"manualReset": @{@"status": @"unknown"}, @"source": @"Codex app-server",
         @"error": error ?: @""
     };
+}
+
+static NSNumber *TMFiniteCreditNumber(id value) {
+    if ([value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) return nil;
+    if (![value isKindOfClass:NSNumber.class] && ![value isKindOfClass:NSString.class]) return nil;
+    NSScanner *scanner = [NSScanner scannerWithString:[value description]];
+    scanner.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    double number = 0;
+    return [scanner scanDouble:&number] && scanner.isAtEnd && isfinite(number) ? @(number) : nil;
+}
+
+NSDictionary *TMOpenAIExtraCredits(NSDictionary *snapshot) {
+    NSDictionary *raw = [snapshot[@"credits"] isKindOfClass:NSDictionary.class] ? snapshot[@"credits"] : nil;
+    if (!raw) return @{@"status": @"unknown"};
+    NSMutableDictionary *out = [@{@"status": @"known", @"unit": @"credits",
+        @"observedAt": @((long long)NSDate.date.timeIntervalSince1970)} mutableCopy];
+    if ([raw[@"unlimited"] isKindOfClass:NSNumber.class]) out[@"unlimited"] = @([raw[@"unlimited"] boolValue]);
+    if ([raw[@"hasCredits"] isKindOfClass:NSNumber.class]) out[@"hasCredits"] = @([raw[@"hasCredits"] boolValue]);
+    NSNumber *balance = TMFiniteCreditNumber(raw[@"balance"]);
+    if (balance) out[@"balance"] = balance;
+    if (!balance && ![out[@"unlimited"] boolValue] && !out[@"hasCredits"]) out[@"status"] = @"unknown";
+    return out;
+}
+
+static NSTimeInterval TMParseBillingDate(id value) {
+    if ([value isKindOfClass:NSNumber.class]) { double t=[value doubleValue]; return t>1e11?t/1000:t; }
+    if (![value isKindOfClass:NSString.class] || ![value length]) return 0;
+    static NSISO8601DateFormatter *full, *plain, *day;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        full=[NSISO8601DateFormatter new]; full.formatOptions=NSISO8601DateFormatWithInternetDateTime|NSISO8601DateFormatWithFractionalSeconds;
+        plain=[NSISO8601DateFormatter new]; plain.formatOptions=NSISO8601DateFormatWithInternetDateTime;
+        day=[NSISO8601DateFormatter new]; day.formatOptions=NSISO8601DateFormatWithFullDate;
+    });
+    NSDate *date=[full dateFromString:value] ?: [plain dateFromString:value] ?: [day dateFromString:value];
+    return date ? date.timeIntervalSince1970 : 0;
+}
+
+NSDictionary *TMBillingFromPeriod(NSTimeInterval periodEnd, NSString *plan, NSTimeInterval now) {
+    if (!(periodEnd > 946684800)) return @{@"status":@"unknown"};
+    NSDate *next=[NSDate dateWithTimeIntervalSince1970:periodEnd];
+    BOOL estimated=NO;
+    NSCalendar *calendar=[NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+    calendar.timeZone=[NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+    for (NSInteger months=1; next.timeIntervalSince1970<=now && months<=24; months++) {
+        next=[calendar dateByAddingUnit:NSCalendarUnitMonth value:months toDate:[NSDate dateWithTimeIntervalSince1970:periodEnd] options:0];
+        estimated=YES;
+    }
+    if (next.timeIntervalSince1970<=now) return @{@"status":@"unknown"};
+    NSMutableDictionary *billing=[@{@"status":@"known", @"nextAt":@((long long)next.timeIntervalSince1970), @"estimated":@(estimated)} mutableCopy];
+    if ([plan isKindOfClass:NSString.class] && plan.length) billing[@"plan"]=plan;
+    return billing;
+}
+
+NSDictionary *TMOpenAIBillingFromIDToken(NSString *idToken, NSTimeInterval now) {
+    NSArray *parts=[idToken isKindOfClass:NSString.class] ? [idToken componentsSeparatedByString:@"."] : @[];
+    if (parts.count<2) return @{@"status":@"unknown"};
+    NSMutableString *payload=[[[parts[1] stringByReplacingOccurrencesOfString:@"-" withString:@"+"]
+        stringByReplacingOccurrencesOfString:@"_" withString:@"/"] mutableCopy];
+    while (payload.length%4) [payload appendString:@"="];
+    NSData *data=[[NSData alloc] initWithBase64EncodedString:payload options:0];
+    NSDictionary *claims=data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSDictionary *auth=[claims isKindOfClass:NSDictionary.class] ? claims[@"https://api.openai.com/auth"] : nil;
+    if (![auth isKindOfClass:NSDictionary.class]) return @{@"status":@"unknown"};
+    return TMBillingFromPeriod(TMParseBillingDate(auth[@"chatgpt_subscription_active_until"]), auth[@"chatgpt_plan_type"], now);
+}
+
+NSDictionary *TMClaudeBillingFromSubscription(id json, NSTimeInterval now) {
+    if (![json isKindOfClass:NSDictionary.class]) return @{@"status":@"unknown"};
+    // Forme non documentée : on accepte les noms usuels, à plat ou sous « subscription ».
+    NSArray *containers=@[json, [json[@"subscription"] isKindOfClass:NSDictionary.class] ? json[@"subscription"] : @{}];
+    for (NSDictionary *container in containers)
+        for (NSString *key in @[@"next_charge_date", @"next_billing_date", @"current_period_end", @"renewal_date", @"renews_at", @"period_end"]) {
+            NSTimeInterval t=TMParseBillingDate(container[key]);
+            if (t>0) {
+                return TMBillingFromPeriod(t, [container[@"plan"] isKindOfClass:NSString.class] ? container[@"plan"] : nil, now);
+            }
+        }
+    return @{@"status":@"unknown"};
+}
+
+NSArray *TMResetCreditDetails(id raw) {
+    if (![raw isKindOfClass:NSArray.class]) return nil;  // nil = détail non fourni, distinct de « aucun »
+    NSMutableArray *credits = [NSMutableArray array];
+    for (NSDictionary *credit in raw) {
+        if (![credit isKindOfClass:NSDictionary.class]) continue;
+        if ([credit[@"status"] isKindOfClass:NSString.class] && ![credit[@"status"] isEqual:@"available"]) continue;
+        NSMutableDictionary *row = [NSMutableDictionary dictionary];
+        id expires = credit[@"expiresAt"];
+        if ([expires isKindOfClass:NSNumber.class] && [expires doubleValue] > 0) row[@"expiresAt"] = @([expires longLongValue]);
+        for (NSString *key in @[@"title", @"resetType"])
+            if ([credit[key] isKindOfClass:NSString.class] && [credit[key] length]) row[key] = credit[key];
+        [credits addObject:row];
+    }
+    // Le premier à expirer d'abord ; un crédit sans expiration passe en dernier.
+    [credits sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        double x = a[@"expiresAt"] ? [a[@"expiresAt"] doubleValue] : INFINITY, y = b[@"expiresAt"] ? [b[@"expiresAt"] doubleValue] : INFINITY;
+        return x < y ? NSOrderedAscending : x > y ? NSOrderedDescending : NSOrderedSame;
+    }];
+    return credits;
+}
+
+NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSDictionary *grant) {
+    NSDictionary *extra = [usage[@"extra_usage"] isKindOfClass:NSDictionary.class] ? usage[@"extra_usage"] : @{};
+    NSDictionary *source = [spend isKindOfClass:NSDictionary.class] && spend.count ? spend : extra;
+    NSMutableDictionary *out = [@{@"status": @"unknown", @"unit": @"money"} mutableCopy];
+    NSDictionary *structured = [grant[@"balance"] isKindOfClass:NSDictionary.class] ? grant[@"balance"] : @{};
+    NSDictionary *money = [structured[@"money"] isKindOfClass:NSDictionary.class] ? structured[@"money"] : @{};
+    NSNumber *minor = TMFiniteCreditNumber(money[@"amount_minor"]);
+    NSNumber *exponent = TMFiniteCreditNumber(money[@"exponent"]);
+    NSNumber *balance = nil;
+    if (minor && exponent && exponent.doubleValue >= 0 && exponent.doubleValue <= 6 && floor(exponent.doubleValue) == exponent.doubleValue)
+        balance = @(minor.doubleValue / pow(10, exponent.doubleValue));
+    else {
+        // Ancien format claude.ai : amount/remaining_balance sont des unités monétaires mineures.
+        NSNumber *legacy = TMFiniteCreditNumber(grant[@"amount"] ?: grant[@"remaining_balance"]);
+        if (legacy) balance = @(legacy.doubleValue / 100.0);
+    }
+    NSNumber *used = TMFiniteCreditNumber(source[@"used_credits"]);
+    NSNumber *limit = TMFiniteCreditNumber(source[@"monthly_credit_limit"] ?: source[@"monthly_limit"]);
+    if (balance) out[@"balance"] = balance;
+    if (used) out[@"used"] = @(used.doubleValue / 100.0);
+    if (limit) out[@"monthlyLimit"] = @(limit.doubleValue / 100.0);
+    if ([source[@"is_enabled"] isKindOfClass:NSNumber.class]) out[@"enabled"] = @([source[@"is_enabled"] boolValue]);
+    NSString *balanceCurrency = [money[@"currency"] isKindOfClass:NSString.class] ? money[@"currency"] : grant[@"currency"];
+    if ([balanceCurrency isKindOfClass:NSString.class] && balanceCurrency.length == 3) out[@"balanceCurrency"] = balanceCurrency.uppercaseString;
+    NSString *currency = source[@"currency"];
+    if ([currency isKindOfClass:NSString.class] && currency.length == 3) out[@"currency"] = currency.uppercaseString;
+    if (balance || used || limit || out[@"enabled"]) {
+        out[@"status"] = @"known";
+        out[@"observedAt"] = @((long long)NSDate.date.timeIntervalSince1970);
+    }
+    return out;
 }
 
 NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateResponse, BOOL connecting, NSString *error) {
@@ -106,12 +239,24 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
         }
     }
     NSDictionary *creditSummary = [rateResponse[@"rateLimitResetCredits"] isKindOfClass:NSDictionary.class] ? rateResponse[@"rateLimitResetCredits"] : nil;
-    NSInteger credits = TMInteger(creditSummary[@"availableCount"]);
+    id rawCredits = creditSummary[@"availableCount"];
+    BOOL creditsKnown = [rawCredits isKindOfClass:NSNumber.class] &&
+        CFGetTypeID((__bridge CFTypeRef)rawCredits) != CFBooleanGetTypeID() &&
+        [rawCredits doubleValue] >= 0 && isfinite([rawCredits doubleValue]);
+    NSInteger credits = creditsKnown ? [rawCredits integerValue] : 0;
+    NSMutableDictionary *manualReset = creditsKnown && !error.length
+        ? [@{@"status": credits > 0 ? @"available" : @"none", @"count": @(credits),
+            @"observedAt": @((long long)NSDate.date.timeIntervalSince1970)} mutableCopy]
+        : [@{@"status": @"unknown"} mutableCopy];
+    NSArray *details = TMResetCreditDetails(creditSummary[@"credits"]);
+    if (creditsKnown && details) manualReset[@"credits"] = details;
     return @{
         @"connected": @(connected), @"connecting": @(connecting),
         @"email": connected && [account[@"email"] isKindOfClass:NSString.class] ? account[@"email"] : @"",
         @"plan": connected && [account[@"planType"] isKindOfClass:NSString.class] ? account[@"planType"] : @"",
-        @"windows": windows, @"availableCredits": @(credits), @"source": @"Codex app-server",
+        @"windows": windows, @"manualReset": manualReset,
+        @"extraCredits": error.length ? @{@"status":@"unknown"} : TMOpenAIExtraCredits(root ?: byID[@"codex"]),
+        @"source": @"Codex app-server",
         @"error": error ?: @""
     };
 }
@@ -119,7 +264,7 @@ NSDictionary *TMOpenAIAccountPayload(NSDictionary *account, NSDictionary *rateRe
 NSDictionary *TMEmptyClaudeAccount(void) {
     return @{
         @"windows": @[], @"capturedAt": @0, @"stale": @NO, @"liveSource": @NO,
-        @"cookieConfigured": @NO, @"orgId": @"", @"error": @""
+        @"cookieConfigured": @NO, @"orgId": @"", @"manualReset": @{@"status": @"unknown"}, @"error": @""
     };
 }
 
@@ -348,9 +493,38 @@ NSString *TMHistoryToCSV(NSArray *history) {
 }
 
 NSArray *TMLoadHistory(void) {
-    NSData *data = [NSData dataWithContentsOfFile:TMHistoryPath()];
+    // Appelé à chaque rafraîchissement d'interface (plusieurs fois par minute) sur un fichier de
+    // l'ordre du Mo : on ne le relit et ne le réanalyse que s'il a changé sur disque.
+    static NSArray *cached; static NSDate *cachedDate; static unsigned long long cachedSize;
+    static NSString *cachedPath;
+    NSString *path = TMHistoryPath();
+    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
+    NSDate *date = attributes.fileModificationDate; unsigned long long size = attributes.fileSize;
+    @synchronized (NSFileManager.class) {
+        if (cached && date && [date isEqual:cachedDate] && size == cachedSize && [path isEqual:cachedPath]) return cached;
+    }
+    NSData *data = [NSData dataWithContentsOfFile:path];
     NSArray *history = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    return [history isKindOfClass:NSArray.class] ? history : @[];
+    history = [history isKindOfClass:NSArray.class] ? history : @[];
+    @synchronized (NSFileManager.class) { cached = history; cachedDate = date; cachedSize = size; cachedPath = path; }
+    return history;
+}
+
+NSArray *TMHistoryForDisplay(NSArray *history, NSTimeInterval now) {
+    if (![history isKindOfClass:NSArray.class]) return @[];
+    NSMutableArray *out = [NSMutableArray array];
+    long long lastBucket = LLONG_MIN;
+    for (NSDictionary *point in history) {
+        if (![point isKindOfClass:NSDictionary.class]) continue;
+        double t = [point[@"t"] doubleValue];
+        if (t >= now - 3 * 3600) { [out addObject:point]; continue; }
+        long long bucket = (long long)floor(t / 1200);
+        // Le dernier point d'une tranche remplace le précédent : la courbe garde l'état le plus récent.
+        if (bucket == lastBucket && out.count) out[out.count - 1] = point;
+        else [out addObject:point];
+        lastBucket = bucket;
+    }
+    return out;
 }
 
 #pragma mark - Clés d'historique par compte
@@ -485,6 +659,18 @@ static NSDictionary *TMAggregate(NSArray *accounts, NSString *provider, NSString
     return out;
 }
 
+NSString *TMProviderMenuMetric(NSString *provider, NSDictionary *selections, NSString *legacyMetric) {
+    NSString *aggregate=[provider stringByAppendingString:@":weekly"];
+    for (id candidate in @[selections[provider] ?: NSNull.null, legacyMetric ?: NSNull.null]) {
+        if (![candidate isKindOfClass:NSString.class]) continue;
+        NSArray *parts=[candidate componentsSeparatedByString:@":"];
+        BOOL pinned=parts.count==4 && [parts[0] isEqual:@"acct"] && [parts[1] isEqual:provider] && [parts[2] length]>0;
+        BOOL grouped=parts.count==2 && [parts[0] isEqual:provider];
+        if ((pinned || grouped) && [@[@"weekly",@"session",@"weekly-fable"] containsObject:parts.lastObject]) return candidate;
+    }
+    return aggregate;
+}
+
 NSDictionary *TMResolveMenuBarMetric(NSString *metric, NSArray *accounts) {
     if (![accounts isKindOfClass:NSArray.class]) accounts = @[];
     NSString *value = metric.length ? metric : @"claude:weekly";
@@ -496,9 +682,12 @@ NSDictionary *TMResolveMenuBarMetric(NSString *metric, NSArray *accounts) {
             NSString *kind = [[parts subarrayWithRange:NSMakeRange(3, parts.count - 3)]
                               componentsJoinedByString:@":"];
             NSDictionary *pinned = TMBestForKind(accounts, kind, ^BOOL(NSDictionary *account) {
-                return [account[@"accountId"] isEqualToString:accountId];
+                return [account[@"provider"] isEqual:provider] && [account[@"accountId"] isEqualToString:accountId];
             });
             if (pinned) return pinned;
+            // Un compte présent sans quota ne doit pas emprunter le chiffre d'un autre.
+            for (NSDictionary *account in accounts)
+                if ([account[@"provider"] isEqual:provider] && [account[@"accountId"] isEqual:accountId]) return nil;
             // Compte supprimé, ou qui n'a pas encore de fenêtre : l'agrégat de son fournisseur dit
             // encore quelque chose de vrai, là où un tiret permanent ne dirait rien.
             return TMAggregate(accounts, provider, kind);
@@ -581,8 +770,9 @@ NSArray *TMAppendHistory(NSArray *pairs, long long now) {
 
     NSMutableArray *history = [TMLoadHistory() mutableCopy];
     NSDictionary *last = history.lastObject;
-    // Coalesce: don't record a new row if <2 min since the previous one (double refresh, wake, etc.).
-    if (![last isKindOfClass:NSDictionary.class] || now - TMInteger(last[@"t"]) >= 120) {
+    // La collecte peut tourner toutes les 30-60 s, mais 2000 points à 5 min gardent une semaine
+    // de graphe. Ne pas remplir le budget avec des relevés redondants à chaque sondage.
+    if (![last isKindOfClass:NSDictionary.class] || now - TMInteger(last[@"t"]) >= 300) {
         [history addObject:@{@"t": @(now), @"p": points}];
         while (history.count > 2000) [history removeObjectAtIndex:0];
         NSData *data = [NSJSONSerialization dataWithJSONObject:history options:0 error:nil];

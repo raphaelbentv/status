@@ -20,6 +20,13 @@ extern NSArray<NSString *> *TMMenuBarWidgetIDs(void);
 // vient des familles quota injectées dans le snapshot, pas du moniteur système.
 BOOL TMWidgetIsQuota(NSString *widgetId);
 
+// Un widget de crédit API (« anthropicApi » / « openaiApi ») : famille injectée par Status.m avec
+// { text, fraction, severity, template } déjà calculés.
+BOOL TMWidgetIsApi(NSString *widgetId);
+// Quota ou crédit API : la donnée vient des comptes, pas du moniteur système, et le clic ouvre le
+// popover des comptes.
+BOOL TMWidgetUsesAccounts(NSString *widgetId);
+
 // Libellé lisible d'un widget (pour les Réglages).
 NSString *TMMenuBarWidgetLabel(NSString *widgetId);
 

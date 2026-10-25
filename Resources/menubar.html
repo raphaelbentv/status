@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="themes.css">
+<script src="i18n.js"></script>
+<link rel="stylesheet" href="themes/moderne.css">
+<link rel="stylesheet" href="themes/dark.css">
+<link rel="stylesheet" href="themes/neon.css">
+<link rel="stylesheet" href="themes/bento.css">
+<link rel="stylesheet" href="themes/widget.css">
 <style>
   /* Le thème actif vient de themes.css ([data-theme] sur <html>, poussé par renderMenu()) ;
      cyan = OpenAI, violet = Claude reste la convention par défaut, mais chaque thème peut
@@ -22,37 +28,23 @@
      rangée commune, si bien que les lignes se comparent à l'horizontale. Claude a des sous-jauges
      qu'OpenAI n'a pas ; la rangée existe des deux côtés et reste vide en face au lieu de décaler
      tout ce qui suit. La huitième rangée, sans contenu, absorbe le vide restant. */
-  .providers{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(7,auto) 1fr;
     flex:1;min-height:0;overflow-y:auto}
-  .cell{background:var(--panel-bg);padding:0 16px;min-width:0;text-align:center}
-  .c1{grid-column:1}
-  .c2{grid-column:2;border-left:1px solid var(--hair)}
-  .r1{grid-row:1;padding-top:16px;border-top:2px solid var(--provider)}
-  .r2{grid-row:2}.r3{grid-row:3}.r4{grid-row:4}.r5{grid-row:5}.r6{grid-row:6}
-  .r7{grid-row:7;padding-bottom:14px}
-  .r8{grid-row:8}
-  .name{font-size:12px;color:var(--provider);font-weight:700;margin-bottom:8px;text-transform:lowercase;letter-spacing:.06em;text-shadow:var(--value-glow,none)}
   /* Nom du compte retenu, quand il y en a plusieurs : sans lui le chiffre ne dit pas de qui il parle. */
-  .name-sub{display:block;color:var(--muted);font-weight:500;letter-spacing:0;text-transform:none;font-size:12px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .value .unit{font-size:.42em;margin-left:.08em;opacity:.65;font-weight:400}
   .value{font-size:44px;line-height:1;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--provider);text-shadow:var(--value-glow,none)}
-  .window{font-size:13px;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
   .reset{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:5px}
-  .subgauge{border-top:1px solid var(--hair);margin-top:14px;padding-top:12px;text-align:left}
-  .subgauge-head{display:flex;justify-content:space-between;align-items:baseline;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
-  .subgauge-head strong{font-size:13px;color:var(--provider);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;text-shadow:var(--value-glow,none)}
   /* Même trame que la fenêtre principale : une mesure, pas une progression — hachure par
      défaut (blueprint/phosphore), qu'un thème peut remplacer par un aplat ou un dégradé
      (voir themes.css). --provider est réellement hérité ici, contrairement à un alias
      --rail-fill qui figerait var(--provider) invalide à son propre niveau de déclaration. */
   .rail{height:10px;background:rgba(255,255,255,.03);border:1px solid var(--hair);margin-top:7px;overflow:hidden}
   .rail i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--provider) 0 2px,color-mix(in srgb,var(--provider) 45%,transparent) 2px 4px);box-shadow:var(--edge-glow,none);transition:width .3s ease}
-  .fable{border-top:1px solid var(--hair);margin-top:13px;padding-top:11px;text-align:left}
   .account-note{margin-top:11px;color:var(--muted);font-size:12px;min-height:24px}
   .account-note.stale{color:var(--amber);font-weight:700}
   .account-note.live{color:var(--green)}
-  .mb-cost{margin-top:6px;font-size:12px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .mb-cost-lbl{color:var(--muted);font-weight:400;font-size:12px}
+  .extra-credits{margin-top:9px;padding-top:8px;border-top:1px solid var(--hair);font-size:12px}
+  .extra-credits span,.extra-credits small{display:block;color:var(--muted)}
+  .extra-credits strong{display:block;margin-top:3px;font-variant-numeric:tabular-nums}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
   .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
@@ -108,20 +100,78 @@
   .b-value{font-size:12px;color:var(--text);width:28px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
 
   .provider-picker{width:100%;padding:7px 6px;margin:8px 0 4px;background:var(--panel-bg-strong);color:var(--text);border:1px solid var(--hair-strong);border-radius:var(--radius);font:inherit;font-size:12px}
-  .gauge-caption{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin-top:6px;flex-wrap:wrap}
   .primary-rail{margin-top:10px}.rail{height:12px;border-radius:3px}.rail i{background:var(--provider)}
-  .subgauge-head{text-transform:none;letter-spacing:0;gap:8px;align-items:flex-start}.subgauge-head span{min-width:0;overflow-wrap:anywhere}.subgauge-head strong{white-space:nowrap}
-  .reset{font-size:12px}.window{font-size:12px;letter-spacing:0;text-transform:none}.value{font-size:38px}
+  .reset{font-size:12px}
   .popup-notice{padding:10px 12px;border-bottom:1px solid var(--amber);font-size:12px;color:var(--amber);display:flex;gap:10px;align-items:center;justify-content:space-between;flex:none}.popup-notice button{background:none;border:1px solid var(--amber);border-radius:var(--radius);padding:5px;cursor:pointer}
-  .mb-cost{white-space:normal;font-size:12px}.mb-cost-lbl{display:block}.segmented{flex-wrap:wrap}.footer .seg{flex:1 1 45px}.account-note{line-height:1.5}
   button:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.popover{--muted:color-mix(in srgb,var(--text) 75%,var(--bg))}.mac-tools{flex:none;background:var(--panel-bg-strong);border-top:1px solid var(--hair-strong)}.mac-tools>summary{padding:9px 14px;color:var(--text);cursor:pointer}.name-sub{display:none}.value.critical{color:var(--danger)}.value.warning{color:var(--amber)}
+.popover{--muted:color-mix(in srgb,var(--text) 75%,var(--bg))}.mac-tools{flex:none;background:var(--panel-bg-strong);border-top:1px solid var(--hair-strong)}.mac-tools>summary{padding:9px 14px;color:var(--text);cursor:pointer}.value.critical{color:var(--danger)}.value.warning{color:var(--amber)}
+  .fans{padding:10px 14px 11px;border-top:1px solid var(--hair-strong);background:var(--panel-bg-strong);flex:none}
+  .fan-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:7px}
+  .fan-head strong{font-size:12px;text-transform:lowercase;letter-spacing:.06em;color:var(--text)}
+  .fan-head span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .fan-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .fan-row .account-action{--provider:var(--blue);margin-top:0;flex:none;padding:7px 12px}
+  .fan-state{flex:1;font-size:12px;font-weight:700;color:var(--muted)}.fan-state.on{color:var(--blue)}
+  .fan-note{display:block;color:var(--muted);font-size:12px;margin-top:7px;line-height:1.4}
+  /* Cartes fournisseur côte à côte : volume hebdo en grand, jauge, renouvellement, puis la 5 h. */
+  .providers{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;align-content:start;gap:8px;padding:10px;flex:1;min-height:0;overflow-y:auto}
+  .quota-card{background:var(--panel-bg);border:1px solid var(--hair);border-top:2px solid var(--provider);border-radius:var(--radius);padding:10px 10px 8px;min-width:0;display:flex;flex-direction:column}
+  .quota-card header{display:flex;flex-direction:column;align-items:stretch;gap:5px;margin-bottom:6px;min-width:0}
+  .provider-name{font-size:12px;font-weight:700;color:var(--provider);text-transform:lowercase;letter-spacing:.06em}
+  .account-name{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .quota-card .provider-picker{margin:0;width:100%;padding:3px 6px;font-size:11.5px}
+  .quota-main{display:flex;flex-direction:column;gap:6px}
+  .quota-main .value{font-size:34px}
+  .quota-side{min-width:0}
+  .quota-label{font-size:12px;color:var(--muted)}
+  .quota-side .primary-rail{margin-top:6px}
+  /* Une seule ligne, tronquée au pire : un retour à la ligne laissait « h » seul au bout. */
+  .quota-side .reset{margin-top:5px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .session-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"l t v" "r r r";align-items:center;gap:5px 8px;margin-top:8px;padding-top:7px;border-top:1px solid var(--hair);font-size:12px;color:var(--muted)}
+  .session-row>span{grid-area:l}.session-row>b{grid-area:v;justify-self:end;color:var(--text);font-variant-numeric:tabular-nums}
+  .session-row>.rail{grid-area:r}.session-row>small{grid-area:t;font-size:12px;font-variant-numeric:tabular-nums}
+  .rail.thin{height:6px;margin:0;border-radius:3px}
+  .quota-card footer{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:auto;padding-top:8px;min-width:0;width:100%}
+  .quota-card .account-note{margin:0;min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quota-card .who{color:var(--text);font-weight:700;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .quota-card .account-action{margin:0}
+  /* Crédits calés en bas des deux cartes : ils tombent à la même hauteur même quand une seule
+     des deux a une ligne 5 h. Le pied suit sans second « auto », qui se partagerait le vide. */
+  .quota-card .extra-credits~footer{margin-top:0}
+  .quota-card .session-row{margin-bottom:8px}
+  .quota-card .extra-credits{margin-top:auto;padding-top:9px}
+  /* Crédits API : sous les deux cartes, sur toute la largeur. Estimation, jamais un solde lu. */
+  /* Liste compacte : une ligne par compte — nom, jauge (la part RESTANTE se remplit — l'inverse des
+     cartes), 5 h en retrait pour Claude, puis le % hebdo restant. Colonnes fixes pour que les
+     jauges s'alignent d'une ligne à l'autre. */
+  .account-list{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:8px 10px 4px}
+  .account-list>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:3px}
+  .al-row{display:grid;grid-template-columns:8px minmax(0,140px) minmax(40px,1fr) 52px 40px;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--hair);font-size:12px;font-variant-numeric:tabular-nums}
+  .al-row:first-of-type{border-top:0}
+  .al-row>i{width:8px;height:8px;border-radius:50%;background:var(--provider)}
+  .al-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+  .al-row .rail{height:6px;margin:0;border-radius:3px}
+  .al-row>.al-gap{height:6px}
+  .al-row>small{color:var(--muted);text-align:right;white-space:nowrap}
+  .al-row>b{text-align:right}.al-row>b.warning{color:var(--amber)}.al-row>b.critical{color:var(--danger)}
+  .al-row.off>span,.al-row.off>b{color:var(--muted)}
+  .api-credits{grid-column:1/-1;background:var(--panel-bg);border:1px solid var(--hair);border-radius:var(--radius);padding:10px 12px}
+  .api-credits>header{font-size:12px;font-weight:700;color:var(--text);text-transform:lowercase;letter-spacing:.06em;margin-bottom:2px}
+  .api-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:7px 0;border-top:1px solid var(--hair);font-size:12px}
+  .api-row:first-of-type{border-top:0}
+  .api-row>span{color:var(--provider);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .api-row>b{font-variant-numeric:tabular-nums;text-align:right}.api-row>b.warning{color:var(--amber)}.api-row>b.critical{color:var(--danger)}
+  .api-row>.rail{grid-column:1/-1;margin:2px 0 0}
+  .api-row>small{grid-column:1/-1;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .api-row>small.error{color:var(--amber)}
 </style>
 </head>
 <body>
-<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary>Outils du Mac</summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div></details><footer class="footer"><div class="footer-row"><span class="segmented" id="metric"></span></div><div class="footer-row" id="accountRow" hidden><span class="segmented" id="account"></span></div><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" title="Actualiser maintenant — ignore la pause en cas d'erreurs répétées">maj…</button><button class="go" onclick="send('openDashboard')">ouvrir</button><button onclick="send('quit')" style="color:var(--danger)" title="Quitter Status">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><details class="mac-tools"><summary data-i18n="menu.macTools"></summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><div id="fanControls"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" data-i18n-title="menu.syncTip">…</button><button class="go" onclick="send('openDashboard')" data-i18n="menu.open"></button><button onclick="send('quit')" style="color:var(--danger)" data-i18n-title="menu.quit">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
+document.querySelector('.mac-tools').addEventListener('toggle',event=>
+  send('setMacToolsVisible',{visible:event.currentTarget.open}));
+const I=StatusI18n;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
 const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
@@ -134,26 +184,18 @@ const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
 const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
 const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
 const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+// Même seuils que dashboard.html : data-level pour les thèmes qui colorent l'alerte (≤ 20 % restant : crit, ≤ 45 % : warn).
+const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
 const reset=w=>{
   if(!w?.resetsAt)return '—';
   const s=w.resetsAt-Date.now()/1000;
-  if(s<=0)return 'réinitialisé';
+  if(s<=0)return t('d.reset');
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
-  if(d>0)return `dans ${d} j ${h} h`;
-  if(h>0)return `dans ${h} h ${String(m).padStart(2,'0')}`;
-  return `dans ${m} min`;
+  if(d>0)return t('d.in',{v:`${d} ${t('unit.day')} ${h} ${t('unit.hour')}`});
+  if(h>0)return t('d.in',{v:`${h} ${t('unit.hour')} ${String(m).padStart(2,'0')}`});
+  return t('d.in',{v:`${m} ${t('unit.min')}`});
 };
-const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?'à l’instant':min<60?`il y a ${min} min`:`il y a ${Math.round(min/60)} h`};
-// Coût équivalent compact (feature 16), les deux devises. lastData porte costs.
-// Popover compact : une seule devise, en chiffres entiers (jamais « k »). L'équivalent € vit dans
-// le tableau de bord, où la place existe ; ici on tient sur une ligne étroite (2 colonnes).
-const fmtCost=v=>v>=10?`${Math.round(v).toLocaleString('fr-FR')} $`:`${v.toFixed(2)} $`;
-function providerCost(id){
-  const c=lastData?.costs; if(!c||c.scanning)return '';
-  const d=id==='openai'?c.codex:c.claude; if(!d||d.total8d==null)return '';
-  const partial=Number(d.unpricedTokens)>0;
-  return `<div class="mb-cost">${id==='openai'?'~ ':''}${fmtCost(d.total8d)}<span class="mb-cost-lbl">API 8 j${partial?' · partiel':''}<br>Pas une facture</span></div>`;
-}
+const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?t('d.now'):min<60?t('d.agoMin',{n:min}):t('d.agoHour',{n:Math.round(min/60)})};
 // Le popover garde deux colonnes, une par fournisseur, et y montre le compte le plus contraint —
 // celui sur lequel il y a quelque chose à décider. La grille tient huit rangées en face l'une de
 // l'autre : y empiler N comptes la ferait éclater, et le détail par compte a déjà sa place dans le
@@ -174,72 +216,142 @@ function pickAccount(accounts,metric){
   });
   return best||(accounts||[])[0]||null;
 }
-const popupSelection={};
 function selectPopupAccount(provider,accountId){
+  if(!accountId)return send('setMenuBarMetric',{value:aggregateMetric(provider,'weekly')});
   if(!lastData?.accounts?.some(a=>a.provider===provider&&a.accountId===accountId))return;
-  popupSelection[provider]=accountId;renderMenu(lastData);
+  send('setMenuBarMetric',{value:pinnedMetric(provider,accountId,'weekly')});
 }
-function quotaRail(window,primary=false){
+// `remaining` : la jauge montre ce qui reste au lieu de ce qui est consommé (liste des comptes) ;
+// la couleur d'alerte suit toujours la consommation.
+function quotaRail(window,primary=false,thin=false,remaining=false){
   const value=used(window);
   if(value===null||!Number.isFinite(value))return '';
   const color=value>=95?'var(--danger)':value>=80?'var(--amber)':'var(--provider)';
-  return `<div class="rail ${primary?'primary-rail':''}" role="meter" aria-label="${esc(window.label||window.windowId||'Quota')} consommé" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}" aria-valuetext="${value} % consommé, ${100-value} % restant"><i style="width:${value}%;background:${color}"></i></div><div class="gauge-caption"><strong>${100-value} % restant</strong></div>`;
+  return `<div class="rail ${thin?'thin':''} ${primary?'primary-rail':''}" role="meter" aria-label="${t(remaining?'menu.remaining':'menu.consumed',{label:esc(I.label(window.label)||window.windowId||'Quota')})}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${remaining?100-value:value}" aria-valuetext="${t('menu.valueText',{used:I.pct(value),left:I.pct(100-value)})}"><i style="width:${remaining?100-value:value}%;background:${color}"></i></div>`;
 }
-function lastWeeklyReset(account){
-  const t=account?.lastWeeklyResetObservedAt;
-  const valid=typeof t==='number'&&Number.isFinite(t)&&t>0&&t<=Date.now()/1000;
-  const date=valid?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(t*1000)):'Non observée';
-  return `<div class="last-weekly-reset" style="font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0" title="Date de détection par Status du renouvellement du quota hebdomadaire global ; l’heure réelle peut être antérieure.">Dernière réinitialisation hebdo observée : ${date}</div>`;
+function extraCredits(account){
+  if(!account)return '';
+  const c=account.extraCredits||{},finite=n=>typeof n==='number'&&Number.isFinite(n);
+  const fmt=n=>I.numMax(n,2);
+  let value=t('credits.balanceUnavailable'),detail='';
+  if(c.status==='known'&&c.unit==='credits'){
+    value=c.unlimited?t('credits.unlimited'):finite(c.balance)?t('credits.left',{v:fmt(c.balance)}):
+      c.hasCredits===false?t('credits.none'):t('credits.balanceUnavailable');
+  }else if(c.status==='known'&&c.unit==='money'){
+    const currency=c.balanceCurrency||c.currency;
+    if(finite(c.balance))value=c.balance===0?t('credits.none'):
+      t('credits.moneyLeft',{v:/^[A-Z]{3}$/.test(currency||'')?I.money(c.balance,currency,2):t('credits.noCurrency',{v:fmt(c.balance)})});
+    if(c.enabled===false)detail=t('menu.extraDisabled');
+  }
+  if(c.observedAt&&Date.now()/1000-c.observedAt>120)
+    detail=[detail,t('menu.reading',{v:ageLabel(c.observedAt)})].filter(Boolean).join(' · ');
+  if(c.status!=='known'||value===t('credits.balanceUnavailable'))return '';  // rien d'utile à dire
+  return `<div class="extra-credits"><span>${t('credits.title')}</span><strong>${esc(value)}</strong>${detail?`<small>${esc(detail)}</small>`:''}</div>`;
 }
+// Une carte par fournisseur, pleine largeur : le volume hebdo restant en grand, sa jauge et son
+// renouvellement ; la fenêtre 5 h de Claude en ligne compacte. Ni prévision, ni historique de
+// reset, ni sous-quota Fable : seul ce qui fait décider reste.
 function provider(id,name,accounts,metric){
-  const account=(accounts||[]).find(a=>a.accountId===popupSelection[id])||pickAccount(accounts,metric);
-  const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
-  // La limite générale la plus contrainte — sous-quotas scoped exclus, voir mainWeekly.
-  const weekly=mainWeekly(windows);
+  const account=pickAccount(accounts,metric);
+  const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&!isFable(w)&&!isScopedWeekly(w)&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
+  const weekly=mainWeekly(windows),session=windows.find(isSession);
   const connected=id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
-  const action=id==='openai'?'loginOpenAI':'connectClaudeWeb';
-  const actionLabel=id==='openai'?'connecter':'connecter Claude';
-  // Badge de fraîcheur (feature 2). « figé » doit crier plus fort qu'une simple mesure ancienne :
-  // c'est le signal qui manquait quand les jauges restaient périmées en silence.
-  const noteText=(primaryValue)=>{
-    if(!connected)return 'non connecté';
-    if(account?.liveSource)return '⟳ en direct';
-    if(account?.stale||(account?.capturedAt&&Date.now()/1000-account.capturedAt>1800))return `⚠ mesure ancienne · ${ageLabel(account.capturedAt)}`;
-    if(account?.capturedAt)return `mesure ${ageLabel(account.capturedAt)}`;
-    return primaryValue===null?'connecté · en attente':'quota en direct';
-  };
-  // ⟳ : la source directe répond, badge discret. classe .live pour la couleur verte.
+  const ink=id==='openai'?'var(--blue)':'var(--purple)';
   const old=account?.stale||(account?.capturedAt&&Date.now()/1000-account.capturedAt>1800);
-  const noteClass=account?.liveSource?'live':(old?'stale':'');
-  const noteAndAction=(primaryValue)=>`<div class="account-note ${noteClass}">${noteText(primaryValue)}</div>${connected?'':`<button class="account-action" onclick="send('${account?action:'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?actionLabel:'ajouter un compte'}</button>`}`;
-  const col=id==='openai'?'c1':'c2',ink=id==='openai'?'var(--blue)':'var(--purple)';
-  // Les sept rangées, dans l'ordre, toujours toutes émises : une case vide tient la place de la
-  // donnée absente, et c'est elle qui garde les deux colonnes en face l'une de l'autre.
-  const cells=rows=>rows.map((html,i)=>`<div class="cell ${col} r${i+1}" style="--provider:${ink}">${html}</div>`).join('')
-    +`<div class="cell ${col} r8" style="--provider:${ink}"></div>`;
-  const several=(accounts||[]).length>1;
-  const nameHTML=`<div class="name">${name}${several&&account?`<span class="name-sub">${esc(account.label)}</span><select class="provider-picker" aria-label="Compte ${name}" onchange="selectPopupAccount('${id}',this.value)">${accounts.map(a=>`<option value="${esc(a.accountId)}" ${a.accountId===account.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`:''}</div>`;
-  const weeklyValue=used(weekly);
-  const valueHTML=`<div class="value ${weeklyValue===null?'empty-value':weeklyValue>=95?'critical':weeklyValue>=80?'warning':''}">${weeklyValue===null?'—':(100-weeklyValue)+'<span class="unit">%</span>'}</div>`;
-  const subgauge=w=>`<div class="subgauge"><div class="subgauge-head"><span>${esc(w.label||(isSession(w)?'5 h':w.windowId))}</span></div>${quotaRail(w)}<div class="reset">Renouvellement ${reset(w)}</div></div>`;
-  const additional=windows.filter(w=>w!==weekly);
-  const weekLabel=weekly?.label||'Semaine';
-  return cells([nameHTML,valueHTML,`<div class="window">${esc(weekLabel)} · restant</div>${quotaRail(weekly,true)}`,
-    `<div class="reset">Renouvellement ${reset(weekly)}</div>${lastWeeklyReset(account)}`,additional.map(subgauge).join(''),
-    noteAndAction(weeklyValue),providerCost(id)]);
+  const note=!connected?t('menu.notConnected'):account?.liveSource?t('menu.live'):old?t('menu.stale',{v:ageLabel(account.capturedAt)}):account?.capturedAt?t('menu.measure',{v:ageLabel(account.capturedAt)}):t('menu.waiting');
+  const noteClass=account?.liveSource?'live':old?'stale':'';
+  const value=used(weekly),level=value===null?'empty-value':value>=95?'critical':value>=80?'warning':'';
+  const pinned=parseMetric(metric).accountId;
+  // « le plus contraint » = agrégat : la carte suit seule le compte le plus entamé.
+  const picker=(accounts||[]).length>1?`<select class="provider-picker" aria-label="${t('menu.account',{name})}" onchange="selectPopupAccount('${id}',this.value);this.blur()"><option value="" ${!pinned?'selected':''}>${t('menu.mostUsed')}</option>${accounts.map(a=>`<option value="${esc(a.accountId)}" ${pinned&&a.accountId===account?.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`
+    :account?`<span class="account-name">${esc(account.label)}</span>`:'';
+  const action=!connected?`<button class="account-action" onclick="send('${account?(id==='openai'?'loginOpenAI':'connectClaudeWeb'):'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?t('menu.connect'):t('menu.addAccount')}</button>`:'';
+  const sessionRow=session?`<div class="session-row" data-level="${levelOf(used(session))}"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${I.pct(100-used(session))}</b><small>${reset(session)}</small></div>`:'';
+  return `<section class="quota-card" data-provider="${id}" data-level="${levelOf(value)}" style="--provider:${ink}">
+    <header><span class="provider-name">${name}</span>${picker}</header>
+    <div class="quota-main"><div class="value ${level}">${value===null?'—':(100-value)+'<span class="unit">%</span>'}</div>
+      <div class="quota-side"><div class="quota-label">${t('menu.leftThisWeek')}</div>${quotaRail(weekly,true)}<div class="reset">${weekly?t('menu.renewal',{v:reset(weekly)}):'—'}</div></div></div>
+    ${sessionRow}${extraCredits(account)}
+    <footer>${(accounts||[]).length>1&&!pinned&&account?`<b class="who" title="${esc(account.label)}">${esc(account.label)}</b>`:''}<span class="account-note ${noteClass}">${note}</span>${action}</footer></section>`;
+}
+// Liste compacte de tous les comptes, même ordre que le tableau de bord (prochain renouvellement).
+// Les cartes ci-dessus ne montrent qu'un compte par fournisseur : ici on les voit tous d'un coup.
+function accountSummary(account){
+  const windows=(account.windows||[]).filter(w=>!isCodexSpark(w)&&!isFable(w)&&!isScopedWeekly(w)&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
+  const weekly=mainWeekly(windows),session=windows.find(isSession);
+  const connected=account.provider==='openai'||['code','web'].includes(account.claudeSource)?Boolean(account.connected):Boolean(account.cookieConfigured&&account.orgId);
+  return {account,weekly:connected?weekly:null,session:connected?session:null};
+}
+function accountList(accounts){
+  const rows=(accounts||[]).map(accountSummary);
+  if(rows.length<2)return '';  // un seul compte : la carte du fournisseur le montre déjà
+  rows.sort((a,b)=>{
+    if(!a.weekly||!b.weekly)return a.weekly?-1:b.weekly?1:0;
+    return a.weekly.resetsAt-b.weekly.resetsAt;
+  });
+  const row=({account,weekly,session})=>{
+    const value=used(weekly),level=value===null?'':value>=95?'critical':value>=80?'warning':'';
+    const ink=account.provider==='openai'?'var(--blue)':'var(--purple)';
+    const rail=value===null?'<div class="al-gap"></div>':quotaRail(weekly,false,true,true);
+    return `<div class="al-row ${value===null?'off':''}" style="--provider:${ink}"><i></i><span title="${esc(account.label)}">${esc(account.label)}</span>${rail}<small>${session?'5 h '+I.pct(100-used(session)):''}</small><b class="${level}">${value===null?'—':I.pct(100-value)}</b></div>`;
+  };
+  return `<section class="account-list"><header>${t('menu.accountList')}</header>${rows.map(row).join('')}</section>`;
+}
+// Comptes API : une ligne par compte. Le reste est estimé (solde saisi − coûts relevés) ou celui
+// d'un budget mensuel ; sans l'un ni l'autre, la dépense du mois. Rien si aucun compte API.
+const usd=v=>typeof v==='number'&&Number.isFinite(v)?I.money(v,'USD',Math.abs(v)>=100?0:2):'—';
+function apiCreditRow(a){
+  const ink=a.provider==='openai'?'var(--blue)':'var(--purple)';
+  const level=a.severity>=2?'critical':a.severity===1?'warning':'';
+  let value='—';
+  if(a.hasData)value=a.mode==='prepaid'?'≈ '+usd(Math.max(0,a.remainingUSD)):a.mode==='budget'?t('api.menu.budgetLeft',{v:usd(Math.max(0,a.remainingUSD))}):t('api.menu.month',{v:usd(a.monthUSD)});
+  const rail=a.hasData&&typeof a.fraction==='number'?`<div class="rail thin"><i style="width:${Math.round(a.fraction*100)}%"></i></div>`:'';
+  const detail=!a.keyConfigured?t('api.menu.noKey'):a.error?t(a.error):a.hasData?t('api.menu.detail',{today:usd(a.todayUSD),age:a.updatedAt?ageLabel(a.updatedAt/1000):'—'}):t('api.note.waiting');
+  return `<div class="api-row" style="--provider:${ink}"><span title="${esc(a.label)}">${esc(a.label)}</span><b class="${level}">${value}</b>${rail}<small class="${a.error||!a.keyConfigured?'error':''}">${esc(detail)}</small></div>`;
+}
+function apiCredits(accounts){
+  if(!(accounts||[]).length)return '';
+  return `<section class="api-credits"><header>${t('api.menu.title')}</header>${accounts.map(apiCreditRow).join('')}</section>`;
 }
 // Le clavier est dessiné, pas écrit : U+2328 (⌨) n'a pas de glyphe dans la police système et
 // macOS le rendait en rectangle vide. La lune, elle, existe bel et bien.
 const GLYPH_KEYBOARD='<svg viewBox="0 0 20 14" width="17" height="12" fill="none" stroke="currentColor" stroke-width="1.3">'
   +'<rect x="1" y="1" width="18" height="12" rx="2"/><path d="M4.5 5h1M8 5h1M11.5 5h1M15 5h1M4.5 8h1M8 8h1M11.5 8h1M15 8h1M6.5 10.7h7" stroke-linecap="round"/></svg>';
-function tools(t){
+function tools(tl){
   const btn=(action,glyph,label,active)=>`<button class="tool ${active?'on':''}" onclick="send('${action}')"><span class="glyph">${glyph}</span>${label}</button>`;
-  const awake=t?.awake||{},lock=t?.keyboardLock||{},lid=t?.lidMode||{};
+  const awake=tl?.awake||{},lock=tl?.keyboardLock||{},lid=tl?.lidMode||{};
   // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
   // après l'avoir accordée dans Réglages système.
-  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?'capot · '+Math.ceil((lid.remainingSeconds||0)/60)+' min':'capot fermé',lid.active&&!lid.unconfirmed)
-    +btn('toggleAwake','☾',awake.active?'veille bloquée':'veille',awake.active)
-    +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?'autoriser l’accès':'nettoyage',lock.state==='locked');
+  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?t('menu.lidShort',{n:Math.ceil((lid.remainingSeconds||0)/60)}):t('menu.lid'),lid.active&&!lid.unconfirmed)
+    +btn('toggleAwake','☾',awake.active?t('menu.awakeOn'):t('menu.awake'),awake.active)
+    +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?t('menu.allowAccess'):t('menu.cleaning'),lock.state==='locked');
+}
+// Ventilateurs : palier (60 %, 80 %, max) et durée choisis d'un geste, sans champ à saisir. Le
+// natif borne et revalide tout ; le service vérifie la vitesse réelle et rend la main à macOS.
+let fanPercent=100,fanMinutes=15;
+const FAN_LEVELS=[60,80,100],FAN_DURATIONS=[15,30,60];
+function setFanChoice(kind,value){if(kind==='percent')fanPercent=value;else fanMinutes=value;if(lastData)renderMenu(lastData);}
+function startFanBoost(){if(FAN_DURATIONS.includes(fanMinutes)&&FAN_LEVELS.includes(fanPercent))send('startFanBoost',{minutes:fanMinutes,percent:fanPercent});}
+const fanLevelLabel=p=>p>=100?t('mon.maxCap'):I.pct(p);
+function fanControls(tools){
+  const lid=tools?.lidMode||{},f=lid.fanBoost||{},service=lid.authorized&&f.version===2&&!lid.unconfirmed;
+  const active=f.active===true,needsStop=active||f.restorationPending||lid.unconfirmed||f.manualOutsideBoost;
+  const rpm=(f.fans||[]).map(v=>I.num(Math.round(v.rpm),0)).join(' · ');
+  const seg=(kind,value,label,on)=>`<button class="seg ${on?'on':''}" onclick="setFanChoice('${kind}',${value})">${label}</button>`;
+  let body,note=f.message?I.tm(f.message):'';
+  if(needsStop){
+    const state=lid.unconfirmed?t('lid.toCheck'):active?t('mon.fanState',{state:f.verified?t('mon.boost'):t('mon.ramp'),level:fanLevelLabel(f.percent||100),n:Math.ceil((f.remainingSeconds||0)/60)}):f.manualOutsideBoost?t('mon.fanManual'):t('fan.backToCheck');
+    body=`<div class="fan-row"><span class="fan-state ${active&&f.verified?'on':''}">${state}</span><button class="account-action" ${!service||lid.busy?'disabled':''} onclick="send('stopFanBoost')">${t('fan.autoApple')}</button></div>`;
+    if(lid.unconfirmed)note=I.tm(lid.message||note);
+  }else if(service){
+    body=`<div class="fan-row"><span class="segmented">${FAN_LEVELS.map(p=>seg('percent',p,fanLevelLabel(p),fanPercent===p)).join('')}</span></div>
+      <div class="fan-row"><span class="segmented">${FAN_DURATIONS.map(m=>seg('minutes',m,m+' '+t('unit.min'),fanMinutes===m)).join('')}</span><button class="account-action" ${lid.busy?'disabled':''} onclick="startFanBoost()">${t('mon.boost')}</button></div>`;
+    note=note&&note!=='Auto Apple'?note:t('fan.macControls');
+  }else{
+    body=`<div class="fan-row"><button class="account-action" onclick="send('authorizeLidMode')">${lid.authorized?t('fan.updateService'):t('lid.authorize')}</button></div>`;
+    note=lid.authorized?t('menu.fanUpdateNote'):t('menu.fanInstallNote');
+  }
+  return `<div class="fans"><div class="fan-head"><strong>${t('w.temp.fans').replace(/^./,c=>c.toUpperCase())}</strong><span>${rpm?esc(rpm)+' '+t('unit.rpm'):''}</span></div>${body}<small class="fan-note" role="status">${esc(note)}</small></div>`;
 }
 // Un curseur par écran pilotable, les non-pilotables omis (popover trop dense pour l'état « sans
 // réponse » détaillé — voir le tableau de bord). Nom tronqué par CSS, pas ici : le survol du
@@ -248,8 +360,9 @@ function brightnessRow(displays){
   const pilotable=(displays||[]).filter(d=>d.available);
   if(!pilotable.length)return '';
   // Un glyphe ☀ ouvre la section : le curseur se lit alors comme « luminosité », pas comme une
-  // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne.
-  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="Luminosité — ${esc(d.name)}">☀</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${d.brightness??0} %</span></div>`).join('');
+  // jauge quelconque. Interne et externes (dont les écrans Apple) apparaissent chacun sur sa ligne,
+  // puis le rétroéclairage du clavier (kind « keyboard »), signalé par ⌨ au lieu de ☀.
+  return pilotable.map(d=>`<div class="b-row"><span class="b-sun" title="${d.kind==='keyboard'?t('menu.backlight'):t('disp.brightness')} — ${esc(d.name)}">${d.kind==='keyboard'?'⌨':'☀'}</span><span class="b-label" title="${esc(d.name)}">${esc(d.name)}</span><input type="range" class="b-slider" min="0" max="100" value="${d.brightness??0}" oninput="this.nextElementSibling.textContent=I.pct(+this.value)" onchange="send('setBrightness',{id:'${d.id}',value:Number(this.value)})"><span class="b-value">${I.pct(d.brightness??0)}</span></div>`).join('');
 }
 // Grammaire de menuBarMetric, identique à celle du natif (voir StatusQuota.h) :
 //   "lowest" | "<provider>:<kind>" (agrégat) | "acct:<provider>:<accountId>:<kind>" (épinglé).
@@ -267,73 +380,43 @@ function parseMetric(metric){
 }
 const aggregateMetric=(provider,kind)=>`${provider}:${kind}`;
 const pinnedMetric=(provider,accountId,kind)=>`acct:${provider}:${accountId}:${kind}`;
-// Choisir une fenêtre garde le compte déjà épinglé chez ce fournisseur : changer de fenêtre ne
-// doit pas rendre l'icône à un autre compte sans le dire.
-function metricForWindow(current,provider,kind){
-  const m=parseMetric(current);
-  return m.accountId&&m.provider===provider?pinnedMetric(provider,m.accountId,kind)
-                                           :aggregateMetric(provider,kind);
-}
-// Rangée « compte » : elle n'existe que s'il y a quelque chose à basculer — un fournisseur pilote
-// l'icône, et il a plusieurs comptes. Sinon elle rend @"" et la rangée disparaît, plutôt que
-// d'occuper de la hauteur pour un choix unique.
-// Nom compact pour une pastille : trois pastilles se partagent 400 px, un libellé auto comme
-// « contact@venio.paris's Organization » s'y réduirait à « conta… ». On garde la partie qui
-// identifie — avant l'arobase, ou le premier mot — et le nom complet reste dans l'infobulle.
-function chipLabel(label){
-  const value=String(label||'');
-  const at=value.indexOf('@');
-  const short=(at>0?value.slice(0,at):value.split(/[\s·]+/)[0])||value;
-  return short.length>12?short.slice(0,11)+'…':short;
-}
-function accountSwitcher(accounts,metric){
-  const current=parseMetric(metric);
-  if(!current.provider)return '';
-  const siblings=(accounts||[]).filter(a=>a.provider===current.provider);
-  if(siblings.length<2)return '';
-  const kind=current.kind||'weekly';
-  const chip=(value,label,on,title)=>`<button class="seg ${on?'on':''}" title="${esc(title)}" onclick="send('setMenuBarMetric',{value:'${value}'})">${esc(label)}</button>`;
-  return chip(aggregateMetric(current.provider,kind),'tous',!current.accountId,
-              'Le compte le plus contraint du moment, quel qu’il soit')
-    +siblings.map(a=>chip(pinnedMetric(current.provider,a.accountId,kind),chipLabel(a.label),
-                          current.accountId===a.accountId,a.label)).join('');
-}
 let lastData=null;
+// Le service pousse un état toutes les 5 s (tours/minute des ventilateurs) : réécrire un bloc
+// à chaque fois détruisait le <select> de compte ouvert et effaçait une durée en cours de saisie.
+// On ne remplace donc que ce qui a changé, et jamais un bloc dont un champ a le focus — il sera
+// redessiné à sa sortie (blur).
+function setHTML(selector,html){
+  const el=document.querySelector(selector);
+  if(el.dataset.html===html)return;
+  const focused=document.activeElement;
+  if(focused&&el.contains(focused)&&/^(SELECT|INPUT)$/.test(focused.tagName))return;
+  el.innerHTML=html;el.dataset.html=html;
+}
+document.addEventListener('focusout',e=>{if(lastData&&/^(SELECT|INPUT)$/.test(e.target.tagName))setTimeout(()=>renderMenu(lastData),0);});
+// Un clic dans un popover ouvert au survol l'épingle : sans cela, le menu natif du sélecteur de
+// compte, qui déborde du popover, faisait croire à une sortie de la souris et tout se refermait.
+document.addEventListener('pointerdown',()=>send('pinPopover'),true);
 function renderMenu(data){
   document.documentElement.dataset.theme=data.prefs?.theme||'blueprint';
   const accounts=data.accounts||[];
   const of=providerId=>accounts.filter(a=>a.provider===providerId);
   const metric=data.prefs?.menuBarMetric||'claude:weekly';
-  document.querySelector('#notificationNotice').innerHTML=data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>Alertes désactivées sur ce Mac</span><button onclick="send('openNotificationSettings')">Réglages</button></div>`:'';
-  document.querySelector('#providers').innerHTML=provider('openai','OpenAI',of('openai'),metric)+provider('claude','Claude',of('claude'),metric);
-  document.querySelector('#brightness').innerHTML=brightnessRow(data.displays);
-  document.querySelector('#tools').innerHTML=tools(data.tools);
-  const current=parseMetric(metric);
-  // Un segment de fenêtre reste allumé quand un compte est épinglé sur cette même fenêtre : c'est
-  // toujours « Claude semaine » qui pilote l'icône, seul le compte a été restreint.
-  const win=(provider,kind,label)=>{
-    const on=current.provider===provider&&current.kind===kind;
-    return `<button class="seg ${on?'on':''}" title="Fenêtre affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${metricForWindow(metric,provider,kind)}'})">${label}</button>`;
-  };
-  const plain=(v,l)=>`<button class="seg ${metric===v?'on':''}" title="Valeur affichée dans la barre des menus" onclick="send('setMenuBarMetric',{value:'${v}'})">${l}</button>`;
-  document.querySelector('#metric').innerHTML=win('claude','weekly','C sem')+win('claude','session','C 5h')
-    +win('openai','weekly','AI sem')+plain('lowest','max')+plain('system:cpu','cpu')+plain('system:temp','°C')+plain('system:battery','bat');
-
-  const switcher=accountSwitcher(accounts,metric);
-  const row=document.querySelector('#accountRow');
-  row.hidden=!switcher;
-  if(switcher)document.querySelector('#account').innerHTML=switcher;
+  setHTML('#notificationNotice',data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>${t('notice.title')}</span><button onclick="send('openNotificationSettings')">${t('set.title')}</button></div>`:'');
+  setHTML('#providers',provider('openai','OpenAI',of('openai'),data.prefs?.providerMenuMetrics?.openai||metric)+provider('claude','Claude',of('claude'),data.prefs?.providerMenuMetrics?.claude||metric)+accountList(data.accounts)+apiCredits(data.apiAccounts));
+  setHTML('#brightness',brightnessRow(data.displays));
+  setHTML('#tools',tools(data.tools));
+  setHTML('#fanControls',fanControls(data.tools));
   const sync=document.querySelector('#sync');
   sync.textContent=data.refreshing
-    ? 'actualisation…'
+    ? t('menu.refreshing')
     : data.backoffUntil
-      ? `⚠ pause · retry ${reset({resetsAt:data.backoffUntil/1000})}`
-      : `maj ${new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(new Date(data.updatedAt))}`;
+      ? t('menu.pause',{v:reset({resetsAt:data.backoffUntil/1000})})
+      : t('menu.updated',{v:I.date(data.updatedAt,{hour:'2-digit',minute:'2-digit'})});
   sync.disabled=Boolean(data.refreshing);
 }
 // Métriques système : flux séparé, poussé à 1 Hz par le natif tant que le popover est ouvert.
 const CHART_A='#0891B2',CHART_B='#8B5CF6';
-const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const units=['o/s','Ko/s','Mo/s','Go/s'];let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return (i&&v<10?v.toFixed(1):Math.round(v))+' '+units[i]};
+const fmtBytes=v=>{if(v==null||isNaN(v))return '—';const units=['b','kb','mb','gb'].map(k=>t('unit.'+k));let i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return I.num(i&&v<10?v:Math.round(v),i&&v<10?1:0)+' '+units[i]+'/s'};
 function miniChart(family,specs,percent){
   const drawn=specs.map(s=>({...s,values:family.series?.[s.key]||[]})).filter(s=>s.values.length>1);
   if(!drawn.length)return '';
@@ -346,12 +429,12 @@ function renderMetrics(data){
   const familyById=id=>data?.families?.find(f=>f.id===id);
   const tiles=[];
   const pctTile=(id,label)=>{const family=familyById(id);if(!family)return;const key=id==='gpu'?'usage':id==='ram'?'usedPercent':'total';
-    tiles.push(`<div class="mtile"><div class="mlabel">${label}</div><div class="mvalue">${family.now[key]==null?'—':Math.round(family.now[key])+' %'}</div>${miniChart(family,[{key,color:CHART_A}],true)}</div>`)};
-  pctTile('cpu','cpu');pctTile('gpu','gpu');pctTile('ram','mém');
+    tiles.push(`<div class="mtile"><div class="mlabel">${label}</div><div class="mvalue">${family.now[key]==null?'—':I.pct(Math.round(family.now[key]))}</div>${miniChart(family,[{key,color:CHART_A}],true)}</div>`)};
+  pctTile('cpu','cpu');pctTile('gpu','gpu');pctTile('ram',t('menu.mem'));
   const network=familyById('network');
-  if(network)tiles.push(`<div class="mtile"><div class="mlabel">réseau ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
+  if(network)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.network')} ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
   const sensors=familyById('sensors');
-  if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">temp</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
+  if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.temp')}</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
   document.querySelector('#metrics').innerHTML=tiles.join('');
 }
 // Tick incrémental : même mécanique que dashboard.html — le natif n'envoie les séries qu'à
@@ -375,7 +458,9 @@ function mergeMetricsDelta(state,payload){
   delete merged.delta;
   return merged;
 }
-window.StatusMenu={update(data){lastData=data;renderMenu(data)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
+I.onChange(()=>{I.apply();if(lastData)renderMenu(lastData);if(lastMetrics)renderMetrics(lastMetrics)});
+I.apply();
+window.StatusMenu={update(data){lastData=data;renderMenu(data)},patch(part){if(!lastData)return;lastData={...lastData,...part};renderMenu(lastData)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
 // Keep the "dans X min" countdowns honest between polls.
 setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
 </script>

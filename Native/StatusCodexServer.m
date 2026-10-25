@@ -1,4 +1,5 @@
 #import "StatusCodexServer.h"
+#import <AppKit/AppKit.h>
 
 static NSError *TMError(NSString *message) {
     return [NSError errorWithDomain:@"Status.CodexAppServer" code:1 userInfo:@{NSLocalizedDescriptionKey: message ?: @"Erreur inconnue"}];
@@ -7,12 +8,23 @@ static NSError *TMError(NSString *message) {
 NSString *TMCodexExecutablePath(void) {
     NSString *override = NSProcessInfo.processInfo.environment[@"STATUS_CODEX_PATH"];
     if (override.length && [NSFileManager.defaultManager isExecutableFileAtPath:override]) return override;
-    NSArray<NSString *> *candidates = @[
-        @"/Applications/ChatGPT.app/Contents/Resources/codex",
+    // Le nom visible de l'app et la disposition du CLI ont changé. Résoudre aussi son bundle ID
+    // permet de la retrouver même si ChatGPT.app est renommée ou installée hors /Applications.
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    NSURL *installedApp = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.openai.codex"];
+    for (NSString *appPath in @[@"/Applications/ChatGPT.app", @"/Applications/Codex.app", installedApp.path ?: @""]) {
+        if (!appPath.length) continue;
+        NSString *resources = [appPath stringByAppendingPathComponent:@"Contents/Resources"];
+        [candidates addObjectsFromArray:@[
+            [resources stringByAppendingPathComponent:@"codex-cli/CodexCLI.app/Contents/MacOS/codex"],
+            [resources stringByAppendingPathComponent:@"codex-cli/bin/codex"],
+            [resources stringByAppendingPathComponent:@"codex"]
+        ]];
+    }
+    [candidates addObjectsFromArray:@[
         [NSHomeDirectory() stringByAppendingPathComponent:@".local/bin/codex"],
-        @"/opt/homebrew/bin/codex",
-        @"/usr/local/bin/codex"
-    ];
+        @"/opt/homebrew/bin/codex", @"/usr/local/bin/codex"
+    ]];
     for (NSString *candidate in candidates) {
         if ([NSFileManager.defaultManager isExecutableFileAtPath:candidate]) return candidate;
     }
@@ -33,6 +45,8 @@ NSString *TMCodexExecutablePath(void) {
 
 @implementation TMCodexAppServer
 
+- (BOOL)isIdle { return !self.starting && self.pending.count == 0; }
+
 - (instancetype)init {
     if ((self = [super init])) {
         _readBuffer = [NSMutableData data];
@@ -50,7 +64,7 @@ NSString *TMCodexExecutablePath(void) {
     }
     NSString *path = TMCodexExecutablePath();
     if (!path.length) {
-        if (completion) completion(nil, TMError(@"Codex est introuvable. Installez l’app ChatGPT/Codex ou définissez STATUS_CODEX_PATH."));
+        if (completion) completion(nil, TMError(@"CLI Codex introuvable. Installez l’app ChatGPT ou définissez STATUS_CODEX_PATH."));
         return;
     }
     self.starting = YES;
@@ -181,6 +195,7 @@ NSString *TMCodexExecutablePath(void) {
     self.task = nil;
     self.initialized = NO;
     self.starting = NO;
+    [self.readBuffer setLength:0];
 }
 
 @end

@@ -8,26 +8,45 @@ BUILD="${ROOT}/work/Status"
 
 cd "$ROOT"
 mkdir -p "$ROOT/work" "$ROOT/outputs"
-clang -fobjc-arc -O2 -I "$ROOT/Native" \
-  -framework Cocoa -framework WebKit -framework Security \
+"$ROOT/scripts/fetch-sparkle.sh" >/dev/null
+SPARKLE="$ROOT/vendor/Sparkle"
+clang -fobjc-arc -O2 -I "$ROOT/Native" -F "$SPARKLE" -Wl,-rpath,@executable_path/../Frameworks \
+  -framework Sparkle -framework Cocoa -framework WebKit -framework Security \
   -framework ServiceManagement -framework UserNotifications -framework IOKit \
-  "$ROOT/Native/Status.m" "$ROOT/Native/StatusLidClient.m" "$ROOT/Native/StatusLidProtocol.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" \
+  "$ROOT/Native/Status.m" "$ROOT/Native/StatusLidClient.m" "$ROOT/Native/StatusLidProtocol.m" "$ROOT/Native/StatusQuota.m" "$ROOT/Native/StatusAccounts.m" "$ROOT/Native/StatusApiCredits.m" \
   "$ROOT/Native/StatusClaudeSession.m" "$ROOT/Native/StatusClaudeBridge.m" "$ROOT/Native/StatusAwake.m" \
   "$ROOT/Native/StatusSystemMonitor.m" "$ROOT/Native/StatusKeyboardLock.m" \
-  "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusWindowManager.m" "$ROOT/Native/StatusCost.m" \
-  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" -o "$BUILD"
+  "$ROOT/Native/StatusCodexServer.m" "$ROOT/Native/StatusCost.m" \
+  "$ROOT/Native/StatusFx.m" "$ROOT/Native/StatusDisplays.m" "$ROOT/Native/StatusMenuBarWidgets.m" "$ROOT/Native/StatusI18n.m" "$ROOT/Native/StatusUpdater.m" -o "$BUILD"
 
 rm -rf "$OUTPUT"
-mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/icons"
+mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources/fonts" "$OUTPUT/Contents/Resources/themes"
 cp "$BUILD" "$OUTPUT/Contents/MacOS/Status"
 cp "$ROOT/Resources/Info.plist" "$OUTPUT/Contents/Info.plist"
+# Flux de mises à jour de remplacement (tests de bout en bout sur un serveur local).
+if [[ -n "${STATUS_FEED_URL:-}" ]]; then
+  plutil -replace SUFeedURL -string "$STATUS_FEED_URL" "$OUTPUT/Contents/Info.plist"
+  # Un flux http local (jamais en production) demande l'exception ATS pour le réseau local.
+  [[ "$STATUS_FEED_URL" == http://* ]] && plutil -insert NSAppTransportSecurity -json '{"NSAllowsLocalNetworking":true}' "$OUTPUT/Contents/Info.plist"
+fi
+# Version de test (tests de mise à jour) : le numéro de build doit dépasser celui de la version installée.
+[[ -n "${STATUS_BUILD_NUMBER:-}" ]] && plutil -replace CFBundleVersion -string "$STATUS_BUILD_NUMBER" "$OUTPUT/Contents/Info.plist"
+[[ -n "${STATUS_VERSION_STRING:-}" ]] && plutil -replace CFBundleShortVersionString -string "$STATUS_VERSION_STRING" "$OUTPUT/Contents/Info.plist"
+mkdir -p "$OUTPUT/Contents/Frameworks"
+ditto "$SPARKLE/Sparkle.framework" "$OUTPUT/Contents/Frameworks/Sparkle.framework"
+# Les services XPC ne servent qu'aux apps sandboxées ; Status ne l'est pas. Les retirer évite deux
+# composants de plus à signer et à notariser.
+rm -rf "$OUTPUT/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$OUTPUT/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp "$ROOT/Resources/StatusIcon.icns" "$OUTPUT/Contents/Resources/StatusIcon.icns"
 cp "$ROOT/Resources/dashboard.html" "$OUTPUT/Contents/Resources/dashboard.html"
 cp "$ROOT/Resources/menubar.html" "$OUTPUT/Contents/Resources/menubar.html"
 cp "$ROOT/Resources/widget.html" "$OUTPUT/Contents/Resources/widget.html"
-cp "$ROOT/Resources/picker.html" "$OUTPUT/Contents/Resources/picker.html"
 cp "$ROOT/Resources/themes.css" "$OUTPUT/Contents/Resources/themes.css"
-cp "$ROOT/Resources/icons/"*.png "$OUTPUT/Contents/Resources/icons/"
+cp "$ROOT/Resources/i18n.js" "$OUTPUT/Contents/Resources/i18n.js"
+mkdir -p "$OUTPUT/Contents/Resources/i18n"
+cp "$ROOT/Resources/i18n/"*.json "$OUTPUT/Contents/Resources/i18n/"
+cp "$ROOT/Resources/fonts/"* "$OUTPUT/Contents/Resources/fonts/"
+cp "$ROOT/Resources/themes/"*.css "$OUTPUT/Contents/Resources/themes/"
 
 clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation \
   "$ROOT/Native/StatusClaudeCollector.m" "$ROOT/Native/StatusClaudeBridge.m" \
@@ -36,27 +55,69 @@ clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation \
 
 mkdir -p "$OUTPUT/Contents/Library/LaunchDaemons" "$OUTPUT/Contents/Library/LaunchServices"
 cp "$ROOT/Resources/LaunchDaemons/com.raphael.status.lid-helper.plist" "$OUTPUT/Contents/Library/LaunchDaemons/"
-clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation -framework IOKit -framework Security   "$ROOT/Native/StatusLidHelper.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusLidProtocol.m"   -o "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
+clang -fobjc-arc -O2 -I "$ROOT/Native" -framework Foundation -framework IOKit -framework Security   "$ROOT/Native/StatusLidHelper.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusFanBoost.m" "$ROOT/Native/StatusLidProtocol.m"   -o "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
 
 xattr -cr "$OUTPUT"
 
 # Signature : une identité stable évite que macOS voie chaque build comme une app différente
-# (demandes d'accès Trousseau répétées, SMAppService qui refuse de s'enregistrer). À défaut, on
+# (demandes d’accès Trousseau répétées). À défaut, on
 # retombe sur l'ad-hoc, qui fonctionne mais change d'empreinte à chaque compilation.
 # Voir ./scripts/create-signing-identity.sh
-SIGN_IDENTITY="${STATUS_SIGN_IDENTITY:-Status Local Signing}"
+# Developer ID en priorité quand il existe : signature reconnue par Gatekeeper, autorisations
+# (Accessibilité) rattachées au certificat et non à l'empreinte du build, et SMAppService utilisable.
+DEVELOPER_ID=$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+SIGN_IDENTITY="${STATUS_SIGN_IDENTITY:-${DEVELOPER_ID:-Status Local Signing}}"
+# Horodatage Apple exigé par la notarisation ; inutile (et hors ligne impossible) en signature locale.
+TIMESTAMP=()
+[[ "$SIGN_IDENTITY" == "Developer ID Application:"* ]] && TIMESTAMP=(--timestamp)
 # Sans -v, délibérément : « -v » ne liste que les identités approuvées comme racine de confiance.
 # Une identité auto-signée locale ne l'est pas, et n'a pas à l'être — on ne cherche pas une chaîne
 # vérifiable par des tiers (ce serait un Developer ID Apple), seulement une empreinte stable d'un
 # build à l'autre, pour que macOS reconnaisse la même app et conserve ses autorisations.
-# codesign, lui, accepte parfaitement une identité non approuvée.
+# Les builds locaux utilisent un paquet approuvé par l’administrateur pour le service.
 if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-  codesign --force --options runtime --identifier com.raphael.status.lid-helper --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
-  codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$OUTPUT"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --identifier com.raphael.status.lid-helper --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
   echo "signé avec : $SIGN_IDENTITY"
 else
-  codesign --force --deep --sign - "$OUTPUT"
+  codesign --force --sign - "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper"
   echo "signé en ad-hoc (aucune identité « $SIGN_IDENTITY » ; voir scripts/create-signing-identity.sh)"
+fi
+
+# Installation classique approuvée par l'administrateur, pour les builds locaux.
+# Le payload contient uniquement le helper signé et sa déclaration launchd.
+# Absent des builds Developer ID : le service y passe par SMAppService (TMLidSigningReady), et un
+# paquet non signé embarqué fait refuser la notarisation.
+if [[ "$SIGN_IDENTITY" != "Developer ID Application:"* ]]; then
+LID_PAYLOAD="$ROOT/work/lid-package"
+rm -rf "$LID_PAYLOAD"
+mkdir -p "$LID_PAYLOAD/Library/PrivilegedHelperTools" "$LID_PAYLOAD/Library/LaunchDaemons"
+cp "$OUTPUT/Contents/Library/LaunchServices/com.raphael.status.lid-helper" "$LID_PAYLOAD/Library/PrivilegedHelperTools/"
+# Label et nom Mach distincts de l'enregistrement SMAppService : smd recrée ce dernier
+# après bootout, et le partage du label faisait échouer le bootstrap du paquet.
+LID_PLIST="$LID_PAYLOAD/Library/LaunchDaemons/com.raphael.status.lid-service.plist"
+cp "$ROOT/Resources/LaunchDaemons/com.raphael.status.lid-helper.plist" "$LID_PLIST"
+plutil -replace Label -string com.raphael.status.lid-service "$LID_PLIST"
+plutil -replace MachServices -json '{"com.raphael.status.lid-service":true}' "$LID_PLIST"
+plutil -remove BundleProgram "$LID_PLIST"
+plutil -insert Program -string /Library/PrivilegedHelperTools/com.raphael.status.lid-helper "$LID_PLIST"
+plutil -replace ThrottleInterval -integer 30 "$LID_PLIST"
+plutil -insert AssociatedBundleIdentifiers -json '["com.raphael.status"]' "$LID_PLIST"
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Resources/Info.plist")
+pkgbuild --root "$LID_PAYLOAD" --ownership recommended --install-location / \
+  --scripts "$ROOT/scripts/lid-installer" --identifier com.raphael.status.lid-service \
+  --version "$VERSION" "$OUTPUT/Contents/Resources/StatusLidService.pkg"
+fi
+
+if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  # Du plus profond au bundle : --deep ne pose pas l'horodatage ni le runtime de façon fiable.
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$OUTPUT/Contents/Resources/status-claude-collector"
+  SPK="$OUTPUT/Contents/Frameworks/Sparkle.framework"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Autoupdate"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$SPK/Versions/B/Updater.app"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$SPK"
+  codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$OUTPUT"
+else
+  codesign --force --deep --sign - "$OUTPUT"
 fi
 
 rm -f "$ARCHIVE"

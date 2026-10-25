@@ -1,0 +1,11 @@
+Polices embarquées, toutes sous SIL Open Font License 1.1 (https://openfontlicense.org) :
+- bricolage-grotesque :   "license": "OFL-1.1",
+- figtree :   "license": "OFL-1.1",
+- geist :   "license": "OFL-1.1",
+- geist-mono :   "license": "OFL-1.1",
+- instrument-sans :   "license": "OFL-1.1",
+- outfit :   "license": "OFL-1.1",
+- ibm-plex-mono :   "license": "OFL-1.1",
+- ibm-plex-sans :   "license": "OFL-1.1",
+- tilt-neon :   "license": "OFL-1.1",
+Sources : paquets npm @fontsource (sous-ensemble latin des polices d'origine : Geist, IBM Plex, Tilt Neon, Outfit, Bricolage Grotesque, Instrument Sans, Figtree).

@@ -27,6 +27,20 @@ NSString *TMQuotaWindowLabel(long long minutes);
 NSString *TMClaudeWindowLabel(NSString *name);
 // Unique source des quotas Claude : réponse de claude.ai /api/organizations/{org}/usage.
 NSArray *TMClaudeWindowsFromUsagePayload(NSDictionary *payload);
+// Crédits supplémentaires, distincts des crédits de reset et des quotas inclus.
+NSDictionary *TMOpenAIExtraCredits(NSDictionary *snapshot);
+NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSDictionary *grant);
+// Crédits de reset manuel disponibles (Codex rateLimitResetCredits.credits) : expiresAt, title,
+// resetType, triés par expiration. nil quand le détail n'est pas fourni.
+NSArray *TMResetCreditDetails(id raw);
+// Prochaine facturation de l'abonnement : { status:"known", nextAt, estimated, plan? } ou
+// { status:"unknown" }. Une échéance passée est reportée de mois en mois (estimated:YES) plutôt
+// que d'afficher une date révolue : le jeton local n'est rafraîchi qu'épisodiquement.
+NSDictionary *TMBillingFromPeriod(NSTimeInterval periodEnd, NSString *plan, NSTimeInterval now);
+// OpenAI : claims « https://api.openai.com/auth » de l'id_token ChatGPT (chatgpt_subscription_active_until).
+NSDictionary *TMOpenAIBillingFromIDToken(NSString *idToken, NSTimeInterval now);
+// Claude : réponse de /api/organizations/{org}/subscription_details (champs tolérés : voir .m).
+NSDictionary *TMClaudeBillingFromSubscription(id json, NSTimeInterval now);
 // Écarte les fenêtres dont le reset est passé : leur pourcentage ne veut plus rien dire.
 NSArray *TMDropExpiredWindows(NSArray *windows);
 
@@ -86,6 +100,9 @@ NSDictionary *TMEmptyClaudeAccount(void);
 NSString *TMSupportDirectory(void);
 NSString *TMHistoryPath(void);
 NSArray *TMLoadHistory(void);
+// Historique allégé pour l'affichage : tous les points des 3 dernières heures, puis le dernier
+// point de chaque tranche de 20 minutes. L'historique sur disque n'est pas modifié.
+NSArray *TMHistoryForDisplay(NSArray *history, NSTimeInterval now);
 
 // Cache du dernier état de comptes connu (volumes courants), pour réafficher les volumes tout de
 // suite au lancement au lieu d'attendre le premier sondage. Écriture atomique. `accounts` est un
@@ -176,3 +193,6 @@ NSArray *TMAppendHistory(NSArray *pairs, long long now);
 // Renouvellements globaux détectés, isolés par compte. Au plus 64 dates sur 180 jours.
 // Estimation descriptive (médiane/plage observée), jamais une date garantie du fournisseur.
 NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *accountKey, NSTimeInterval now);
+
+// Métrique persistée indépendamment pour chaque jauge, avec reprise de l’ancien choix.
+NSString *TMProviderMenuMetric(NSString *provider, NSDictionary *selections, NSString *legacyMetric);

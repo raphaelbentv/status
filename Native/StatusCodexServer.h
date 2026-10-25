@@ -13,8 +13,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef void (^TMAppServerCompletion)(id _Nullable result, NSError * _Nullable error);
 
-// Chemin du binaire `codex`. Cherche l'app ChatGPT puis les emplacements d'installation usuels ;
-// STATUS_CODEX_PATH force la main pour les tests. nil si rien n'est installé.
+// Chemin du binaire `codex`. Cherche le CLI embarqué par ChatGPT (nom et bundle ID), puis les
+// emplacements d'installation usuels ; STATUS_CODEX_PATH peut forcer un chemin exécutable.
 NSString * _Nullable TMCodexExecutablePath(void);
 
 @interface TMCodexAppServer : NSObject
@@ -23,6 +23,7 @@ NSString * _Nullable TMCodexExecutablePath(void);
 // Status ne touche plus la session Codex partagée du Mac. nil ⇒ le CODEX_HOME hérité (~/.codex).
 @property (copy, nullable) NSString *codexHome;
 @property (copy, nullable) void (^notificationHandler)(NSString *method, NSDictionary *params);
+@property (readonly, getter=isIdle) BOOL idle;
 - (void)start:(TMAppServerCompletion)completion;
 - (void)request:(NSString *)method params:(nullable NSDictionary *)params completion:(TMAppServerCompletion)completion;
 - (void)notify:(NSString *)method params:(nullable NSDictionary *)params;

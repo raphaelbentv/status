@@ -6,5 +6,7 @@
 - (void)requestAuthorization;
 - (void)startMinutes:(NSInteger)minutes;
 - (void)stop;
+- (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent;
+- (void)stopFanBoost;
 - (void)invalidate;
 @end

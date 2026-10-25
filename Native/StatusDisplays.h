@@ -73,15 +73,29 @@ BOOL TMDDCParseVCPReply(NSData *reply, uint8_t expectedVCPCode, uint16_t *outCur
 - (void)syncFromHardware;
 @end
 
-// Détecte les écrans actifs et construit un TMDisplay par écran.
+// Rétroéclairage du clavier (CoreBrightness, privé). `available` est NO sur un Mac sans clavier
+// rétroéclairé ou si l'API privée a disparu ; `brightnessPercent` est relu à chaque appel.
+extern NSString *const TMKeyboardBacklightIdentifier;  // id du clavier dans `snapshot`
+@interface TMKeyboardBacklight : NSObject
+@property (readonly) BOOL available;
+@property (readonly, nullable) NSNumber *brightnessPercent;
+- (BOOL)setBrightnessPercent:(double)percent;
+@end
+
+// Détecte les écrans actifs et construit un TMDisplay par écran. Sûr entre threads : les touches
+// F1/F2 sont traitées sur le thread du tap clavier, le reste sur le thread principal.
 @interface TMDisplayManager : NSObject
 // Ré-énumère CGGetActiveDisplayList et reconstruit les contrôleurs. À appeler à l'ouverture d'une
 // surface et sur NSApplicationDidChangeScreenParametersNotification — pas en continu, la
 // luminosité ne dérive pas toute seule entre deux branchements.
 - (void)rescan;
 @property (readonly) NSArray<TMDisplay *> *displays;
-// [{ id, name, kind, available, brightness }] — sérialisable en JSON tel quel.
+@property (readonly) TMKeyboardBacklight *keyboard;
+// [{ id, name, kind, available, brightness }] — sérialisable en JSON tel quel. `kind` vaut
+// "builtin", "external" ou "keyboard" (le rétroéclairage du clavier, en dernier).
 - (NSArray<NSDictionary *> *)snapshot;
+// Règle un écran ou le clavier (TMKeyboardBacklightIdentifier) — cible des curseurs.
+- (BOOL)setBrightnessPercent:(double)percent forIdentifier:(NSString *)identifier;
 - (nullable TMDisplay *)displayWithIdentifier:(NSString *)identifier;
 // Touche clavier physique : elle ne règle QUE l'écran survolé par la souris (voir
 // displayUnderMouse) — comme les curseurs, un écran à la fois. Reste ici le pas appliqué à tous

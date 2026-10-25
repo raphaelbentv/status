@@ -1,5 +1,6 @@
 #import "StatusLidMode.h"
 #import "StatusLidProtocol.h"
+#import "StatusFanBoost.h"
 #import <IOKit/ps/IOPowerSources.h>
 #import <IOKit/ps/IOPSKeys.h>
 #import <sys/stat.h>
@@ -100,13 +101,16 @@ static BOOL PrivateDirectory(void) {
 @interface TMLidServer : NSObject <NSXPCListenerDelegate,TMLidService>
 @property TMLidMode *mode;
 @property (weak) NSXPCConnection *owner;
+@property TMFanBoost *fanBoost;
+@property (weak) NSXPCConnection *fanOwner;
 @end
 @implementation TMLidServer
 - (NSDictionary *)snapshot {
     double battery=Battery();
     return @{@"active":@(self.mode.active), @"restorationPending":@(self.mode.restorationPending),
-        @"remainingSeconds":@(MAX(0,self.mode.deadline-Clock())), @"message":self.mode.message ?: @"",
-        @"batteryPercent":@(battery), @"thermalState":@(NSProcessInfo.processInfo.thermalState)};
+        @"controlVersion":@4, @"remainingSeconds":@(MAX(0,self.mode.deadline-Clock())), @"message":self.mode.message ?: @"",
+        @"batteryPercent":@(battery), @"thermalState":@(NSProcessInfo.processInfo.thermalState),
+        @"fanBoost":[self.fanBoost snapshot:Clock()]};
 }
 - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection {
     NSString *requirement=TMLidPeerRequirement(@"com.raphael.status");
@@ -117,6 +121,7 @@ static BOOL PrivateDirectory(void) {
     __weak NSXPCConnection *weakConnection=connection;
     connection.invalidationHandler=^{ dispatch_async(dispatch_get_main_queue(), ^{
         if (self.owner==weakConnection) { [self.mode stop:@"Status a été fermé ou déconnecté."]; self.owner=nil; }
+        if (self.fanOwner==weakConnection) { [self.fanBoost stop:@"Status a été fermé · Auto Apple."]; self.fanOwner=nil; }
     }); };
     connection.interruptionHandler=connection.invalidationHandler;
     [connection resume]; return YES;
@@ -125,6 +130,7 @@ static BOOL PrivateDirectory(void) {
     NSXPCConnection *client=NSXPCConnection.currentConnection;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.owner==client) [self.mode heartbeatAt:Clock()];
+        if (self.fanOwner==client) [self.fanBoost heartbeat:Clock()];
         reply([self snapshot]);
     });
 }
@@ -139,6 +145,28 @@ static BOOL PrivateDirectory(void) {
 - (void)stopWithReply:(void (^)(NSDictionary *))reply {
     dispatch_async(dispatch_get_main_queue(), ^{ [self.mode stop:@"Arrêt demandé."]; self.owner=nil; reply([self snapshot]); });
 }
+- (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent reply:(void (^)(NSDictionary *))reply {
+    NSXPCConnection *client=NSXPCConnection.currentConnection;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.fanOwner || self.fanOwner==client) {
+            [self.fanBoost startMinutes:minutes percent:percent now:Clock()];
+            if (self.fanBoost.active) self.fanOwner=client;
+        }
+        reply([self snapshot]);
+    });
+}
+- (void)stopFanBoostWithReply:(void (^)(NSDictionary *))reply {
+    NSXPCConnection *client=NSXPCConnection.currentConnection;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.fanOwner || self.fanOwner==client) {
+            // Demande explicite : répare aussi un ventilateur resté en manuel hors boost.
+            if (self.fanBoost.active || self.fanBoost.restorationPending) [self.fanBoost stop:@"Auto Apple."];
+            else [self.fanBoost restoreAll:@"Auto Apple."];
+            self.fanOwner=nil;
+        }
+        reply([self snapshot]);
+    });
+}
 @end
 int main(int argc,const char *argv[]) {
     @autoreleasepool {
@@ -146,7 +174,8 @@ int main(int argc,const char *argv[]) {
         if (argc==2 && strcmp(argv[1],"--diagnose")==0) {
             NSDictionary *d=@{@"power":[[TMLidSystemBackend new] powerSettings] ?: @{},
                 @"batteryPercent":@(Battery()), @"thermalState":@(NSProcessInfo.processInfo.thermalState),
-                @"peerRequirement":TMLidPeerRequirement(@"com.raphael.status") ?: @""};
+                @"peerRequirement":TMLidPeerRequirement(@"com.raphael.status") ?: @"",
+                @"fans":[[TMFanSMCBackend new] fans]};
             NSData *json=[NSJSONSerialization dataWithJSONObject:d options:0 error:nil];
             fwrite(json.bytes,1,json.length,stdout); fputc('\n',stdout); return 0;
         }
@@ -154,14 +183,20 @@ int main(int argc,const char *argv[]) {
         TMLidServer *server=[TMLidServer new];
         server.mode=[[TMLidMode alloc] initWithBackend:[TMLidSystemBackend new]];
         [server.mode recover];
-        NSXPCListener *listener=[[NSXPCListener alloc] initWithMachServiceName:TMLidServiceName];
+        server.fanBoost=[[TMFanBoost alloc] initWithBackend:[TMFanSMCBackend new]];
+        [server.fanBoost recover];
+        // Le nom Mach dépend du mode d'installation (paquet Installer ou SMAppService).
+        BOOL installed=[NSBundle.mainBundle.executablePath isEqualToString:TMLidInstalledHelperPath];
+        NSXPCListener *listener=[[NSXPCListener alloc] initWithMachServiceName:installed ? TMLidInstalledServiceName : TMLidServiceName];
         listener.delegate=server; [listener resume];
         [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
             [server.mode tickBattery:Battery() thermal:NSProcessInfo.processInfo.thermalState now:Clock()];
+            [server.fanBoost tick:Clock() thermal:NSProcessInfo.processInfo.thermalState];
+            if (!server.fanBoost.active) server.fanOwner=nil;
         }];
         signal(SIGTERM,SIG_IGN); signal(SIGINT,SIG_IGN);
         dispatch_source_t term=dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL,SIGTERM,0,dispatch_get_main_queue());
-        dispatch_source_set_event_handler(term, ^{ [server.mode stop:@"Service arrêté."]; exit(server.mode.restorationPending?1:0); });
+        dispatch_source_set_event_handler(term, ^{ [server.mode stop:@"Service arrêté."]; [server.fanBoost stop:@"Service arrêté · Auto Apple."]; exit(server.mode.restorationPending||server.fanBoost.restorationPending?1:0); });
         dispatch_resume(term);
         [[NSRunLoop currentRunLoop] run];
     }
