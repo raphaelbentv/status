@@ -700,6 +700,152 @@ static NSImage *TMDrawHub(double fraction, BOOL hasValue, NSColor *ink, BOOL isT
     });
 }
 
+#pragma mark - Famille Console
+
+// La puce : 18 pt de haut, deux niveaux de texte à gauche (micro-étiquette en capitales, valeur
+// tabulaire dessous) et un graphique intégré à droite — sparkline pour ce qui varie (CPU, GPU, réseau,
+// température), réservoir pour ce qui se remplit (mémoire, disque, batterie ; « puce + jauge »
+// impose le réservoir horizontal). La largeur est celle du pire cas (« 100 % », « ↓ 999 Mo/s »),
+// jamais celle de la mesure du moment : la puce ne saute pas quand le chiffre change de longueur.
+
+// Éclair de 3 × 5 pt (batterie en charge), centré sur (x, y).
+static void TMFillBolt(CGFloat x, CGFloat y, NSColor *color) {
+    NSBezierPath *bolt = [NSBezierPath bezierPath];
+    [bolt moveToPoint:NSMakePoint(x + 0.9, y + 2.5)];
+    [bolt lineToPoint:NSMakePoint(x - 1.5, y - 0.2)];
+    [bolt lineToPoint:NSMakePoint(x - 0.1, y - 0.2)];
+    [bolt lineToPoint:NSMakePoint(x - 0.9, y - 2.5)];
+    [bolt lineToPoint:NSMakePoint(x + 1.5, y + 0.2)];
+    [bolt lineToPoint:NSMakePoint(x + 0.1, y + 0.2)];
+    [bolt closePath];
+    [color setFill];
+    [bolt fill];
+}
+
+// Sparkline de la série récente dans `box` : trait, léger remplissage dessous, point terminal.
+// Échelle fixe 0-100, ou ajustée à la série (température : 12 °C minimum de plage pour qu'un
+// capteur stable ne devienne pas un électrocardiogramme).
+static void TMDrawChipSpark(NSArray<NSNumber *> *series, BOOL autoScale, BOOL hasValue, NSRect box, NSColor *ink, BOOL isTemplate) {
+    NSArray<NSNumber *> *pts = series.count > 18 ? [series subarrayWithRange:NSMakeRange(series.count - 18, 18)] : series;
+    if (!hasValue || pts.count < 2) {
+        NSBezierPath *flat = [NSBezierPath bezierPath];
+        [flat moveToPoint:NSMakePoint(NSMinX(box), NSMidY(box))];
+        [flat lineToPoint:NSMakePoint(NSMaxX(box), NSMidY(box))];
+        flat.lineWidth = 1.2; flat.lineCapStyle = NSLineCapStyleRound;
+        [[ink colorWithAlphaComponent:0.4] setStroke];
+        [flat stroke];
+        return;
+    }
+    double lo = 0, hi = 100;
+    if (autoScale) {
+        lo = HUGE_VAL; hi = -HUGE_VAL;
+        for (NSNumber *v in pts) { lo = MIN(lo, v.doubleValue); hi = MAX(hi, v.doubleValue); }
+        double span = MAX(hi - lo, 12), mid = (hi + lo) / 2;
+        lo = mid - span / 2; hi = mid + span / 2;
+    }
+    CGFloat inset = 1.2;  // le point terminal ne déborde pas de la boîte
+    NSRect plot = NSInsetRect(box, inset, inset);
+    NSBezierPath *line = [NSBezierPath bezierPath];
+    line.lineWidth = 1.2; line.lineJoinStyle = NSLineJoinStyleRound; line.lineCapStyle = NSLineCapStyleRound;
+    CGFloat lastX = 0, lastY = 0;
+    for (NSUInteger i = 0; i < pts.count; i++) {
+        CGFloat x = NSMinX(plot) + (CGFloat)i / (pts.count - 1) * NSWidth(plot);
+        CGFloat y = NSMinY(plot) + TMUnit((pts[i].doubleValue - lo) / (hi - lo)) * NSHeight(plot);
+        if (i == 0) [line moveToPoint:NSMakePoint(x, y)]; else [line lineToPoint:NSMakePoint(x, y)];
+        lastX = x; lastY = y;
+    }
+    NSBezierPath *area = [line copy];
+    [area lineToPoint:NSMakePoint(lastX, NSMinY(box))];
+    [area lineToPoint:NSMakePoint(NSMinX(plot), NSMinY(box))];
+    [area closePath];
+    [[ink colorWithAlphaComponent:isTemplate ? 0.22 : 0.2] setFill];
+    [area fill];
+    [ink setStroke];
+    [line stroke];
+    TMFillCircle(NSMakePoint(lastX, lastY), 1.3, ink);
+}
+
+// Réservoir : contour, remplissage de bas en haut (vertical) ou de gauche à droite (horizontal).
+static void TMDrawChipReservoir(double fraction, BOOL hasValue, BOOL horizontal, NSRect box, NSColor *ink, BOOL isTemplate) {
+    CGFloat radius = horizontal ? NSHeight(box) / 2 : 2.0;
+    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(box, 0.5, 0.5) xRadius:radius yRadius:radius];
+    outline.lineWidth = 1;
+    [[ink colorWithAlphaComponent:isTemplate ? 0.6 : 0.55] setStroke];
+    [outline stroke];
+    if (!hasValue) { TMDrawDashLen(ink, NSMidX(box), NSMidY(box), horizontal ? 2.4 : 1.4); return; }
+    double f = TMUnit(fraction);
+    if (f <= 0) return;
+    NSRect inner = NSInsetRect(box, 1.8, 1.8);
+    NSRect cut = horizontal ? NSMakeRect(inner.origin.x, inner.origin.y, inner.size.width * f, inner.size.height)
+                            : NSMakeRect(inner.origin.x, inner.origin.y, inner.size.width, inner.size.height * f);
+    [NSGraphicsContext saveGraphicsState];
+    [[NSBezierPath bezierPathWithRect:cut] addClip];
+    [ink setFill];
+    CGFloat r = horizontal ? inner.size.height / 2 : 1.0;
+    [[NSBezierPath bezierPathWithRoundedRect:inner xRadius:r yRadius:r] fill];
+    [NSGraphicsContext restoreGraphicsState];
+}
+
+static NSImage *TMDrawChip(NSDictionary *readout, BOOL withBar, NSColor *ink, BOOL isTemplate) {
+    const CGFloat h = 18, gap = 4, left = 0.5;
+    BOOL hasValue = [readout[@"hasValue"] boolValue], dual = [readout[@"dual"] boolValue];
+    NSString *label = readout[@"chipLabel"], *value = readout[@"chipValue"], *unit = readout[@"chipUnit"];
+    BOOL spark = !withBar && [readout[@"chipKind"] isEqual:@"spark"];
+    BOOL charging = [readout[@"charging"] boolValue];
+
+    NSFont *labelFont = [NSFont systemFontOfSize:5.8 weight:NSFontWeightSemibold];
+    NSFont *valueFont = [NSFont monospacedDigitSystemFontOfSize:9.5 weight:NSFontWeightSemibold];
+    NSFont *unitFont = [NSFont systemFontOfSize:6.5 weight:NSFontWeightMedium];
+    NSFont *rateFont = [NSFont monospacedDigitSystemFontOfSize:8.5 weight:NSFontWeightMedium];
+    NSFont *upFont = [NSFont monospacedDigitSystemFontOfSize:5.8 weight:NSFontWeightMedium];
+    const CGFloat labelKern = 0.5;
+
+    // Largeur du pire cas, mesurée sur du texte réel (les gabarits du readout).
+    CGFloat labelW = TMTextWidth(label, labelFont, labelKern) + (charging ? 5 : 0);
+    CGFloat textW;
+    if (dual) {
+        NSString *template = readout[@"template"];
+        NSString *upTemplate = [@"↑" stringByAppendingString:[template length] > 1 ? [template substringFromIndex:1] : @""];
+        textW = MAX(TMTextWidth(template, rateFont, 0), labelW + 4 + TMTextWidth(upTemplate, upFont, 0));
+    } else {
+        textW = MAX(labelW, TMTextWidth(@"100", valueFont, 0) + 1 + TMTextWidth(unit, unitFont, 0));
+    }
+    textW = ceil(textW);
+    CGFloat graphW = withBar ? 15 : spark ? 17 : 8;
+    CGFloat w = left + textW + gap + graphW + 0.5;
+
+    NSString *top = hasValue && dual ? readout[@"secondary"] : @"";
+    NSString *rate = hasValue && dual ? readout[@"primary"] : @"";
+    double fraction = dual ? [readout[@"rxFraction"] doubleValue] : [readout[@"fraction"] doubleValue];
+    NSArray<NSNumber *> *series = readout[@"series"];
+    BOOL autoScale = [readout[@"autoScale"] boolValue];
+
+    return TMVectorImage(NSMakeSize(w, h), isTemplate, ^{
+        const CGFloat labelBase = 11.4, valueBase = 2.6;
+        NSColor *dim = [ink colorWithAlphaComponent:0.62];
+        TMDrawTextAt(label, labelFont, dim, left, labelBase, NSTextAlignmentLeft, labelKern);
+        if (charging) TMFillBolt(left + labelW - 1.6, labelBase + 2.1, dim);
+        if (dual) {
+            TMDrawTextAt(top, upFont, dim, left + textW, labelBase, NSTextAlignmentRight, 0);
+            TMDrawTextAt(hasValue ? rate : @"—", rateFont, ink, left, valueBase, NSTextAlignmentLeft, 0);
+        } else if (hasValue && value.length) {
+            TMDrawTextAt(value, valueFont, ink, left, valueBase, NSTextAlignmentLeft, 0);
+            TMDrawTextAt(unit, unitFont, [ink colorWithAlphaComponent:0.7],
+                         left + TMTextWidth(value, valueFont, 0) + 1, valueBase, NSTextAlignmentLeft, 0);
+        } else {
+            TMDrawTextAt(@"—", valueFont, [ink colorWithAlphaComponent:0.6], left, valueBase, NSTextAlignmentLeft, 0);
+        }
+        CGFloat gx = left + textW + gap;
+        if (spark) {
+            TMDrawChipSpark(series, autoScale, hasValue, NSMakeRect(gx, 3, graphW, 12), ink, isTemplate);
+        } else if (withBar) {
+            TMDrawChipReservoir(fraction, hasValue, YES, NSMakeRect(gx, 5.5, graphW, 7), ink, isTemplate);
+        } else {
+            TMDrawChipReservoir(fraction, hasValue, NO, NSMakeRect(gx, 3, graphW, 12), ink, isTemplate);
+        }
+    });
+}
+
 // Forme réellement dessinée : celle demandée si elle sait représenter la donnée de ce widget, sinon
 // la forme naturelle du readout. Les formes historiques passent telles quelles (inchangées pour les
 // utilisateurs existants) ; les formes ajoutées exigent les champs du readout qu'elles dessinent.
@@ -784,6 +930,8 @@ NSImage *TMWidgetImageWithInk(NSDictionary *readout, NSString *shape, NSColor *i
         return TMDrawHub(fraction, hasValue, ink, isTemplate);
     if ([shape isEqual:@"dualArc"])
         return TMDrawDualArc(readout, ink, isTemplate);
+    if ([shape isEqual:@"chip"] || [shape isEqual:@"chipBar"])
+        return TMDrawChip(readout, [shape isEqual:@"chipBar"], ink, isTemplate);
     NSString *textTemplate = readout[@"template"], *valueTemplate = readout[@"valueTemplate"];
     if ([shape isEqual:@"text"])
         return TMDrawText(hasValue ? readout[@"value"] : @"—", valueTemplate, ink, isTemplate);
