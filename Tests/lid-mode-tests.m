@@ -19,7 +19,8 @@ static void Check(BOOL ok, NSString *label) { checks++; if(!ok){failures++; NSLo
 - (BOOL)saveJournal:(NSDictionary *)journal{if(self.failSave)return NO;self.journal=[journal copy];return YES;}
 - (BOOL)clearJournal{self.journal=nil;return YES;}
 @end
-static TMLidMode *Mode(FakePower *backend){return [[TMLidMode alloc]initWithBackend:backend];}
+// Modèle fixé (un MacBook Pro) : ces tests décrivent le profil à ventilateurs, quel que soit le Mac qui les lance.
+static TMLidMode *Mode(FakePower *backend){TMLidMode *m=[[TMLidMode alloc]initWithBackend:backend];m.machineModel=@"Mac16,6";return m;}
 static void Start(TMLidMode *mode){[mode startMinutes:17 battery:65 thermal:0 now:100];}
 int main(void){@autoreleasepool{
     Check(TMLidDurationAllowed(1)&&TMLidDurationAllowed(17)&&TMLidDurationAllowed(240),@"durée personnalisée acceptée");

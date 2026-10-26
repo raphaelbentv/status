@@ -1174,6 +1174,39 @@ section('Réglages : espacement système des icônes');
   for(const id of ['normal','snug','tight']) check(def.includes(`send('setSystemMenuBarSpacing',{preset:'${id}'})`),`bouton ${id} → setSystemMenuBarSpacing`);
   checkEqual(active(render({systemMenuBarSpacing:'<img>'})),['Normal'],'valeur inconnue : repli sur Normal');
 }
+section('Capot fermé : mode constant réservé aux MacBook Air');
+{
+  const strip=lidMode=>menubar('lidStrip')({lidMode});
+  const pro=strip({authorized:true,active:false,fanlessMac:false});
+  check(!pro.includes('∞')&&!pro.includes('setLidMinutes(0)'),'Pro : aucune option constante');
+  const air=strip({authorized:true,active:false,fanlessMac:true});
+  check(air.includes('∞')&&air.includes('setLidMinutes(0)')&&air.includes('tant que la batterie dépasse 30'),'Air : option ∞ avec son explication');
+  check(air.includes('>15<')&&air.includes('>120<'),'Air : les durées restent proposées');
+  const running=strip({authorized:true,active:true,constant:true,fanlessMac:true,remainingSeconds:0});
+  check(running.includes('Constant · jusqu’à 30 % de batterie')&&running.includes("send('stopLidMode')")&&!running.includes('0 min'),'Air : session constante affichée sans compte à rebours');
+  menubar('window.sent=[]; window.webkit={messageHandlers:{native:{postMessage:m=>window.sent.push(m)}}}');
+  menubar('lastData=null');menubar('setLidMinutes(0)');   // sans données : pas de rendu complet du popup
+  menubar(`lastData={tools:{lidMode:{authorized:true,fanlessMac:true}}}`);
+  menubar('startLid()');
+  checkEqual(menubar('window.sent[0]'),{action:'startLidConstant'},'Air : ∞ puis Démarrer → startLidConstant');
+  menubar(`lastData={tools:{lidMode:{authorized:true,fanlessMac:false}}}`);
+  menubar('startLid()');
+  checkEqual(menubar('window.sent.length'),1,'Pro : un choix constant resté en mémoire n’envoie rien');
+  check(!strip({authorized:true,active:false,fanlessMac:false}).includes('∞'),'Pro : ∞ jamais affiché, même s’il était mémorisé');
+  menubar('lastData=null');menubar('setLidMinutes(30)');
+  const tool=menubar('tools')({lidMode:{active:true,constant:true},awake:{},keyboardLock:{}});
+  check(tool.includes('capot · constant'),'bouton Outils : « capot · constant »');
+  const set=(lidMode)=>dashboard('lidModeSettings')({tools:{lidMode}});
+  check(!set({authorized:true,fanlessMac:false}).includes('MacBook Air détecté'),'Réglages Pro : pas de note Air');
+  const airSet=set({authorized:true,fanlessMac:true});
+  check(airSet.includes('MacBook Air détecté')&&airSet.includes('type="checkbox"')&&airSet.includes('Constant'),'Réglages Air : note et case Constant');
+  check(set({authorized:true,fanlessMac:true,active:true,constant:true}).includes('Constant · jusqu’à 30 % de batterie'),'Réglages Air : session constante affichée');
+  dashboard('window.sent=[]; window.webkit={messageHandlers:{native:{postMessage:m=>window.sent.push(m)}}}');
+  dashboard(`appData={tools:{lidMode:{authorized:true,fanlessMac:true}}};lidConstant=true`);
+  dashboard('startLidMode()');
+  checkEqual(dashboard('window.sent[0]'),{action:'startLidConstant'},'Réglages Air : Constant coché → startLidConstant');
+  dashboard('lidConstant=false');
+}
 section('Réglages : mises à jour automatiques');
 {
   const off=plain(dashboard('updateSettings')({updates:{available:false,version:'0.9.0'}}));

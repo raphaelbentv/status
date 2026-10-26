@@ -109,6 +109,7 @@ static BOOL PrivateDirectory(void) {
     double battery=Battery();
     return @{@"active":@(self.mode.active), @"restorationPending":@(self.mode.restorationPending),
         @"controlVersion":@4, @"remainingSeconds":@(MAX(0,self.mode.deadline-Clock())), @"message":self.mode.message ?: @"",
+        @"constant":@(self.mode.constant), @"constantSupported":@YES, @"fanlessMac":@(TMMachineIsFanlessMacBook(TMMachineModel())),
         @"batteryPercent":@(battery), @"thermalState":@(NSProcessInfo.processInfo.thermalState),
         @"fanBoost":[self.fanBoost snapshot:Clock()]};
 }

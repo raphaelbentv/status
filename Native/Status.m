@@ -1946,6 +1946,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         if (minutes && minutes.doubleValue==minutes.integerValue && minutes.integerValue>=1 && minutes.integerValue<=240)
             [self.lidMode startMinutes:minutes.integerValue];
     }
+    if ([action isEqualToString:@"startLidConstant"]) [self.lidMode startConstant];  // le client et le service revérifient la machine
     if ([action isEqualToString:@"stopLidMode"]) [self.lidMode stop];
     // Boost du popup quota et des Réglages = mode Manuel : le contrôleur arrête proprement un palier
     // de courbe en cours avant de lancer celui-ci (le service refuse de relancer un boost actif).

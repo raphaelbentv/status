@@ -336,23 +336,28 @@ function tools(tl){
   const awake=tl?.awake||{},lock=tl?.keyboardLock||{},lid=tl?.lidMode||{};
   // « blocked » = permission Accessibilité refusée : le libellé le dit, et re-cliquer re-tente
   // après l'avoir accordée dans Réglages système.
-  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?t('menu.lidShort',{n:Math.ceil((lid.remainingSeconds||0)/60)}):t('menu.lid'),lid.active&&!lid.unconfirmed)
+  return btn('showLidMode','▱',lid.active&&!lid.unconfirmed?(lid.constant?t('menu.lidConstant'):t('menu.lidShort',{n:Math.ceil((lid.remainingSeconds||0)/60)})):t('menu.lid'),lid.active&&!lid.unconfirmed)
     +btn('toggleAwake','☾',awake.active?t('menu.awakeOn'):t('menu.awake'),awake.active)
     +btn('toggleKeyboardLock',GLYPH_KEYBOARD,lock.state==='blocked'?t('menu.allowAccess'):t('menu.cleaning'),lock.state==='locked');
 }
 // Capot fermé : démarrage direct depuis le popup, sans passer par le tableau de bord. Mêmes états
 // et mêmes garde-fous que Réglages › Mac (service autorisé, session active, état à vérifier) ;
 // le natif borne et revalide tout (durée entière de 1 à 240 min).
-const LID_DURATIONS=[15,30,60,120];
+// 0 = constant (sans échéance) : proposé seulement sur un MacBook Air, que le client et le service revérifient.
+const LID_DURATIONS=[15,30,60,120],LID_CONSTANT=0;
+const lidChoices=lid=>lid?.fanlessMac?[...LID_DURATIONS,LID_CONSTANT]:LID_DURATIONS;
 let lidMinutes=30;
-try{const saved=Number(localStorage.getItem('lidMinutes'));if(LID_DURATIONS.includes(saved))lidMinutes=saved;}catch(e){}
+try{const raw=localStorage.getItem('lidMinutes'),saved=Number(raw);if(raw!==null&&(LID_DURATIONS.includes(saved)||saved===LID_CONSTANT))lidMinutes=saved;}catch(e){}
 function setLidMinutes(m){
-  if(!LID_DURATIONS.includes(m))return;
+  if(!LID_DURATIONS.includes(m)&&m!==LID_CONSTANT)return;
   lidMinutes=m;
   try{localStorage.setItem('lidMinutes',String(m));}catch(e){}
   if(lastData)renderMenu(lastData);
 }
-function startLid(){if(LID_DURATIONS.includes(lidMinutes))send('startLidMode',{minutes:lidMinutes});}
+function startLid(){
+  if(lidMinutes===LID_CONSTANT){if(lastData?.tools?.lidMode?.fanlessMac)send('startLidConstant');return;}
+  if(LID_DURATIONS.includes(lidMinutes))send('startLidMode',{minutes:lidMinutes});
+}
 function lidStrip(tl){
   const lid=tl?.lidMode;
   if(!lid||lid.available===false&&!lid.authorized)return '';  // machine sans le service : rien à proposer
@@ -360,9 +365,9 @@ function lidStrip(tl){
   const title=`<span class="lid-title">${t('menu.lid')}</span>`;
   const go=(action,label,extra='')=>`<button class="account-action lid-go" ${lid.busy?'disabled':''} onclick="${action}">${label}</button>${extra}`;
   let body;
-  if(active)body=`<span class="lid-state on">${t('lid.remaining',{n:Math.ceil((lid.remainingSeconds||0)/60)})}</span>${go("send('stopLidMode')",t('lid.stopNow'))}`;
+  if(active)body=`<span class="lid-state on">${lid.constant?t('lid.constantActive'):t('lid.remaining',{n:Math.ceil((lid.remainingSeconds||0)/60)})}</span>${go("send('stopLidMode')",t('lid.stopNow'))}`;
   else if(pending)body=`<span class="lid-state">${t('lid.toCheck')}</span>${go("send('stopLidMode')",t('lid.stopRestore'))}`;
-  else if(lid.authorized)body=`<span class="segmented" role="group" aria-label="${t('lid.durationAria')}">${LID_DURATIONS.map(m=>`<button class="seg ${lidMinutes===m?'on':''}" aria-pressed="${lidMinutes===m}" onclick="setLidMinutes(${m})">${m}</button>`).join('')}</span><span class="lid-state">${t('unit.min')}</span>${go('startLid()',t('lid.start'))}`;
+  else if(lid.authorized)body=`<span class="segmented" role="group" aria-label="${t('lid.durationAria')}">${(lidMinutes===LID_CONSTANT&&!lid.fanlessMac?(lidMinutes=30,LID_DURATIONS):lidChoices(lid)).map(m=>`<button class="seg ${lidMinutes===m?'on':''}" aria-pressed="${lidMinutes===m}" ${m===LID_CONSTANT?`title="${t('lid.constantTip')}" aria-label="${t('lid.constant')}"`:''} onclick="setLidMinutes(${m})">${m===LID_CONSTANT?'∞':m}</button>`).join('')}</span><span class="lid-state">${lidMinutes===LID_CONSTANT?'':t('unit.min')}</span>${go('startLid()',t('lid.start'))}`;
   else body=`<span class="lid-state">${t('lid.authNote')}</span>${go("send('authorizeLidMode')",lid.approvalRequired?t('lid.openAuth'):t('lid.authorize'))}`;
   return `<div class="lid-strip" style="--provider:var(--blue)">${title}${body}</div>`;
 }

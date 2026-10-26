@@ -1,5 +1,6 @@
 #import "StatusLidClient.h"
 #import "StatusLidProtocol.h"
+#import "StatusMachine.h"
 #import <ServiceManagement/ServiceManagement.h>
 #import <AppKit/AppKit.h>
 
@@ -30,6 +31,11 @@
         result[@"unconfirmed"]=@YES;
         result[@"message"]=@"Ancien service chargé. Arrêtez le mode puis mettez le service à jour.";
     }
+    // Machine lue ici aussi : l'interface propose le mode constant dès qu'elle voit un Air, même si un ancien service
+    // tourne encore (le démarrage lui explique alors qu'il faut le mettre à jour).
+    NSString *model=TMMachineModel();
+    result[@"machineModel"]=model ?: @"";
+    result[@"fanlessMac"]=@(TMMachineIsFanlessMacBook(model));
     result[@"authorized"]=@(self.authorized);
     result[@"approvalRequired"]=@(status==SMAppServiceStatusRequiresApproval);
     result[@"busy"]=@(_refreshing);
@@ -138,6 +144,15 @@
 }
 - (void)refresh { [self request:0 minutes:0]; }
 - (void)startMinutes:(NSInteger)minutes { [self request:1 minutes:minutes]; }
+- (void)startConstant {
+    if (!TMMachineIsFanlessMacBook(TMMachineModel())) {
+        _error=@"Le mode constant est réservé aux MacBook Air (sans ventilateur)."; [self changed]; return;
+    }
+    if (![_remote[@"constantSupported"] boolValue]) {
+        _error=@"Le service macOS en cours est une version précédente : redémarrez le Mac pour activer le mode constant."; [self changed]; [self refresh]; return;
+    }
+    [self request:1 minutes:0];
+}
 - (void)stop { [self request:2 minutes:0]; }
 - (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent { [self request:3 minutes:minutes percent:percent]; }
 - (void)stopFanBoost { [self request:4 minutes:0]; }

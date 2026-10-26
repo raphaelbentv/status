@@ -23,9 +23,15 @@ native_status=$?
 
 echo "── Mode capot fermé (simulé, sans modifier la veille) ──"
 clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework Security -framework IOKit \
-  "$ROOT/Tests/lid-mode-tests.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusLidProtocol.m" \
+  "$ROOT/Tests/lid-mode-tests.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusMachine.m" "$ROOT/Native/StatusLidProtocol.m" \
   -o "$BUILD/lid-mode-tests"
 "$BUILD/lid-mode-tests"
+
+echo "── Mode capot fermé sur MacBook Air (profil sans ventilateur, session constante) ──"
+clang -fobjc-arc -I "$ROOT/Native" -framework Foundation \
+  "$ROOT/Tests/lid-air-tests.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusMachine.m" \
+  -o "$BUILD/lid-air-tests"
+"$BUILD/lid-air-tests"
 
 echo "── Tests des surfaces web (JavaScript) ──"
 clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework IOKit \
