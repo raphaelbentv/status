@@ -129,6 +129,7 @@ function sandboxFor(htmlFile) {
   sandbox.__STATUS_I18N__ = payload('fr');
   const context = createContext(sandbox);
   runInContext(readFileSync(join(root, 'Resources', 'i18n.js'), 'utf8'), context);
+  runInContext(readFileSync(join(root, 'Resources', 'quota-core.js'), 'utf8'), context);
   runInContext(script, context);
   return expression => runInContext(expression, context);
 }

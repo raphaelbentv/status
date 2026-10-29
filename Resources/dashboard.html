@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="themes/blueprint.css">
 <link rel="stylesheet" href="themes/phosphore.css">
 <script src="i18n.js"></script>
+<script src="quota-core.js"></script>
 <link rel="stylesheet" href="themes/moderne.css">
 <link rel="stylesheet" href="themes/dark.css">
 <link rel="stylesheet" href="themes/neon.css">
@@ -414,14 +415,8 @@ const countdown=timestamp=>{
   if(h>0)return t('d.in',{v:`${h} ${t('unit.hour')} ${String(m).padStart(2,'0')}`});
   return t('d.in',{v:`${m} ${t('unit.min')}`});
 };
-const isConnected=(id,account)=>id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
-const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
-// Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, qui garde sa
-// carte et son épinglage mais ne pilote aucun chiffre agrégé — en tête d'affiche, « 54 % » sans
-// son contexte Fable ferait croire que la semaine entière en est là.
-const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
-const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
-const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+const {isConnected}=StatusQuota;
+const {isWeekly,isScopedWeekly,isCodexSpark,used,usableWindows,availability,weeklyReset,compareByReset,compareByRemaining}=StatusQuota;
 // Niveau d'une fenêtre d'après ce qu'il RESTE (≤ 20 % : crit, ≤ 45 % : warn) : exposé en data-level
 // pour que les thèmes colorent l'alerte d'après la vraie valeur. Les thèmes historiques l'ignorent.
 const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
@@ -799,25 +794,9 @@ function weeklyChart(data){
     <svg class="wk-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${paths}</svg>
     <div class="wk-legend">${legend}</div></div>`;
 }
-function usableWindows(account){return (account.windows||[]).filter(w=>typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&w.usedPercent>=0&&w.usedPercent<=100&&Number(w.resetsAt)>Date.now()/1000);}
-function availability(account){
-  if(!isConnected(account.provider,account)||account.error||account.stale||(account.capturedAt&&Date.now()/1000-account.capturedAt>1800))return null;
-  const windows=usableWindows(account),weekly=windows.filter(w=>isWeekly(w)&&!isScopedWeekly(w)&&!/spark/i.test(w.label||w.windowId||''));
-  if(!weekly.length)return null;
-  const week=Math.max(...weekly.map(w=>w.usedPercent));
-  const session=windows.filter(w=>w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
-  if(account.provider==='claude'&&!session.length)return null;
-  return {remaining:Math.max(0,100-week),available:week<100&&session.every(w=>w.usedPercent<100),reset:Math.min(...weekly.map(w=>Number(w.resetsAt)))};
-}
 let accountSort='reset';
 function setAccountSort(value){if(['remaining','reset','name'].includes(value)){accountSort=value;render();}}
-function sortedAccounts(accounts,mode=accountSort){return [...accounts].sort((a,b)=>{
-  const aa=availability(a),bb=availability(b);
-  if(mode==='name')return String(a.label).localeCompare(String(b.label),I.locale);
-  if(!aa||!bb)return aa?-1:bb?1:0;
-  if(mode==='reset')return aa.reset-bb.reset;
-  return Number(bb.available)-Number(aa.available)||bb.remaining-aa.remaining;
-});}
+function sortedAccounts(accounts,mode=accountSort){return [...accounts].sort(mode==='name'?(a,b)=>String(a.label).localeCompare(String(b.label),I.locale):mode==='reset'?compareByReset:compareByRemaining);}
 function notificationsNotice(data){return data.prefs?.notificationsAuthorized===false?`<aside class="notice"><div><strong>${t('notice.title')}</strong><p>${t('notice.body')}</p></div><button class="button" onclick="send('openNotificationSettings')">${t('notice.open')}</button></aside>`:'';}
 function overview(data){
   // Les synthèses par fournisseur et le « compte le plus contraint » ont été retirés : les blocs par
@@ -884,8 +863,8 @@ function fanBoostSettings(data){
 // Seules les métriques de quota existent côté natif pour ces deux icônes : `lowest` et `system:*`
 // ne pilotent plus rien (les icônes système passent par menuBarWidgets), on ne les propose plus.
 const ICON_COLORS={openai:'#33A6FF',claude:'#FF8C47'};  // mêmes teintes que TMProviderGauge
-const isSessionWindow=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
-const windowMatchesKind=(w,kind)=>kind==='session'?isSessionWindow(w):kind==='weekly'?isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w):false;
+const isSessionWindow=StatusQuota.isSession;
+const windowMatchesKind=(w,kind)=>kind==='session'?isSessionWindow(w):kind==='weekly'?StatusQuota.isMainWeekly(w):false;
 // Reflet de TMResolveMenuBarMetric pour un fournisseur : fraction RESTANTE montrée par l'icône,
 // compte épinglé d'abord, sinon le plus consommé des comptes ; un compte épinglé sans fenêtre ne
 // prête pas le chiffre d'un autre.

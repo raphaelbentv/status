@@ -66,6 +66,7 @@ function sandboxFor(htmlFile, language = 'fr') {
   sandbox.__STATUS_I18N__ = i18nPayload(language);
   const context = createContext(sandbox);
   runInContext(readFileSync(join(root, 'Resources', 'i18n.js'), 'utf8'), context);
+  runInContext(readFileSync(join(root, 'Resources', 'quota-core.js'), 'utf8'), context);
   runInContext(script, context);
   // Les `const` de haut niveau vivent dans l'environnement lexical du contexte, pas sur l'objet
   // global : on les récupère en évaluant une expression dans ce même contexte.
@@ -1133,6 +1134,16 @@ section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumul�
   const spark={...account,provider:'openai',windows:[{windowId:'base',durationMinutes:10080,label:'Semaine',usedPercent:2,resetsAt:future},{windowId:'spark',durationMinutes:10080,label:'Spark',usedPercent:99,resetsAt:future}]};
   checkEqual(dashboard('availability')(spark).remaining,98,'la synthèse standard ne mélange pas Spark avec le quota général');
   checkEqual(dashboard('sortedAccounts')([{...account,label:'Ancien',stale:true},account])[0].label,'Disponible','tri place les données exploitables en premier');
+  const soon=Date.now()/1000+3600,late=Date.now()/1000+86400;
+  const idle={...account,label:'Inactif',capturedAt:Date.now()/1000-7200,windows:[{windowId:'seven_day',label:'7 jours',usedPercent:10,resetsAt:soon}]};
+  const busy={...account,label:'Actif',windows:[{windowId:'five_hour',label:'5 h',usedPercent:5,resetsAt:future},{windowId:'seven_day',label:'7 jours',usedPercent:25,resetsAt:late}]};
+  checkEqual(dashboard('sortedAccounts')([busy,idle])[0].label,'Inactif','tri par renouvellement : compte inactif sans fenêtre 5 h classé selon sa date hebdo');
+  // Le popover et le tableau de bord partagent quota-core.js : mêmes comptes, même ordre.
+  const errored={...account,label:'Erreur',error:'boom',windows:[{windowId:'seven_day',label:'7 jours',usedPercent:1,resetsAt:soon-60}]};
+  const none={...account,label:'Vide',windows:[]};
+  const fleet=[none,errored,busy,idle,{...account,label:'Proche',windows:[{windowId:'five_hour',label:'5 h',usedPercent:5,resetsAt:future},{windowId:'seven_day',label:'7 jours',usedPercent:60,resetsAt:soon+60}]}];
+  const popupOrder=[...menubar('accountList')(fleet).matchAll(/<span title="([^"]*)"/g)].map(m=>m[1]);
+  checkEqual(popupOrder,dashboard('sortedAccounts')(fleet,'reset').map(a=>a.label),'popover et tableau de bord ordonnent les comptes à l’identique (renouvellement)');
 }
 section('Popup : capot fermé démarrable directement');
 {

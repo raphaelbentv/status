@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="themes/blueprint.css">
 <link rel="stylesheet" href="themes/phosphore.css">
 <script src="i18n.js"></script>
+<script src="quota-core.js"></script>
 <link rel="stylesheet" href="themes/moderne.css">
 <link rel="stylesheet" href="themes/dark.css">
 <link rel="stylesheet" href="themes/neon.css">
@@ -187,17 +188,7 @@ document.querySelector('.mac-tools').addEventListener('toggle',event=>
   send('setMacToolsVisible',{visible:event.currentTarget.open}));
 const I=StatusI18n;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const isSession=w=>w&&(w.windowId==='five_hour'||w.durationMinutes===300||w.label==='5 h');
-const isWeekly=w=>w&&(String(w.windowId||'').startsWith('seven_day')||w.durationMinutes===10080||w.label==='Semaine'||w.label==='7 jours');
-// Sous-quota hebdo dédié à un modèle (seven_day_scoped_fable) : un compteur à part, exclu de la
-// jauge « Semaine » — le max avec lui ferait dire à la jauge autre chose que la carte 7 jours.
-// Le max reste voulu entre limites GÉNÉRALES (OpenAI en expose plusieurs : afficher la première
-// venue montrerait 1 % pendant que l'autre est à 84 %).
-const isCodexSpark=w=>/spark/i.test(`${w?.windowId||''} ${w?.label||''}`);
-const isScopedWeekly=w=>isWeekly(w)&&String(w?.windowId||'').includes('scoped');
-const mainWeekly=windows=>(windows||[]).filter(w=>isWeekly(w)&&!isScopedWeekly(w)&&!isCodexSpark(w)).sort((a,b)=>(used(b)??0)-(used(a)??0))[0]??null;
-const isFable=w=>w&&(/fable/i.test(w.label||'')||/fable/i.test(w.windowId||''));
-const used=w=>w?Math.max(0,Math.min(100,Math.round(Number(w.usedPercent)))):null;
+const {isSession,isWeekly,isCodexSpark,isScopedWeekly,mainWeekly,isFable,used,isConnected,isLive}=StatusQuota;
 // Même seuils que dashboard.html : data-level pour les thèmes qui colorent l'alerte (≤ 20 % restant : crit, ≤ 45 % : warn).
 const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
 const reset=w=>{
@@ -267,9 +258,9 @@ function extraCredits(account){
 // reset, ni sous-quota Fable : seul ce qui fait décider reste.
 function provider(id,name,accounts,metric){
   const account=pickAccount(accounts,metric);
-  const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&!isFable(w)&&!isScopedWeekly(w)&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
+  const windows=(account?.windows||[]).filter(w=>!(id==='openai'&&isCodexSpark(w))&&!isFable(w)&&!isScopedWeekly(w)&&isLive(w));
   const weekly=mainWeekly(windows),session=windows.find(isSession);
-  const connected=id==='openai'||['code','web'].includes(account?.claudeSource)?Boolean(account?.connected):Boolean(account?.cookieConfigured&&account?.orgId);
+  const connected=isConnected(id,account);
   const ink=id==='openai'?'var(--blue)':'var(--purple)';
   const old=account?.stale||(account?.capturedAt&&Date.now()/1000-account.capturedAt>1800);
   const note=!connected?t('menu.notConnected'):account?.liveSource?t('menu.live'):old?t('menu.stale',{v:ageLabel(account.capturedAt)}):account?.capturedAt?t('menu.measure',{v:ageLabel(account.capturedAt)}):t('menu.waiting');
@@ -291,18 +282,15 @@ function provider(id,name,accounts,metric){
 // Liste compacte de tous les comptes, même ordre que le tableau de bord (prochain renouvellement).
 // Les cartes ci-dessus ne montrent qu'un compte par fournisseur : ici on les voit tous d'un coup.
 function accountSummary(account){
-  const windows=(account.windows||[]).filter(w=>!isCodexSpark(w)&&!isFable(w)&&!isScopedWeekly(w)&&typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent)&&Number(w.resetsAt)>Date.now()/1000);
+  const windows=(account.windows||[]).filter(w=>!isCodexSpark(w)&&!isFable(w)&&!isScopedWeekly(w)&&isLive(w));
   const weekly=mainWeekly(windows),session=windows.find(isSession);
-  const connected=account.provider==='openai'||['code','web'].includes(account.claudeSource)?Boolean(account.connected):Boolean(account.cookieConfigured&&account.orgId);
+  const connected=isConnected(account.provider,account);
   return {account,weekly:connected?weekly:null,session:connected?session:null};
 }
 function accountList(accounts){
   const rows=(accounts||[]).map(accountSummary);
   if(rows.length<2)return '';  // un seul compte : la carte du fournisseur le montre déjà
-  rows.sort((a,b)=>{
-    if(!a.weekly||!b.weekly)return a.weekly?-1:b.weekly?1:0;
-    return a.weekly.resetsAt-b.weekly.resetsAt;
-  });
+  rows.sort((a,b)=>StatusQuota.compareByReset(a.account,b.account));
   const row=({account,weekly,session})=>{
     const value=used(weekly),level=value===null?'':value>=95?'critical':value>=80?'warning':'';
     const ink=account.provider==='openai'?'var(--blue)':'var(--purple)';
