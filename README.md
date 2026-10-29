@@ -13,8 +13,14 @@ facturée à l'API.
 
 OpenAI n'expose plus de fenêtre 5 h : seule la jauge hebdomadaire est affichée.
 
-Le suivi de la **consommation API facturée** (tokens, coûts, clés admin) a été entièrement retiré :
-l'app ne traite plus que les quotas d'abonnement.
+En complément, deux suivis facultatifs côté API :
+
+- **Comptes API** (Réglages → Comptes, OpenAI API et Anthropic API) : dépense relevée toutes les
+  5 min via les Admin API (clé d'administration au Trousseau uniquement), crédit restant estimé
+  depuis un solde saisi ou un budget mensuel, widgets `anthropicApi` / `openaiApi` et alerte
+  « Crédit API bas ».
+- **Coût équivalent API** des usages terminal (Claude Code, Codex), estimé localement à partir
+  des logs ; aucun appel réseau.
 
 ## Plusieurs comptes par fournisseur
 
