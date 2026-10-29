@@ -473,6 +473,9 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
     self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
         [weakSelf.lidMode refresh];
     }];
+    // Chaque relevé sert aussi de battement de cœur (arrêt du service après 20 s sans contact) :
+    // 1 s de tolérance laisse macOS grouper les réveils sans approcher ce délai.
+    self.lidTimer.tolerance = 1;
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     // Ventilateurs : le préréglage de courbe est mémorisé, mais chaque lancement repart en Auto —
     // jamais de ventilateurs forcés sans geste de l'utilisateur dans la session.
