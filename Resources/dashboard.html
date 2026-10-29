@@ -639,10 +639,13 @@ function manualResetLine(w,account){
 }
 // Expiration des resets manuels : date et délai de chaque crédit (OpenAI), ou la mention lue sur
 // la page Usage de Claude. Rien quand la source ne la donne pas — jamais de date supposée.
+// Jours calendaires locaux jusqu'à ts (secondes) : une échéance ce soir est « aujourd'hui », pas « demain ».
+function calendarDays(ts){const day=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
+  return Math.round((day(new Date(ts*1000))-day(new Date()))/86400000);}
 function resetExpiries(reset){
   const credits=Array.isArray(reset.credits)?reset.credits:[];
   if(credits.length){
-    const fmt=ts=>{const days=Math.ceil((ts-Date.now()/1000)/86400);
+    const fmt=ts=>{const days=calendarDays(ts);
       return `${I.date(ts*1000,{day:'numeric',month:'short'})} (${days<=0?t('d.today'):days===1?t('d.tomorrow'):t('d.inDays',{n:days})})`;};
     // « sans expiration » n'a de sens que pour OpenAI (champ explicite) ; une mention Claude non
     // convertie en date est reprise telle quelle, et une ligne sans information est omise.
@@ -703,7 +706,7 @@ function providerCostTotal(id){
 function billingLine(account){
   const b=account?.billing;
   if(b?.status!=='known'||!Number.isFinite(b.nextAt))return '';
-  const at=new Date(b.nextAt*1000),days=Math.ceil((b.nextAt-Date.now()/1000)/86400);
+  const at=new Date(b.nextAt*1000),days=calendarDays(b.nextAt);
   const date=I.date(at,{day:'numeric',month:'long'});
   const when=days<=0?t('d.today'):days===1?t('d.tomorrow'):t('d.inDays',{n:days});
   const plan=b.plan?` · ${esc(String(b.plan).replace(/^\w/,c=>c.toUpperCase()))}`:'';
