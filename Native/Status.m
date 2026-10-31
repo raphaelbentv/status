@@ -449,6 +449,7 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
 @property TMRamCleaner *ramCleaner;
+@property NSDictionary *ramCleanState;  // dernier état, relayé au popup via toolsPayload
 @property TMLidClient *lidMode;
 @property NSTimer *lidTimer;
 // Modes des ventilateurs (auto / courbe / manuel), pilotés via le service existant. Voir driveFans.
@@ -2330,6 +2331,8 @@ static NSNumber *TMFanInteger(id value) {
 }
 
 - (void)pushRamClean:(NSDictionary *)state {
+    self.ramCleanState = state;
+    [self pushData];
     NSData *data = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
     NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     [self.widgetWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.ramClean(%@);", json]
@@ -2339,6 +2342,7 @@ static NSNumber *TMFanInteger(id value) {
 - (NSDictionary *)toolsPayload {
     return @{
         @"awake": @{ @"active": @(self.awake.isEnabled) },
+        @"ramClean": self.ramCleanState ?: @{},
         @"lidMode": self.lidMode.snapshot ?: @{},
         // Mode des ventilateurs : le popup quota et les Réglages affichent une courbe active.
         @"fanMode": @{ @"mode": self.fanController.mode ?: @"auto", @"preset": self.fanController.preset ?: @"balanced",

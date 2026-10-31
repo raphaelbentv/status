@@ -911,5 +911,9 @@
  "w.mem.clean.running": "Limpiando…",
  "w.mem.clean.done": "{v} liberados",
  "w.mem.clean.nothing": "Nada que liberar ahora",
- "w.mem.clean.aborted": "Interrumpido: el Mac iba justo de memoria"
+ "w.mem.clean.aborted": "Interrumpido: el Mac iba justo de memoria",
+ "menu.ram": "RAM",
+ "menu.ramRunning": "RAM…",
+ "menu.ramDone": "{v} GB liberados",
+ "menu.ramNothing": "RAM ya libre"
 }

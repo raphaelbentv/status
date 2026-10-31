@@ -911,5 +911,9 @@
  "w.mem.clean.running": "Pulizia in corso…",
  "w.mem.clean.done": "{v} liberati",
  "w.mem.clean.nothing": "Niente da liberare ora",
- "w.mem.clean.aborted": "Interrotto: il Mac aveva poca memoria"
+ "w.mem.clean.aborted": "Interrotto: il Mac aveva poca memoria",
+ "menu.ram": "RAM",
+ "menu.ramRunning": "RAM…",
+ "menu.ramDone": "{v} GB liberati",
+ "menu.ramNothing": "RAM già libera"
 }

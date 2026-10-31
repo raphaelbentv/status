@@ -911,5 +911,9 @@
  "w.mem.clean.running": "Nettoyage en cours…",
  "w.mem.clean.done": "{v} libérés",
  "w.mem.clean.nothing": "Rien à libérer pour l'instant",
- "w.mem.clean.aborted": "Interrompu : le Mac manquait de mémoire"
+ "w.mem.clean.aborted": "Interrompu : le Mac manquait de mémoire",
+ "menu.ram": "RAM",
+ "menu.ramRunning": "RAM…",
+ "menu.ramDone": "{v} Go libérés",
+ "menu.ramNothing": "RAM déjà libre"
 }

@@ -911,5 +911,9 @@
  "w.mem.clean.running": "Cleaning…",
  "w.mem.clean.done": "{v} freed",
  "w.mem.clean.nothing": "Nothing to free right now",
- "w.mem.clean.aborted": "Stopped: the Mac was short on memory"
+ "w.mem.clean.aborted": "Stopped: the Mac was short on memory",
+ "menu.ram": "RAM",
+ "menu.ramRunning": "RAM…",
+ "menu.ramDone": "{v} GB freed",
+ "menu.ramNothing": "RAM already free"
 }
