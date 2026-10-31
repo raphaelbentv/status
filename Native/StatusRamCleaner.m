@@ -5,11 +5,12 @@
 
 static const uint64_t TMRamReserveBytes = 1ull << 30;   // marge laissée au système
 static const uint64_t TMRamChunkBytes = 128ull << 20;
-static const NSTimeInterval TMRamMaxSeconds = 8;
+static const NSTimeInterval TMRamMaxSeconds = 25;
 
 uint64_t TMRamCleanTarget(uint64_t freeBytes, uint64_t cachedBytes, uint64_t totalBytes) {
-    uint64_t reclaimable = freeBytes + cachedBytes;
-    uint64_t cap = MIN(reclaimable, totalBytes / 2);
+    // Plus de borne « libre + cache » : on demande 60 % de la RAM, quitte à ce que le noyau compresse
+    // des pages d'apps inactives pour y répondre (c'est voulu : le but est de les compresser).
+    uint64_t cap = totalBytes / 10 * 6;
     return cap > TMRamReserveBytes ? cap - TMRamReserveBytes : 0;
 }
 
@@ -54,7 +55,7 @@ static int TMRamPressure(void) {
     uint64_t freeBefore, cached, total;
     if (!TMRamSample(&freeBefore, &cached, &total)) return @{ @"status": @"aborted", @"freedBytes": @0, @"claimedBytes": @0 };
     uint64_t target = TMRamCleanTarget(freeBefore, cached, total);
-    if (target == 0 || TMRamPressure() >= 2) return @{ @"status": @"nothing", @"freedBytes": @0, @"claimedBytes": @0 };
+    if (target == 0 || TMRamPressure() >= 4) return @{ @"status": @"nothing", @"freedBytes": @0, @"claimedBytes": @0 };
 
     NSMutableArray<NSValue *> *chunks = [NSMutableArray array];
     uint64_t claimed = 0;
@@ -62,7 +63,7 @@ static int TMRamPressure(void) {
     NSDate *start = NSDate.date;
     long page = vm_kernel_page_size;
     while (claimed < target) {
-        if (-start.timeIntervalSinceNow > TMRamMaxSeconds || TMRamPressure() >= 2) { aborted = YES; break; }
+        if (-start.timeIntervalSinceNow > TMRamMaxSeconds || TMRamPressure() >= 4) { aborted = YES; break; }
         uint64_t size = MIN(TMRamChunkBytes, target - claimed);
         void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
         if (p == MAP_FAILED) { aborted = YES; break; }

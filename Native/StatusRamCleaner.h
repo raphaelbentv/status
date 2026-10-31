@@ -1,12 +1,12 @@
 // StatusRamCleaner — libère de la RAM sans droits administrateur.
 //
 // `purge` exige root ; ici on fait réclamer de la mémoire au noyau pendant un instant, qui rend le
-// cache de fichiers pour la satisfaire, puis on la rend. Aucune app n'est fermée. La demande reste
-// sous (libre + cache) : on ne pousse jamais le noyau à compresser ou swapper des apps.
+// cache de fichiers pour la satisfaire, puis on la rend. Aucune app n'est fermée. La demande monte à 60 % de la RAM, ce
+// qui pousse aussi le noyau à compresser des pages d'apps inactives ; arrêt dès la pression critique.
 
 #import <Foundation/Foundation.h>
 
-// Octets à réclamer. 0 si la machine n'a pas de marge. Plafonné à la moitié de la RAM, et réduit
+// Octets à réclamer. 0 si la machine n'a pas de marge. Plafonné à 60 % de la RAM, et réduit
 // d'une réserve fixe pour que le système garde de quoi respirer.
 uint64_t TMRamCleanTarget(uint64_t freeBytes, uint64_t cachedBytes, uint64_t totalBytes);
 

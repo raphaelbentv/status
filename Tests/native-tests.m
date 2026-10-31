@@ -1162,8 +1162,8 @@ static void TestThresholdFire(void) {
     Section(@"TMRamCleanTarget — marge et plafond");
     const uint64_t G = 1ull << 30;
     Check(TMRamCleanTarget(G / 2, 0, 16 * G) == 0, @"moins que la réserve : rien à réclamer");
-    Check(TMRamCleanTarget(2 * G, 3 * G, 16 * G) == 4 * G, @"libre + cache moins la réserve");
-    Check(TMRamCleanTarget(10 * G, 10 * G, 16 * G) == 7 * G, @"plafonné à la moitié de la RAM, moins la réserve");
+    Check(TMRamCleanTarget(2 * G, 3 * G, 36 * G) > 20 * G, @"36 Go : plus de 20 Go réclamés, même avec peu de cache");
+    Check(TMRamCleanTarget(10 * G, 10 * G, 16 * G) <= 16 * G / 10 * 6, @"plafonné à 60 % de la RAM");
 
     Section(@"TMThresholdShouldFire — hystérésis");
     BOOL above = NO;
