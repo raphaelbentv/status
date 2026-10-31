@@ -13,6 +13,7 @@
 #import "StatusAwake.h"
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
+#import "StatusRamCleaner.h"
 #import "StatusDisplays.h"
 #import "StatusMenuBarWidgets.h"
 #import "StatusIconDesigns.h"
@@ -1158,6 +1159,12 @@ static void TestTopProcessesEnergy(void) {
 }
 
 static void TestThresholdFire(void) {
+    Section(@"TMRamCleanTarget — marge et plafond");
+    const uint64_t G = 1ull << 30;
+    Check(TMRamCleanTarget(G / 2, 0, 16 * G) == 0, @"moins que la réserve : rien à réclamer");
+    Check(TMRamCleanTarget(2 * G, 3 * G, 16 * G) == 4 * G, @"libre + cache moins la réserve");
+    Check(TMRamCleanTarget(10 * G, 10 * G, 16 * G) == 7 * G, @"plafonné à la moitié de la RAM, moins la réserve");
+
     Section(@"TMThresholdShouldFire — hystérésis");
     BOOL above = NO;
     Check(!TMThresholdShouldFire(&above, 70, 90, 85), @"sous le seuil : silence");

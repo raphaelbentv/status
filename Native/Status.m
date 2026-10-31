@@ -10,6 +10,7 @@
 
 #import "StatusQuota.h"
 #import "StatusAwake.h"
+#import "StatusRamCleaner.h"
 #import "StatusSystemMonitor.h"
 #import "StatusKeyboardLock.h"
 #import "StatusCodexServer.h"
@@ -447,6 +448,7 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property BOOL macToolsVisible;
 @property BOOL notificationsAuthorized;
 @property TMAwake *awake;
+@property TMRamCleaner *ramCleaner;
 @property TMLidClient *lidMode;
 @property NSTimer *lidTimer;
 // Modes des ventilateurs (auto / courbe / manuel), pilotés via le service existant. Voir driveFans.
@@ -464,6 +466,7 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.updater = [TMUpdater new];
     self.awake = [TMAwake new];
+    self.ramCleaner = [TMRamCleaner new];
     self.lidMode = [TMLidClient new];
     __weak typeof(self) weakSelf = self;
     // Le service répond toutes les 5 s (vitesse des ventilateurs) : seul l'état des outils est
@@ -1979,6 +1982,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         [self openDashboard:nil];
         [self.webView evaluateJavaScript:@"settingsTab='system'; goToView('settings');" completionHandler:nil];
     }
+    if ([action isEqualToString:@"cleanRam"]) [self cleanRam];
     if ([action isEqualToString:@"toggleAwake"]) {
         self.awake.enabled = !self.awake.isEnabled;
         [self pushData];
@@ -2314,6 +2318,22 @@ static NSNumber *TMFanInteger(id value) {
     while (self.fanServiceView.busy && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
     [NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:@"fanMode"];
+}
+
+// Nettoyage de la RAM : l'état (en cours, résultat) est poussé directement au panneau Mémoire, qui
+// le garde côté web pour le réafficher à chaque tick de métriques.
+- (void)cleanRam {
+    if (self.ramCleaner.isRunning) return;
+    [self pushRamClean:@{ @"status": @"running" }];
+    __weak typeof(self) weakSelf = self;
+    [self.ramCleaner runWithCompletion:^(NSDictionary *result) { [weakSelf pushRamClean:result]; }];
+}
+
+- (void)pushRamClean:(NSDictionary *)state {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    [self.widgetWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusWidget && window.StatusWidget.ramClean(%@);", json]
+                         completionHandler:nil];
 }
 
 - (NSDictionary *)toolsPayload {

@@ -905,5 +905,11 @@
  "widget.left": "Hacia la izquierda",
  "widget.panel": "Panel",
  "widget.right": "Hacia la derecha",
- "widget.show": "Mostrar el icono de {label} en la barra de menús"
+ "widget.show": "Mostrar el icono de {label} en la barra de menús",
+ "w.mem.clean": "Liberar",
+ "w.mem.clean.hint": "Libera la caché sin cerrar apps",
+ "w.mem.clean.running": "Limpiando…",
+ "w.mem.clean.done": "{v} liberados",
+ "w.mem.clean.nothing": "Nada que liberar ahora",
+ "w.mem.clean.aborted": "Interrumpido: el Mac iba justo de memoria"
 }

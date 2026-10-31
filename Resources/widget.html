@@ -187,7 +187,7 @@ const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessag
 // widgetId = identité du panneau : un id de widget, ou « grouped » pour le popup regroupé. Dans ce
 // dernier, secId désigne le widget en cours de rendu : les renderers lisent ses interrupteurs de section
 // (on) et sa couleur via cur(), alors que le niveau de détail reste celui du panneau (« grouped »).
-let widgetId=null,metrics=null,secId=null;
+let widgetId=null,metrics=null,secId=null,ramClean=null;
 const GROUPED='grouped';
 const isGrouped=()=>widgetId===GROUPED;
 const cur=()=>secId||widgetId;
@@ -413,6 +413,12 @@ function renderCPU(){
     +(vis('load',1)&&tiles?sec('',`<div class="w-tiles">${tiles}</div>`):'')
     +(vis('processes',1)?sec(t('w.cpu.processSection'),procList('cpuPercent',v=>I.pct(Math.round(v)),procCount(),L>=2?{key:'rssBytes',fmt:fmtSize}:null)):''));
 }
+function ramCleanBlock(){
+  const c=ramClean||{},busy=c.status==='running';
+  const msg=busy?t('w.mem.clean.running'):c.status==='done'?t('w.mem.clean.done',{v:fmtSize(c.freedBytes||0)})
+    :c.status==='nothing'?t('w.mem.clean.nothing'):c.status==='aborted'?t('w.mem.clean.aborted'):'';
+  return `<div class="w-card"><div class="w-kv"><span class="k">${msg||t('w.mem.clean.hint')}</span><button class="w-seg" ${busy?'disabled':''} onclick="send('cleanRam')">${t('w.mem.clean')}</button></div></div>`;
+}
 function renderMemory(){
   const f=famGet('ram');if(!f)return empty(t('w.memory'));const n=f.now,L=level();
   const lv=n.pressureLevel,pcol=lv===4?'var(--danger)':lv===2?'var(--amber)':'var(--green)',pcls=lv===4?'crit':lv===2?'warn':'';
@@ -442,6 +448,7 @@ function renderMemory(){
     hero(pctN(n.usedPercent),'%',n.totalBytes?f1(`<b>${fmtGo(n.totalBytes)}</b><span>${t('w.total',{v:''}).trim()}</span>`):'')
     +plot([series(f,'usedPercent',ec('curve','var(--chart-a)'))],pct)
     +sec('',pressure)
+    +(vis('clean',1)?sec('',ramCleanBlock()):'')
     +(vis('breakdown',1)?sec('',breakdown):'')
     +(vis('stats',1)&&stats.length?sec('',`<div class="w-tiles">${stats.join('')}</div>`):'')
     +(vis('processes',1)?sec(t('w.mem.processSection'),procList('rssBytes',fmtSize,procCount(),L>=2?{key:'cpuPercent',fmt:v=>I.pct(Math.round(v))}:null)):''));
@@ -827,6 +834,7 @@ window.StatusWidget={
   // Changement de widget : la hauteur précédente n'a plus de sens, on force une remesure.
   // `focus` (popup regroupé seulement) : id du widget dont l'icône vient d'être cliquée.
   show(id,data,focus){if(id!==widgetId){pushedHeight=0;renderedTop=null;if(id!==GROUPED)focusId=null}widgetId=id;if(focus)setFocus(focus);metrics=mergeMetricsDelta(metrics,data)||metrics;render()},
+  ramClean(state){ramClean=state;render()},
   updateMetrics(data){const m=mergeMetricsDelta(metrics,data);if(m){metrics=m;render()}}
 };
 </script>

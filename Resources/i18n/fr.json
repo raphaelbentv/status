@@ -905,5 +905,11 @@
  "widget.left": "Vers la gauche",
  "widget.panel": "Panneau",
  "widget.right": "Vers la droite",
- "widget.show": "Afficher l’icône {label} dans la barre des menus"
+ "widget.show": "Afficher l’icône {label} dans la barre des menus",
+ "w.mem.clean": "Libérer",
+ "w.mem.clean.hint": "Libère le cache sans fermer d'app",
+ "w.mem.clean.running": "Nettoyage en cours…",
+ "w.mem.clean.done": "{v} libérés",
+ "w.mem.clean.nothing": "Rien à libérer pour l'instant",
+ "w.mem.clean.aborted": "Interrompu : le Mac manquait de mémoire"
 }
