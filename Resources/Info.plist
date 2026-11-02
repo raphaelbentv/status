@@ -2,45 +2,45 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>fr</string>
-    <key>CFBundleDisplayName</key>
-    <string>Status</string>
-    <key>CFBundleExecutable</key>
-    <string>Status</string>
-    <key>CFBundleIconFile</key>
-    <string>StatusIcon</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.raphael.status</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>Status</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.9.5</string>
-    <key>CFBundleVersion</key>
-    <string>30</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.developer-tools</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Status utilise Terminal uniquement pour lancer la connexion officielle Claude Code à votre demande.</string>
-    <key>SUFeedURL</key>
-    <string>https://github.com/raphaelbentv/status/releases/latest/download/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>OMtpcbBQ1XfPm7LKFVUyffj5TrcbDTORtlPc7sX1VJA=</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
-    <key>SUAutomaticallyUpdate</key>
-    <true/>
-    <key>SUScheduledCheckInterval</key>
-    <integer>21600</integer>
-    <key>NSHumanReadableCopyright</key>
-    <string>© 2026</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>fr</string>
+	<key>CFBundleDisplayName</key>
+	<string>Status</string>
+	<key>CFBundleExecutable</key>
+	<string>Status</string>
+	<key>CFBundleIconFile</key>
+	<string>StatusIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.raphael.status</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Status</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.9.6</string>
+	<key>CFBundleVersion</key>
+	<string>31</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Status utilise Terminal uniquement pour lancer la connexion officielle Claude Code à votre demande.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026</string>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/raphaelbentv/status/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>OMtpcbBQ1XfPm7LKFVUyffj5TrcbDTORtlPc7sX1VJA=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
 </dict>
 </plist>
