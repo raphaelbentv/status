@@ -1545,5 +1545,50 @@ section('Comptes API — réglages et popover');
   check((popup.match(/class="api-row"/g) || []).length === 3, 'popover : une ligne par compte');
 }
 
+// ── Veille : ce qui retient le Mac éveillé ──────────────────────────────────
+section('Veille — panneau Système et popup');
+{
+  const group = (name, seconds, type = 'PreventUserIdleSystemSleep', pids = [1]) =>
+    ({ name, pids, seconds, blocksSystem: true, blocksDisplay: false, items: [{ type, label: `${name} <b>`, seconds }] });
+  const sleep = { disabled: false, warning: false, sleepMinutes: 10, onBattery: true, groups: [], hidden: [group('powerd', 9000)] };
+  const render = (override = {}) => {
+    dashboard(`appData={tools:{sleep:${JSON.stringify({ ...sleep, ...override })}}};sleepShowAll=false`);
+    return plain(dashboard('sleepSection()'));
+  };
+  let html = render();
+  check(html.includes('Rien ne retient la veille.'), 'aucun blocage : message rassurant');
+  check(html.includes('après 10 min · sur batterie'), 'réglage de veille et source d’alimentation');
+  check(!html.includes('powerd') && html.includes('1 processus système de courte durée masqué'), 'le bruit est masqué et compté');
+  check(html.includes('Tout afficher'), 'bouton « Tout afficher » quand du bruit est masqué');
+  dashboard('sleepShowAll=true');
+  html = plain(dashboard('sleepSection()'));
+  check(html.includes('powerd') && html.includes('Masquer le bruit'), '« Tout afficher » révèle le bruit');
+  check(!render({ hidden: [] }).includes('Tout afficher'), 'pas de bouton sans bruit');
+  check(render({ sleepMinutes: 0, onBattery: false }).includes('jamais · sur secteur'), 'veille « jamais » sur secteur');
+  check(!render({ sleepMinutes: undefined }).includes('Veille système'), 'réglage illisible : ligne absente');
+
+  html = render({ groups: [group('Claude', 138000, 'PreventUserIdleSystemSleep', [1, 2])] });
+  check(html.includes('Claude') && html.includes('2 processus') && html.includes('depuis 1 j 14 h'), 'app, nombre de processus et durée');
+  check(html.includes('Empêche la veille inactive') && html.includes('Claude &lt;b&gt;'), 'type lisible, libellé échappé');
+  check(html.includes('1 app retient la veille'), 'compteur d’apps au singulier');
+  check(!html.includes('sleep-warn'), 'sans SleepDisabled : pas d’avertissement');
+
+  html = render({ disabled: true, warning: true });
+  check(html.includes('SleepDisabled = 1') && html.includes('sudo pmset -a disablesleep 0'), 'SleepDisabled : avertissement et commande à lancer soi-même');
+  check(!/onclick="[^"]*pmset/.test(html), 'la commande n’est qu’affichée, aucun bouton ne l’exécute');
+  checkEqual(dashboard('sleepNeedsAttention')({ warning: true, groups: [] }), true, 'avertissement : section mise en avant');
+  checkEqual(dashboard('sleepNeedsAttention')({ warning: false, groups: [] }), false, 'rien à signaler : section discrète');
+  checkEqual(dashboard('sleepNeedsAttention')(null), false, 'relevé absent');
+  dashboard('appData={tools:{}}');
+  checkEqual(dashboard('sleepSection()'), '', 'relevé absent : pas de section');
+
+  checkEqual(menubar('sleepStrip')({ sleep: { warning: false, groups: [] } }), '', 'popup : rien sans blocage');
+  checkEqual(menubar('sleepStrip')({}), '', 'popup : rien sans relevé');
+  html = plain(menubar('sleepStrip')({ sleep: { warning: false, groups: [group('Claude', 90), group('caffeinate', 120)] } }));
+  check(html.includes('Veille retenue par Claude, caffeinate'), 'popup : une ligne compacte nomme les apps');
+  html = plain(menubar('sleepStrip')({ sleep: { warning: true, groups: [group('Claude', 90)] } }));
+  check(html.includes('le mode capot fermé ne démarrera pas') && !html.includes('Claude'), 'popup : l’avertissement prime');
+}
+
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);
 process.exit(failures ? 1 : 0);

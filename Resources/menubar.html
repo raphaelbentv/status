@@ -161,6 +161,7 @@
   .al-row>small{color:var(--muted);text-align:right;white-space:nowrap}
   .al-row>b{text-align:right}.al-row>b.warning{color:var(--amber)}.al-row>b.critical{color:var(--danger)}
   .al-row.off>span,.al-row.off>b{color:var(--muted)}
+.sleep-strip{flex:none;padding:6px 10px;border-top:1px solid var(--amber);background:var(--panel-bg-strong);font-size:12px;color:var(--amber);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lid-strip{flex:none;display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--hair-strong);background:var(--panel-bg-strong);font-size:12px}
   .lid-strip .lid-title{color:var(--text);font-weight:700;white-space:nowrap;display:inline-block}.lid-strip .lid-title::first-letter{text-transform:uppercase}
   .lid-strip .lid-state{flex:1;min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -181,7 +182,7 @@
 </style>
 </head>
 <body>
-<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><div id="lidStrip"></div><details class="mac-tools"><summary data-i18n="menu.macTools"></summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><div id="fanControls"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" data-i18n-title="menu.syncTip">…</button><button class="go" onclick="send('openDashboard')" data-i18n="menu.open"></button><button onclick="send('quit')" style="color:var(--danger)" data-i18n-title="menu.quit">×</button></div></footer></div>
+<div class="popover"><div id="notificationNotice"></div><div class="providers" id="providers"></div><div id="sleepStrip"></div><div id="lidStrip"></div><details class="mac-tools"><summary data-i18n="menu.macTools"></summary><div class="metrics" id="metrics"></div><div class="brightness" id="brightness"></div><div class="tools" id="tools"></div><div id="fanControls"></div></details><footer class="footer"><div class="footer-row"><button class="sync" id="sync" onclick="send('refresh')" data-i18n-title="menu.syncTip">…</button><button class="go" onclick="send('openDashboard')" data-i18n="menu.open"></button><button onclick="send('quit')" style="color:var(--danger)" data-i18n-title="menu.quit">×</button></div></footer></div>
 <script>
 const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessage({action,...extra});
 document.querySelector('.mac-tools').addEventListener('toggle',event=>
@@ -348,6 +349,14 @@ function startLid(){
   if(lidMinutes===LID_CONSTANT){if(lastData?.tools?.lidMode?.fanlessMac)send('startLidConstant');return;}
   if(LID_DURATIONS.includes(lidMinutes))send('startLidMode',{minutes:lidMinutes});
 }
+// Ligne compacte, seulement s'il y a un blocage : SleepDisabled sans session de Status, ou des apps qui
+// retiennent la veille (le détail est dans le panneau Système du tableau de bord).
+function sleepStrip(tl){
+  const sl=tl?.sleep;if(!sl)return '';
+  const names=(sl.groups||[]).map(g=>g.name);
+  const text=sl.warning?t('sleep.popup.warn'):names.length?t('sleep.popup.apps',{apps:names.join(', ')}):'';
+  return text?`<div class="sleep-strip" title="${esc(text)}">${esc(text)}</div>`:'';
+}
 function lidStrip(tl){
   const lid=tl?.lidMode;
   if(!lid||lid.available===false&&!lid.authorized)return '';  // machine sans le service : rien à proposer
@@ -442,6 +451,7 @@ function renderMenu(data){
   setHTML('#notificationNotice',data.prefs?.notificationsAuthorized===false?`<div class="popup-notice"><span>${t('notice.title')}</span><button onclick="send('openNotificationSettings')">${t('set.title')}</button></div>`:'');
   setHTML('#providers',provider('openai','OpenAI',of('openai'),data.prefs?.providerMenuMetrics?.openai||metric)+provider('claude','Claude',of('claude'),data.prefs?.providerMenuMetrics?.claude||metric)+accountList(data.accounts)+apiCredits(data.apiAccounts));
   setHTML('#brightness',brightnessRow(data.displays));
+  setHTML('#sleepStrip',sleepStrip(data.tools));
   setHTML('#lidStrip',lidStrip(data.tools));
   setHTML('#tools',tools(data.tools));
   setHTML('#fanControls',fanControls(data.tools));
@@ -499,7 +509,7 @@ function mergeMetricsDelta(state,payload){
 }
 I.onChange(()=>{I.apply();if(lastData)renderMenu(lastData);if(lastMetrics)renderMetrics(lastMetrics)});
 I.apply();
-window.StatusMenu={update(data){lastData=data;renderMenu(data)},patch(part){if(!lastData)return;lastData={...lastData,...part};renderMenu(lastData)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
+window.StatusMenu={sleep(data){if(!lastData)return;lastData={...lastData,tools:{...lastData.tools,sleep:data}};setHTML('#sleepStrip',sleepStrip(lastData.tools))},update(data){lastData=data;renderMenu(data)},patch(part){if(!lastData)return;lastData={...lastData,...part};renderMenu(lastData)},updateMetrics(data){const m=mergeMetricsDelta(lastMetrics,data);if(m){lastMetrics=m;renderMetrics(m)}}};
 // Keep the "dans X min" countdowns honest between polls.
 setInterval(()=>{if(lastData)renderMenu(lastData)},30000);
 </script>

@@ -214,6 +214,8 @@ Native/StatusClaudeCollector.m   exécutable de status line, aucune lecture de c
 Native/StatusClaudeSession.{h,m} une session claude.ai par compte : WebView et magasin de
                                  données isolés, fetch /usage et /organizations
 Native/StatusCodexServer.{h,m}   app-server Codex, un par compte (CODEX_HOME dédié)
+Native/StatusSleepInfo.{h,m}     ce qui retient la veille (assertions IOKit, SleepDisabled) :
+                                 regroupement et filtrage purs, testés
 Native/Status.m            shell AppKit + WebKit : fenêtres, popover, comptes, préférences
 Resources/dashboard.html   fenêtre principale (WKWebView)
 Resources/menubar.html     popover de la barre des menus (WKWebView)
@@ -266,6 +268,18 @@ Chaque compte affiche la dernière réinitialisation hebdomadaire **observée**,
 locales, dans le tableau de bord, les connexions et le popup. Cette date de détection est persistée
 indépendamment de l’activation des notifications. Sans observation antérieure, « Non observée »
 est affiché ; aucune date n’est extrapolée depuis la prochaine échéance.
+
+## Ce qui retient la veille
+
+Le panneau **Moniteur → Veille** liste, sans droits root, les apps qui retiennent le Mac
+éveillé (assertions `PreventUserIdleSystemSleep`, `PreventSystemSleep`, écran allumé), regroupées
+par app avec leur libellé et leur durée, ainsi que le réglage de veille actif. Les assertions de
+moins d’une minute et celles de `powerd` et `nsurlsessiond` sont masquées (« Tout afficher » les
+rend). Le popup ne montre qu’une ligne, et seulement s’il y a un blocage.
+
+Si `SleepDisabled = 1` sans session capot fermé de Status, un avertissement dit que le mode
+capot fermé ne pourra pas démarrer et affiche `sudo pmset -a disablesleep 0` : Status ne
+l’exécute jamais. Le relevé a lieu toutes les 10 s au plus, uniquement panneau ou popup visible.
 
 ## Mode capot fermé à durée définie (0.8.5)
 

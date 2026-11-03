@@ -14,6 +14,7 @@
 #import "StatusKeyboardLock.h"
 #import "StatusSystemMonitor.h"
 #import "StatusRamCleaner.h"
+#import "StatusSleepInfo.h"
 #import "StatusDisplays.h"
 #import "StatusMenuBarWidgets.h"
 #import "StatusIconDesigns.h"
@@ -631,6 +632,64 @@ static BOOL TMOurSleepAssertionPresent(void) {
         if ([type isEqualToString:(__bridge NSString *)kIOPMAssertionTypePreventUserIdleDisplaySleep]) return YES;
     }
     return NO;
+}
+
+static void TestSleepInfo(void) {
+    printf("\n\033[1mStatusSleepInfo\033[0m\n");
+    NSDate *now = [NSDate dateWithTimeIntervalSinceReferenceDate:800000000];
+    NSDate *(^ago)(double) = ^NSDate *(double s) { return [now dateByAddingTimeInterval:-s]; };
+    NSDictionary *(^assertion)(NSString *, NSString *, NSString *, double) = ^NSDictionary *(NSString *name, NSString *type, NSString *label, double age) {
+        return @{ @"Process Name": name, @"AssertType": type, @"AssertName": label, @"AssertStartWhen": ago(age) };
+    };
+    NSDictionary *raw = @{
+        @421: @[assertion(@"powerd", @"PreventUserIdleSystemSleep", @"Powerd - Prevent sleep while display is on", 600000),
+                assertion(@"powerd", @"UserIsActive", @"com.apple.powermanagement.lidopen", 300)],
+        @868: @[assertion(@"sharingd", @"PreventUserIdleSystemSleep", @"Handoff", 32)],
+        @52671: @[assertion(@"Claude", @"NoIdleSleepAssertion", @"Electron", 138000)],
+        @52680: @[assertion(@"Claude", @"NoIdleSleepAssertion", @"Electron", 138000),
+                  assertion(@"Claude", @"PreventUserIdleDisplaySleep", @"Video", 4000)],
+        @435: @[assertion(@"mds", @"BackgroundTask", @"com.apple.metadata.mds.power", 17000)],
+        @900: @[assertion(@"caffeinate", @"PreventSystemSleep", @"caffeinate command-line tool", 7200)],
+    };
+    NSArray *flat = TMSleepFlattenAssertions(raw, now);
+    CheckEqual(@(flat.count), @6, @"seuls les types qui retiennent la veille sont gardés (UserIsActive et BackgroundTask écartés)");
+    Check([[flat valueForKey:@"type"] containsObject:@"PreventUserIdleSystemSleep"] && ![[flat valueForKey:@"type"] containsObject:@"NoIdleSleepAssertion"],
+          @"l'alias NoIdleSleepAssertion devient PreventUserIdleSystemSleep");
+    CheckEqual(@([flat.firstObject[@"seconds"] doubleValue] >= 0), @YES, @"durée calculée à partir du début de l'assertion");
+
+    NSArray *hidden = nil;
+    NSArray *groups = TMSleepGroupAssertions(flat, &hidden);
+    CheckEqual([groups valueForKey:@"name"], (@[@"Claude", @"caffeinate"]), @"groupes visibles : la plus ancienne d'abord, powerd et sharingd masqués");
+    CheckEqual([hidden valueForKey:@"name"], (@[@"powerd", @"sharingd"]), @"le bruit est regroupé à part");
+    NSDictionary *claudeGroup = groups[0];
+    CheckEqual(claudeGroup[@"pids"], (@[@52671, @52680]), @"deux processus de la même app : un seul groupe");
+    CheckEqual(@([claudeGroup[@"items"] count]), @2, @"la même assertion posée par deux processus ne fait qu'une ligne");
+    CheckEqual(claudeGroup[@"seconds"], @138000, @"durée du groupe = la plus longue");
+    CheckEqual(claudeGroup[@"blocksSystem"], @YES, @"bloque la veille système");
+    CheckEqual(claudeGroup[@"blocksDisplay"], @YES, @"bloque aussi la veille de l'écran");
+    CheckEqual(groups[1][@"blocksDisplay"], @NO, @"caffeinate : pas d'effet sur l'écran");
+
+    // Seuil de bruit : 59 s masquée, 60 s visible ; durée inconnue : jamais masquée.
+    NSArray *edge = TMSleepFlattenAssertions(@{ @1: @[assertion(@"a", @"PreventSystemSleep", @"x", 59)],
+                                                @2: @[assertion(@"b", @"PreventSystemSleep", @"x", 60)],
+                                                @3: @[@{ @"Process Name": @"c", @"AssertType": @"PreventSystemSleep", @"AssertName": @"x" }] }, now);
+    NSArray *edgeHidden = nil;
+    NSArray *edgeGroups = TMSleepGroupAssertions(edge, &edgeHidden);
+    CheckEqual([[edgeGroups valueForKey:@"name"] sortedArrayUsingSelector:@selector(compare:)], (@[@"b", @"c"]), @"59 s masquée, 60 s et durée inconnue visibles");
+    CheckEqual([edgeHidden valueForKey:@"name"], @[@"a"], @"l'assertion de 59 s est du bruit");
+    CheckEqual(@([[edgeGroups.lastObject objectForKey:@"seconds"] intValue]), @-1, @"durée inconnue : -1");
+
+    CheckEqual(@(TMSleepGroupAssertions(@[], NULL).count), @0, @"aucune assertion : aucun groupe");
+    CheckEqual(@(TMSleepFlattenAssertions((NSDictionary *)NSNull.null, now).count), @0, @"relevé invalide : liste vide");
+
+    Check(TMSleepDisabledBlocksLidMode(YES, NO), @"SleepDisabled sans session de Status : avertissement");
+    Check(!TMSleepDisabledBlocksLidMode(YES, YES), @"SleepDisabled pendant une session de Status : normal");
+    Check(!TMSleepDisabledBlocksLidMode(NO, NO), @"veille autorisée : rien à signaler");
+
+    NSDictionary *live = TMSleepInfoRead();
+    Check([live[@"disabled"] isKindOfClass:NSNumber.class] && [live[@"groups"] isKindOfClass:NSArray.class] && [live[@"hidden"] isKindOfClass:NSArray.class],
+          @"lecture réelle : forme du relevé");
+    Check([NSJSONSerialization isValidJSONObject:live], @"le relevé se sérialise en JSON");
 }
 
 static void TestAwake(void) {
@@ -3100,6 +3159,7 @@ int main(void) {
         TestManualResetsOpenAI();
         TestOpenAIHistoryCollision();
         TestAwake();
+        TestSleepInfo();
         TestHoldFraction();
         TestLockStateMachine();
         TestMetricRing();

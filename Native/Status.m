@@ -11,6 +11,7 @@
 #import "StatusQuota.h"
 #import "StatusAwake.h"
 #import "StatusRamCleaner.h"
+#import "StatusSleepInfo.h"
 #import "StatusSystemMonitor.h"
 #import "StatusKeyboardLock.h"
 #import "StatusCodexServer.h"
@@ -452,6 +453,10 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property NSDictionary *ramCleanState;  // dernier état, relayé au popup via toolsPayload
 @property TMLidClient *lidMode;
 @property NSTimer *lidTimer;
+// Blocages de veille (voir StatusSleepInfo) : relevés seulement quand une surface les montre.
+@property NSTimer *sleepTimer;
+@property NSDictionary *sleepInfo;
+@property BOOL sleepReading, sleepLidSessionSeen;
 // Modes des ventilateurs (auto / courbe / manuel), pilotés via le service existant. Voir driveFans.
 @property TMFanController *fanController;
 @property double fanTempC;          // dernier relevé (NAN si absent), pour l'aperçu de la courbe
@@ -473,7 +478,7 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
     // Le service répond toutes les 5 s (vitesse des ventilateurs) : seul l'état des outils est
     // renvoyé, pas tout le payload (historique, comptes…) à chaque fois.
     // Chaque réponse du service peut débloquer la commande suivante (arrêt puis relance d'un palier).
-    self.lidMode.onChange = ^{ [weakSelf pushTools]; [weakSelf driveFans]; };
+    self.lidMode.onChange = ^{ [weakSelf pushTools]; [weakSelf driveFans]; [weakSelf lidSessionMayHaveChanged]; };
     self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
         [weakSelf.lidMode refresh];
     }];
@@ -2344,6 +2349,7 @@ static NSNumber *TMFanInteger(id value) {
         @"awake": @{ @"active": @(self.awake.isEnabled) },
         @"ramClean": self.ramCleanState ?: @{},
         @"lidMode": self.lidMode.snapshot ?: @{},
+        @"sleep": [self sleepPayload] ?: NSNull.null,
         // Mode des ventilateurs : le popup quota et les Réglages affichent une courbe active.
         @"fanMode": @{ @"mode": self.fanController.mode ?: @"auto", @"preset": self.fanController.preset ?: @"balanced",
                        @"target": @(self.fanController.desiredPercent) },
@@ -2409,6 +2415,79 @@ static NSNumber *TMFanInteger(id value) {
     [self updateMenuBarWidgetsFromMonitor];
 }
 
+#pragma mark - Blocages de veille
+
+// Session capot fermé de Status en cours (ou à restaurer, ou état incertain) : dans ces cas, SleepDisabled
+// est le fait de Status et n'a rien d'anormal.
+- (BOOL)statusLidSessionActive {
+    NSDictionary *lid = self.lidMode.snapshot ?: @{};
+    return [lid[@"active"] boolValue] || [lid[@"restorationPending"] boolValue] || [lid[@"unconfirmed"] boolValue];
+}
+
+- (NSDictionary *)sleepPayload {
+    if (!self.sleepInfo) return nil;
+    NSMutableDictionary *payload = [self.sleepInfo mutableCopy];
+    payload[@"warning"] = @(TMSleepDisabledBlocksLidMode([self.sleepInfo[@"disabled"] boolValue], [self statusLidSessionActive]));
+    return payload;
+}
+
+// Au plus un relevé toutes les 10 s, et seulement quand le panneau Système ou le popup est visible.
+- (BOOL)sleepSurfaceVisible {
+    return (self.webReady && self.window.isVisible && self.monitorViewActive)
+        || (self.menuWebReady && self.statusPopover.isShown);
+}
+
+- (void)updateSleepWatch {
+    if (![self sleepSurfaceVisible]) {
+        [self.sleepTimer invalidate];
+        self.sleepTimer = nil;
+        return;
+    }
+    if (self.sleepTimer) return;
+    __weak typeof(self) weakSelf = self;
+    self.sleepTimer = [NSTimer scheduledTimerWithTimeInterval:10 repeats:YES block:^(NSTimer *timer) {
+        // Filet : la fenêtre qui se ferme appelle startSystemMonitor avant d'être masquée.
+        if ([weakSelf sleepSurfaceVisible]) [weakSelf readSleepInfo]; else [weakSelf updateSleepWatch];
+    }];
+    self.sleepTimer.tolerance = 2;
+    [self readSleepInfo];
+}
+
+- (void)readSleepInfo {
+    if (self.sleepReading) return;
+    self.sleepReading = YES;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary *info = TMSleepInfoRead();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            typeof(self) self = weakSelf; if (!self) return;
+            self.sleepReading = NO;
+            self.sleepInfo = info;
+            [self pushSleep];
+        });
+    });
+}
+
+// Fin ou début d'une session capot fermé : SleepDisabled vient de changer, on n'attend pas les 10 s.
+- (void)lidSessionMayHaveChanged {
+    BOOL active = [self statusLidSessionActive];
+    if (active == self.sleepLidSessionSeen) return;
+    self.sleepLidSessionSeen = active;
+    if (self.sleepTimer) [self readSleepInfo];
+}
+
+// Poussée légère vers les deux surfaces : pas de pushData (historique, coûts…), pas de rendu complet.
+- (void)pushSleep {
+    NSDictionary *payload = [self sleepPayload];
+    if (!payload) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (self.menuWebReady && self.statusPopover.isShown)
+        [self.menuWebView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusMenu && window.StatusMenu.sleep && window.StatusMenu.sleep(%@);", json] completionHandler:nil];
+    if (self.webReady && self.window.isVisible)
+        [self.webView evaluateJavaScript:[NSString stringWithFormat:@"window.StatusApp && window.StatusApp.sleep && window.StatusApp.sleep(%@);", json] completionHandler:nil];
+}
+
 #pragma mark - Moniteur système
 
 // Le moniteur matériel reste dormant hors de sa vue, sauf demande explicite (widgets,
@@ -2419,6 +2498,7 @@ static NSNumber *TMFanInteger(id value) {
 }
 
 - (void)startSystemMonitor {
+    [self updateSleepWatch];
     BOOL systemWidgetEnabled = NO;
     for (NSString *widgetId in [self enabledWidgets])
         if (!TMWidgetUsesAccounts(widgetId)) { systemWidgetEnabled = YES; break; }

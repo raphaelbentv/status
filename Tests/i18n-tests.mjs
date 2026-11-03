@@ -208,7 +208,12 @@ section('Rendu complet de chaque surface : aucune clé orpheline, aucune valeur 
     costs: { asOf: '2026-09-01', fxAsOf: '2026-09-02', eurPerUsd: 0.86, claude: { periods: { d8: { total: 412.8, breakdown: [{ model: 'opus', tokens: 61493255, cost: 412.8 }], prices: { opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 } }, unpricedTokens: 2e6 }, d30: { total: 9000 } } } },
     displays: [{ id: 'd1', name: 'Écran interne', kind: 'builtin', available: true, brightness: 60 }, { id: 'd2', name: 'DELL', kind: 'external', available: false }],
     metricsLog: Array.from({ length: 40 }, (_, i) => ({ t: now - (40 - i) * 60, cpu: 10 + i, temp: 50 + i / 4, ram: 40, gpu: 5, batt: 80 })),
-    tools: { awake: { active: false }, keyboardLock: { state: 'unlocked' }, lidMode: { authorized: true, fanBoost: fans, message: 'Désactivé.' } },
+    tools: { awake: { active: false }, keyboardLock: { state: 'unlocked' }, lidMode: { authorized: true, fanBoost: fans, message: 'Désactivé.' },
+      sleep: { disabled: true, warning: true, sleepMinutes: 0, onBattery: false,
+        groups: [{ name: 'Claude', pids: [1, 2], seconds: 138000, blocksSystem: true, blocksDisplay: true,
+          items: [{ type: 'PreventUserIdleSystemSleep', label: 'Electron', seconds: 138000 }, { type: 'PreventUserIdleDisplaySleep', label: 'Video', seconds: 4000 }] },
+          { name: 'caffeinate', pids: [3], seconds: 40, blocksSystem: true, blocksDisplay: false, items: [{ type: 'PreventSystemSleep', label: 'caffeinate', seconds: 40 }] }],
+        hidden: [{ name: 'powerd', pids: [4], seconds: 9000, blocksSystem: true, blocksDisplay: false, items: [{ type: 'PreventUserIdleSystemSleep', label: 'Powerd', seconds: 9000 }] }] } },
     prefs: { theme: 'blueprint', language: 'auto', menuBarMetric: 'claude:weekly', accessibilityTrusted: false, brightnessKeys: true, globalShortcut: true,
       menuBarWidgets: ['cpu', 'battery', 'claudeWeek', 'openaiApi'], apiRefreshIntervalSeconds: 600, notificationsAuthorized: false, providerIconStyles: { openai: 'tube', claude: 'grid' }, alerts: {}, quotaRefreshIntervalSeconds: 120, launchAtLogin: true },
   };
@@ -233,12 +238,13 @@ section('Rendu complet de chaque surface : aucune clé orpheline, aucune valeur 
     out.push(dash('overview(appData)'), dash('displaysView(appData)'));
     for (const group of ['accounts', 'appearance', 'quotas', 'alerts', 'system', 'shortcuts']) out.push(dash(`settingsView(appData,'${group}')`));
     for (const mode of ['charts', 'table', 'day']) { dash(`monitorMode='${mode}'`); out.push(dash('monitorView()')); }
+    dash(`monitorMode='charts';sleepShowAll=true`); out.push(dash('monitorView()')); dash(`sleepShowAll=false`);
     dash(`expanded.add('cpu');expanded.add('battery');expanded.add('disk');expanded.add('network')`);
     dash(`monitorMode='charts'`); out.push(dash('monitorView()'));
     menu(`lastData=${JSON.stringify(data)}`);
     out.push(menu(`provider('claude','Claude',${JSON.stringify(accounts.filter(a => a.provider === 'claude'))},'claude:weekly')`),
       menu(`provider('openai','OpenAI',${JSON.stringify(accounts.slice(0, 1))},'openai:weekly')`),
-      menu(`fanControls(${JSON.stringify(data.tools)})`), menu(`tools(${JSON.stringify(data.tools)})`),
+      menu(`sleepStrip(${JSON.stringify(data.tools)})`), menu(`fanControls(${JSON.stringify(data.tools)})`), menu(`tools(${JSON.stringify(data.tools)})`),
       menu(`brightnessRow(${JSON.stringify(data.displays)})`), menu(`extraCredits(${JSON.stringify(accounts[0])})`),
       menu(`apiCredits(${JSON.stringify(apiAccounts)})`));
     wid(`metrics=${JSON.stringify(metrics)};metrics.prefs={}`);

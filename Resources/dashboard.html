@@ -204,6 +204,23 @@
   .stat-cell b{display:block;font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.15}
   .stat-cell span{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
   .stat-cell.warn b{color:var(--amber)}
+  /* Veille : qui retient le Mac éveillé. Une ligne par app, le détail des assertions dessous. */
+  .sleep-card{display:flex;flex-direction:column;gap:10px}
+  .sleep-warn{border:1px solid var(--amber);padding:10px 12px;font-size:12px;display:flex;flex-direction:column;gap:6px}
+  .sleep-warn b{color:var(--amber)}.sleep-warn p{margin:0;color:var(--muted);line-height:1.45}
+  .sleep-warn code{font:inherit;font-family:ui-monospace,Menlo,monospace;color:var(--text);background:var(--soft);border:1px solid var(--hair);padding:3px 7px;align-self:flex-start;max-width:100%;overflow-wrap:anywhere;user-select:all}
+  .sleep-meta{font-size:12px;color:var(--muted)}
+  .sleep-rows{display:flex;flex-direction:column}
+  .sleep-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:7px 0;border-top:1px solid var(--hair);font-size:12px}
+  .sleep-row:first-child{border-top:0}
+  .sleep-app{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sleep-app small{font-weight:400;color:var(--muted);margin-left:6px}
+  .sleep-dur{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .sleep-item{grid-column:1/-1;color:var(--muted);overflow-wrap:anywhere}
+  .sleep-item b{font-weight:400;color:var(--text)}
+  .sleep-noise-head{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:4px}
+  .sleep-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .sleep-foot button{font:inherit;font-size:12px;color:var(--blue);background:none;border:1px solid var(--hair);border-radius:var(--radius);padding:4px 9px;cursor:pointer}
   .metric-badge{font-size:12px;padding:2px 7px;border:1px solid var(--hair);color:var(--muted)}
   .metric-badge.warn{color:var(--amber);border-color:var(--amber)}
   .metric-badge.crit{color:var(--danger);border-color:var(--danger)}
@@ -1314,6 +1331,33 @@ function metricCard(familyId,title,valueHTML,body){
   const detail=isOpen?`<div class="metric-detail">${DETAILS[familyId](famGet(familyId))}</div>`:'';
   return `<div class="metric-card ${expandable?'expandable':''}" data-family="${familyId}"><div class="metric-head"><h3>${title}${expandable?`<span class="chevron">${isOpen?'▾':'▸'}</span>`:''}</h3>${valueHTML}</div><div class="metric-readout">${readout(familyId)}</div>${body}${detail}</div>`;
 }
+// Veille : ce qui empêche le Mac de dormir (assertions IOKit + SleepDisabled), poussé par le natif
+// toutes les 10 s tant que cette vue est ouverte. Status ne lève jamais le blocage lui-même.
+const SLEEP_FIX_COMMAND='sudo pmset -a disablesleep 0';
+let sleepShowAll=false;
+function setSleepShowAll(on){sleepShowAll=on;renderMonitor()}
+const sleepDur=s=>s==null||s<0?'':s<60?`${Math.floor(s)} ${t('unit.sec')}`:fmtUptime(s);
+const sleepNeedsAttention=sl=>!!sl&&(sl.warning||sl.groups?.length>0);
+function sleepRows(groups){
+  return groups.map(g=>{
+    const items=g.items.map(i=>`<div class="sleep-item"><b>${t('sleep.type.'+i.type)}</b>${i.label?' · '+esc(i.label):''}</div>`).join('');
+    const procs=g.pids?.length>1?`<small>${t('sleep.processes',{n:g.pids.length})}</small>`:'';
+    const dur=g.seconds>=0?t('sleep.since',{v:sleepDur(g.seconds)}):'';
+    return `<div class="sleep-row"><span class="sleep-app">${esc(g.name)}${procs}</span><span class="sleep-dur">${dur}</span>${items}</div>`;
+  }).join('');
+}
+function sleepSection(){
+  const sl=appData?.tools?.sleep;if(!sl)return '';
+  const groups=sl.groups||[],hidden=sl.hidden||[];
+  const warn=sl.warning?`<div class="sleep-warn" role="alert"><b>${t('sleep.warn.title')}</b><p>${t('sleep.warn.body')}</p><code>${SLEEP_FIX_COMMAND}</code></div>`:'';
+  const setting=sl.sleepMinutes==null?'':`${t('sleep.setting')} : ${sl.sleepMinutes===0?t('sleep.never'):t('sleep.after',{v:`${sl.sleepMinutes} ${t('unit.min')}`})} · ${sl.onBattery?t('sleep.onBattery'):t('sleep.onAc')}`;
+  const badge=groups.length?`<span class="metric-badge warn">${t('sleep.holding',{n:groups.length})}</span>`:'';
+  const body=groups.length?`<div class="sleep-rows">${sleepRows(groups)}</div>`:`<div class="sleep-meta">${t('sleep.clear')}</div>`;
+  const noise=sleepShowAll&&hidden.length?`<div class="sleep-noise-head">${t('sleep.noiseHead')}</div><div class="sleep-rows">${sleepRows(hidden)}</div>`:'';
+  const toggle=hidden.length?`<button onclick="setSleepShowAll(${!sleepShowAll})">${sleepShowAll?t('sleep.hideNoise'):t('sleep.showAll')}</button>`:'';
+  const foot=setting||toggle?`<div class="sleep-foot"><span>${sleepShowAll||!hidden.length?setting:[setting,t('sleep.noise',{n:hidden.length})].filter(Boolean).join(' · ')}</span>${toggle}</div>`:'';
+  return `<section class="monitor-section"><h2>${t('sleep.title')}</h2><div class="metric-grid"><div class="metric-card metric-card-wide sleep-card">${warn}${badge?`<div>${badge}</div>`:''}${body}${noise}${foot}</div></div></section>`;
+}
 function monitorView(){
   if(!metricsData?.families?.length)return `<div class="toolbar"><h1>${t('nav.monitor')}</h1></div><div class="metric-empty">${t('mon.firstMeasure')}</div>`;
   const cpu=famGet('cpu'),gpu=famGet('gpu'),ram=famGet('ram'),net=famGet('network'),disk=famGet('disk'),sensors=famGet('sensors');
@@ -1340,15 +1384,17 @@ function monitorView(){
   const toggle=`<div class="view-toggle">${modes.map(([m,l])=>`<button class="${monitorMode===m?'on':''}" onclick="setMonitorMode('${m}')">${l}</button>`).join('')}</div>`;
   const meta=monitorMode==='day'?t('mon.metaDay'):t('mon.metaLive',{s:interval,m:windowMin});
   const head=`<div class="toolbar"><h1>${t('nav.monitor')}</h1><span class="toolbar-meta">${meta}</span>${toggle}</div>`;
-  if(monitorMode==='table')return head+monitorTable();
-  if(monitorMode==='day')return head+monitorDay();
+  const sleep=sleepSection(),urgent=sleepNeedsAttention(appData?.tools?.sleep);
+  if(monitorMode==='table')return head+(urgent?sleep:'')+monitorTable()+(urgent?'':sleep);
+  if(monitorMode==='day')return head+(urgent?sleep:'')+monitorDay()+(urgent?'':sleep);
   // Regroupement par thème : on cherche « pourquoi ça chauffe / rame », pas une famille au hasard.
   const byId=Object.fromEntries(cards.map(html=>[html.match(/data-family="([^"]+)"/)?.[1],html]));
   const group=(title,html)=>html.filter(Boolean).length?`<section class="monitor-section"><h2>${title}</h2><div class="metric-grid">${html.filter(Boolean).join('')}</div></section>`:'';
-  return head+vitalsStrip()
+  return head+vitalsStrip()+(urgent?sleep:'')
     +group(t('mon.group.compute'),[byId.cpu&&byId.cpu.replace('class="metric-card ','class="metric-card metric-card-wide '),byId.gpu,byId.ram])
     +group(t('mon.group.thermal'),[sensorsHTML,byId.battery])
     +group(t('mon.group.io'),[byId.network,byId.disk])
+    +(urgent?'':sleep)
     +group(t('mon.system'),[processesCard(),systemCard()]);
 }
 // Bandeau de tête : l'état de la machine d'un coup d'œil, chaque tuile menant à sa carte.
@@ -1508,7 +1554,7 @@ function mergeMetricsDelta(state,payload){
 }
 I.onChange(()=>{I.apply();render();renderMonitor()});
 I.apply();
-window.StatusApp={update(data){appData=data;render()},patch(part){if(!appData)return;appData={...appData,...part};render()},updateMetrics(data){const m=mergeMetricsDelta(metricsData,data);if(m){metricsData=m;renderMonitor()}}};
+window.StatusApp={sleep(data){if(!appData)return;appData={...appData,tools:{...appData.tools,sleep:data}};renderMonitor()},update(data){appData=data;render()},patch(part){if(!appData)return;appData={...appData,...part};render()},updateMetrics(data){const m=mergeMetricsDelta(metricsData,data);if(m){metricsData=m;renderMonitor()}}};
 // Le basculement d'onglet ne passe pas par render() : celui-ci sort quand les quotas ne sont pas
 // encore arrivés, et le Moniteur — flux indépendant — doit rester joignable même dans ce cas.
 function goToView(view){
