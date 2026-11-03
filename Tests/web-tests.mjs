@@ -1218,6 +1218,31 @@ section('Capot fermé : mode constant réservé aux MacBook Air');
   checkEqual(dashboard('window.sent[0]'),{action:'startLidConstant'},'Réglages Air : Constant coché → startLidConstant');
   dashboard('lidConstant=false');
 }
+section('Capot fermé : démarrage automatique pendant que Claude Code travaille');
+{
+  const set=lidMode=>dashboard('lidModeSettings')({tools:{lidMode}});
+  const off=set({authorized:true,auto:{enabled:false,state:'off'}});
+  check(off.includes('Démarrer automatiquement pendant que Claude Code travaille')&&!off.includes('type="checkbox" checked')&&!off.includes('En attente'),'Réglages : option présente, décochée par défaut, sans état');
+  check(off.includes("send('setLidAuto',{enabled:this.checked})"),'Réglages : la case envoie setLidAuto');
+  check(set({authorized:true,auto:{enabled:true,state:'idle'}}).includes('type="checkbox" checked')&&set({authorized:true,auto:{enabled:true,state:'idle'}}).includes('aucune session Claude Code ne travaille'),'Réglages : activée, état « en attente »');
+  check(set({authorized:true,auto:{enabled:true,state:'otherTool'}}).includes('déjà bloquée par un autre outil'),'Réglages : blocage par un autre outil affiché');
+  check(set({authorized:true,auto:{enabled:true,state:'cooldown',cooldownSeconds:420}}).includes('dans 7 min'),'Réglages : délai après un arrêt de sécurité');
+  check(set({authorized:true,auto:{enabled:true,state:'manual'}}).includes('lancée à la main'),'Réglages : session manuelle respectée');
+  const running=set({authorized:true,active:true,remainingSeconds:1500,auto:{enabled:true,state:'running',legacy:true}});
+  check(running.includes('Automatique · 25 min restantes')&&running.includes('mettre à jour pour les prolongations'),'Réglages : session automatique signalée, ancien service expliqué');
+  check(set({authorized:true,auto:{enabled:true,state:'stopping',stopInSeconds:130}}).includes('arrêt automatique dans 3 min'),'Réglages : compte à rebours après la fin du travail');
+  check(set({authorized:true,auto:{enabled:true,state:'<img>'}}).includes('aucune session Claude Code ne travaille'),'Réglages : état inconnu → en attente');
+  check(!set({available:false,authorized:false}).includes('setLidAuto'),'Réglages : pas d’option sans service installable');
+  const strip=lidMode=>menubar('lidStrip')({lidMode});
+  const runStrip=strip({authorized:true,active:true,remainingSeconds:1500,auto:{enabled:true,state:'running'}});
+  check(runStrip.includes('capot fermé · auto')&&runStrip.includes('Automatique · 25 min restantes')&&runStrip.includes("send('stopLidMode')"),'popup : session automatique signalée et arrêtable');
+  check(strip({authorized:true,auto:{enabled:true,state:'otherTool'}}).includes('title="La veille est déjà bloquée'),'popup : état dans l’infobulle');
+  const manual=strip({authorized:true,active:true,remainingSeconds:600,auto:{enabled:true,state:'manual'}});
+  check(!manual.includes('Automatique ·')&&manual.includes('10 min restantes'),'popup : session manuelle non étiquetée automatique');
+  check(!strip({authorized:true,auto:{enabled:false,state:'off'}}).includes('auto'),'popup : option désactivée, rien d’affiché');
+  const tool=menubar('tools')({lidMode:{active:true,remainingSeconds:1500,auto:{state:'running'}},awake:{},keyboardLock:{}});
+  check(tool.includes('capot · auto · 25 min'),'bouton Outils : « capot · auto »');
+}
 section('Réglages : mises à jour automatiques');
 {
   const off=plain(dashboard('updateSettings')({updates:{available:false,version:'0.9.0'}}));

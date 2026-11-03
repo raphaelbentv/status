@@ -1,7 +1,8 @@
 #import <Foundation/Foundation.h>
 #import "StatusMachine.h"
 
-// Borne volontairement les sessions ; une reconnexion de l'app ne prolonge jamais une session.
+// Borne volontairement les sessions ; une reconnexion de l'app ne prolonge jamais une session. Seule une prolongation
+// explicite (démarrage automatique) le fait, sans dépasser 240 minutes depuis le démarrage.
 BOOL TMLidDurationAllowed(NSInteger minutes);
 // « Durée » 0 : session constante, sans échéance. Réservée aux MacBook Air (sans ventilateur) : voir StatusMachine.h.
 extern const NSInteger TMLidConstantMinutes;
@@ -39,6 +40,7 @@ NSDictionary *TMLidParsePowerSettings(NSString *text);
 @property (readonly, copy) NSString *message;
 - (void)recover;
 - (void)startMinutes:(NSInteger)minutes battery:(double)battery thermal:(NSInteger)thermal now:(double)now;
+- (void)extendMinutes:(NSInteger)minutes now:(double)now;
 - (void)heartbeatAt:(double)now;
 - (void)tickBattery:(double)battery thermal:(NSInteger)thermal now:(double)now;
 - (void)stop:(NSString *)reason;

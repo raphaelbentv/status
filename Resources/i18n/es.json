@@ -938,5 +938,21 @@
  "menu.ram": "RAM",
  "menu.ramRunning": "RAM…",
  "menu.ramDone": "{v} GB liberados",
- "menu.ramNothing": "RAM ya libre"
+ "menu.ramNothing": "RAM ya libre",
+ "lid.auto.toggle": "Iniciar automáticamente mientras Claude Code trabaja",
+ "lid.auto.desc": "Sesiones de 30 min, prolongadas mientras Claude Code trabaja (240 min como máximo), detenidas 5 min después de terminar el trabajo. Las paradas de seguridad siguen teniendo prioridad y una sesión iniciada a mano nunca se detiene.",
+ "lid.auto.tag": "Automático",
+ "lid.auto.legacy": "Actualiza el servicio de macOS para las prórrogas: sesión única de 240 min como máximo.",
+ "lid.auto.state.idle": "En espera: ninguna sesión de Claude Code está trabajando.",
+ "lid.auto.state.starting": "Inicio automático en curso…",
+ "lid.auto.state.running": "Iniciado automáticamente: Claude Code está trabajando.",
+ "lid.auto.state.stopping": "Claude Code ha terminado: parada automática en {n} min.",
+ "lid.auto.state.manual": "Sesión iniciada a mano: el inicio automático no la toca.",
+ "lid.auto.state.otherTool": "El reposo ya está bloqueado por otra herramienta (SleepDisabled = 1): no se inicia nada.",
+ "lid.auto.state.cooldown": "Parada de seguridad: nuevo intento dentro de {n} min como mínimo.",
+ "lid.auto.state.waiting": "En espera: batería por debajo del 35 % o presión térmica.",
+ "lid.auto.state.paused": "En pausa hasta que Claude Code termine el trabajo en curso.",
+ "lid.auto.state.unavailable": "Servicio de macOS no disponible: autorízalo para el inicio automático.",
+ "menu.lidAuto": "tapa · auto · {n} min",
+ "menu.lidAutoOn": "tapa cerrada · auto"
 }

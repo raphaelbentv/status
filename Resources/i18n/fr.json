@@ -938,5 +938,21 @@
  "menu.ram": "RAM",
  "menu.ramRunning": "RAM…",
  "menu.ramDone": "{v} Go libérés",
- "menu.ramNothing": "RAM déjà libre"
+ "menu.ramNothing": "RAM déjà libre",
+ "lid.auto.toggle": "Démarrer automatiquement pendant que Claude Code travaille",
+ "lid.auto.desc": "Sessions de 30 min, prolongées tant que Claude Code travaille (240 min au plus), arrêtées 5 min après la fin du travail. Les arrêts de sécurité restent prioritaires et une session lancée à la main n’est jamais arrêtée.",
+ "lid.auto.tag": "Automatique",
+ "lid.auto.legacy": "Service macOS à mettre à jour pour les prolongations : session unique de 240 min au plus.",
+ "lid.auto.state.idle": "En attente : aucune session Claude Code ne travaille.",
+ "lid.auto.state.starting": "Démarrage automatique en cours…",
+ "lid.auto.state.running": "Démarré automatiquement : Claude Code travaille.",
+ "lid.auto.state.stopping": "Claude Code a terminé : arrêt automatique dans {n} min.",
+ "lid.auto.state.manual": "Session lancée à la main : le démarrage automatique n’y touche pas.",
+ "lid.auto.state.otherTool": "La veille est déjà bloquée par un autre outil (SleepDisabled = 1) : rien n’est démarré.",
+ "lid.auto.state.cooldown": "Arrêt de sécurité : nouvel essai dans {n} min au plus tôt.",
+ "lid.auto.state.waiting": "En attente : batterie sous 35 % ou pression thermique.",
+ "lid.auto.state.paused": "En pause jusqu’à la fin du travail en cours de Claude Code.",
+ "lid.auto.state.unavailable": "Service macOS indisponible : autorisez-le pour le démarrage automatique.",
+ "menu.lidAuto": "capot · auto · {n} min",
+ "menu.lidAutoOn": "capot fermé · auto"
 }
