@@ -138,6 +138,7 @@
   .session-row>span{grid-area:l}.session-row>b{grid-area:v;justify-self:end;color:var(--text);font-variant-numeric:tabular-nums}
   .session-row>.rail{grid-area:r}.session-row>small{grid-area:t;font-size:12px;font-variant-numeric:tabular-nums}
   .rail.thin{height:6px;margin:0;border-radius:3px}
+  .switch-hint{font-size:11.5px;font-weight:700;color:var(--green);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .quota-card footer{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:auto;padding-top:8px;min-width:0;width:100%}
   .quota-card .account-note{margin:0;min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quota-card .who{color:var(--text);font-weight:700;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .quota-card .account-action{margin:0}
@@ -277,7 +278,7 @@ function provider(id,name,accounts,metric){
     <div class="quota-main"><div class="value ${level}">${value===null?'—':(100-value)+'<span class="unit">%</span>'}</div>
       <div class="quota-side"><div class="quota-label">${t('menu.leftThisWeek')}</div>${quotaRail(weekly,true)}<div class="reset">${weekly?t('menu.renewal',{v:reset(weekly)}):'—'}</div></div></div>
     ${sessionRow}${extraCredits(account)}
-    <footer>${(accounts||[]).length>1&&!pinned&&account?`<b class="who" title="${esc(account.label)}">${esc(account.label)}</b>`:''}<span class="account-note ${noteClass}">${note}</span>${action}</footer></section>`;
+    <footer>${(accounts||[]).length>1&&!pinned&&account?`<b class="who" title="${esc(account.label)}">${esc(account.label)}</b>`:''}<span class="account-note ${noteClass}">${note}</span>${switchLine(account)}${action}</footer></section>`;
 }
 // Liste compacte de tous les comptes, même ordre que le tableau de bord (prochain renouvellement).
 // Les cartes ci-dessus ne montrent qu'un compte par fournisseur : ici on les voit tous d'un coup.
@@ -419,6 +420,8 @@ function parseMetric(metric){
 const aggregateMetric=(provider,kind)=>`${provider}:${kind}`;
 const pinnedMetric=(provider,accountId,kind)=>`acct:${provider}:${accountId}:${kind}`;
 let lastData=null;
+// Calculée côté natif (TMSwitchSuggestions) : un autre compte du même fournisseur, nettement moins entamé.
+const switchLine=account=>{const s=account&&lastData?.switchSuggestions?.[account.accountId];return s?`<span class="switch-hint">${esc(t('switch.suggest',{label:s.label,v:I.pct(s.usedPercent)}))}</span>`:''};
 // Le service pousse un état toutes les 5 s (tours/minute des ventilateurs) : réécrire un bloc
 // à chaque fois détruisait le <select> de compte ouvert et effaçait une durée en cours de saisie.
 // On ne remplace donc que ce qui a changé, et jamais un bloc dont un champ a le focus — il sera

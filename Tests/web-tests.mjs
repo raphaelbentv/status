@@ -134,6 +134,14 @@ check(!claudeHTML.includes('Fable') && !claudeHTML.includes('54'), 'aucune jauge
 check(!openaiHTML.includes('session-row'), 'pas de ligne 5 h côté OpenAI');
 check(!claudeHTML.match(/réinitialisation hebdo|Prévision|épuisé/), 'ni prévision ni historique de reset');
 
+section('switchLine — bascule conseillée sur la carte du compte');
+menubar("lastData={switchSuggestions:{A:{accountId:'B',label:'Pro <2>',usedPercent:12}}}");
+const suggested = menubar('provider')('claude', 'Claude', [{ accountId: 'A', provider: 'claude', connected: true, claudeSource: 'web', label: 'Pro 1', windows: [
+  { windowId: 'seven_day', usedPercent: 91, resetsAt: Date.now() / 1000 + 90000 } ] }], 'claude:weekly');
+check(plain(suggested).includes('Bascule conseillée : Pro &lt;2&gt;, 12 % utilisés'), 'libellé et pourcentage du compte conseillé, échappés');
+check(!claudeHTML.includes('switch-hint'), 'aucune suggestion sans entrée native');
+menubar('lastData=null');
+
 // ── Coût par modèle (dashboard) ─────────────────────────────────────────────
 section('fmtTokens — volumes de tokens, toujours en millions');
 checkEqual(dashboard('fmtTokens')(186207), '0,2 M', 'sous le million : arrondi au dixième de million');

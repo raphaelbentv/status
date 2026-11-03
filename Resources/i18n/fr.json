@@ -755,6 +755,7 @@
  "shape.text": "texte",
  "shape.twoLine": "2 lignes",
  "state.attention": "Attention requise",
+ "switch.suggest": "Bascule conseillée : {label}, {v} utilisés",
  "sys.sp.custom": "Valeur personnalisée détectée",
  "sys.sp.desc": "Réglage système : il change l’espace entre TOUTES les icônes de la barre des menus, pas seulement celles de Status.",
  "sys.sp.normal": "Normal",

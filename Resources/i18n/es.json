@@ -755,6 +755,7 @@
  "shape.text": "texto",
  "shape.twoLine": "2 líneas",
  "state.attention": "Requiere atención",
+ "switch.suggest": "Cambio recomendado: {label}, {v} usado",
  "sys.sp.custom": "Valor personalizado detectado",
  "sys.sp.desc": "Ajuste del sistema: cambia el espacio entre TODOS los iconos de la barra de menús, no solo los de Status.",
  "sys.sp.normal": "Normal",
