@@ -413,6 +413,7 @@
  "menu.awake": "stay awake",
  "menu.awakeOn": "staying awake",
  "menu.backlight": "Backlight",
+ "menu.battery": "battery",
  "menu.cleaning": "cleaning",
  "menu.connect": "connect",
  "menu.consumed": "{label} used",

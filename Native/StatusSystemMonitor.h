@@ -80,6 +80,11 @@ NSString * _Nullable TMSensorFamilyForName(NSString * _Nullable name);
 // moyenne de toutes les lectures plausibles. nil si aucune lecture plausible.
 NSDictionary<NSString *, NSNumber *> * _Nullable TMSensorTempAggregates(NSArray<NSDictionary *> *readings);
 
+// Famille « battery » d'après les propriétés de l'AppleSmartBattery (registre IOKit) : percent,
+// charging, cycleCount, healthPercent, powerWatts (signé), temperatureC… `smcTempC` (°C, NAN si
+// inconnue) ne sert que si le registre ne donne pas de température.
+NSDictionary<NSString *, NSNumber *> * _Nullable TMBatteryValues(NSDictionary *props, double smcTempC);
+
 #pragma mark - Moniteur
 
 // Un collecteur échantillonne une famille de métriques : dictionnaire clé → NSNumber, ou nil si

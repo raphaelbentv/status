@@ -772,18 +772,7 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectSensors(void) {
 //     détails du chargeur, température. Clés stables depuis des années, même compromis que le
 //     reste du module ; absente sur un Mac de bureau → famille nil, la carte ne s'affiche pas.
 // `powerWatts` est signé : négatif en décharge, positif en charge (tension × courant).
-static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
-    io_service_t smart = IOServiceGetMatchingService(kIOMainPortDefault,
-                                                     IOServiceMatching("AppleSmartBattery"));
-    if (!smart) return nil;
-    CFMutableDictionaryRef rawProps = NULL;
-    if (IORegistryEntryCreateCFProperties(smart, &rawProps, kCFAllocatorDefault, 0) != KERN_SUCCESS) {
-        IOObjectRelease(smart);
-        return nil;
-    }
-    NSDictionary *props = CFBridgingRelease(rawProps);
-    IOObjectRelease(smart);
-
+NSDictionary<NSString *, NSNumber *> *TMBatteryValues(NSDictionary *props, double smcTempC) {
     NSMutableDictionary *values = [NSMutableDictionary dictionary];
     NSNumber *(^num)(id) = ^NSNumber *(id v) { return [v isKindOfClass:NSNumber.class] ? v : nil; };
 
@@ -818,7 +807,9 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
     // trompeur. Omis si indisponible — pas de chiffre inventé.
     NSDictionary *batteryData = [props[@"BatteryData"] isKindOfClass:NSDictionary.class] ? props[@"BatteryData"] : nil;
     NSNumber *designCap = num(props[@"DesignCapacity"]) ?: num(batteryData[@"DesignCapacity"]);
-    NSNumber *fullCap = num(props[@"AppleRawMaxCapacity"]) ?: num(props[@"NominalChargeCapacity"]) ?: num(batteryData[@"NominalChargeCapacity"]);
+    // NominalChargeCapacity d'abord : stable d'un relevé à l'autre et au plus près de la « capacité
+    // maximale » de Réglages (90 % pour 92 % affichés sur le Mac16,6 ; AppleRawMaxCapacity donnait 87 %).
+    NSNumber *fullCap = num(props[@"NominalChargeCapacity"]) ?: num(batteryData[@"NominalChargeCapacity"]) ?: num(props[@"AppleRawMaxCapacity"]);
     if (designCap.doubleValue > 1000 && fullCap.doubleValue > 1000) {
         values[@"healthPercent"] = @(round(MIN(100.0, 100.0 * fullCap.doubleValue / designCap.doubleValue)));
         values[@"designCapacity"] = @(designCap.integerValue);   // mAh de conception
@@ -833,6 +824,7 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
     // l'AppleSmartBattery est en centi-°C (ex. 3012 = 30,12 °C).
     NSNumber *temp = num(props[@"Temperature"]) ?: num(batteryData[@"Temperature"]);
     if (temp.doubleValue > 0) values[@"temperatureC"] = @(round(temp.doubleValue / 100.0));
+    else if (smcTempC > 0 && smcTempC < 80) values[@"temperatureC"] = @(round(smcTempC));
 
     // Chargeur : puissance nominale de l'adaptateur branché.
     NSDictionary *adapter = [props[@"AdapterDetails"] isKindOfClass:NSDictionary.class] ? props[@"AdapterDetails"] : nil;
@@ -847,6 +839,33 @@ static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
     if (chosen && chosen.intValue > 0 && chosen.intValue != 65535) values[@"minutesRemaining"] = chosen;
 
     return values.count ? values : nil;
+}
+
+// macOS 27 ne publie plus « Temperature » dans l'AppleSmartBattery : on lit alors les sondes de la
+// cellule au SMC (TB0T…TB2T, flottants en °C), la plus chaude faisant foi.
+static double TMBatterySMCTemperature(void) {
+    static const char *keys[] = {"TB0T", "TB1T", "TB2T"};
+    double hottest = NAN;
+    for (size_t i = 0; i < sizeof(keys) / sizeof(*keys); i++) {
+        double celsius = TMSMCReadNumber(keys[i]);
+        if (celsius > 0 && celsius < 80 && !(celsius <= hottest)) hottest = celsius;
+    }
+    return hottest;
+}
+
+static NSDictionary<NSString *, NSNumber *> *TMCollectBattery(void) {
+    io_service_t smart = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                     IOServiceMatching("AppleSmartBattery"));
+    if (!smart) return nil;
+    CFMutableDictionaryRef rawProps = NULL;
+    if (IORegistryEntryCreateCFProperties(smart, &rawProps, kCFAllocatorDefault, 0) != KERN_SUCCESS) {
+        IOObjectRelease(smart);
+        return nil;
+    }
+    NSDictionary *props = CFBridgingRelease(rawProps);
+    IOObjectRelease(smart);
+    BOOL hasTemperature = [props[@"Temperature"] isKindOfClass:NSNumber.class];
+    return TMBatteryValues(props, hasTemperature ? NAN : TMBatterySMCTemperature());
 }
 
 #pragma mark - Processus
