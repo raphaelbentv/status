@@ -184,6 +184,11 @@ réinitialisation manuelle restent affichés séparément.
 - **Alertes** : une notification au seuil configuré (80 % par défaut), puis à 95 % du quota
   hebdomadaire global, une seule fois par niveau et par période. Les renouvellements suivent ce
   même périmètre : aucun seuil ni renouvellement des modèles spécifiques, fenêtres 5 h ou dépassements.
+- **Projection d'épuisement** : « À sec vers jeu. 14 h » sur les cartes (popup et tableau de bord)
+  quand le rythme des 3 dernières heures épuise la fenêtre avant son renouvellement. Rien sans au
+  moins 15 min d'historique et 2 points de montée, à rythme nul, ou juste après une remise à zéro.
+  Une notification prévient si l'épuisement est annoncé dans l'heure (session 5 h et quota hebdo
+  général), une fois par épisode ; l'alerte se règle comme les autres (« À sec dans l'heure »).
 - **Historique** : un point toutes les 5 min dans `~/Library/Application Support/Status/`
   (~2000 points, soit une semaine), rendu en sparkline sous chaque jauge. Ne contient que des
   identifiants de fenêtre et des pourcentages.

@@ -21,6 +21,13 @@
   const isLive = w => typeof w.usedPercent === 'number' && Number.isFinite(w.usedPercent) && Number(w.resetsAt) > Date.now() / 1000;
   const usableWindows = account => (account.windows || []).filter(w => isLive(w) && w.usedPercent >= 0 && w.usedPercent <= 100);
 
+  // Épuisement projeté (`exhaustAt`, posé par le natif), revalidé ici : l'affichage peut durer
+  // des minutes après le calcul, et rien de périmé ne doit s'afficher. null = ne rien montrer.
+  const exhaustAt = (w, now = Date.now() / 1000) => {
+    const at = Number(w?.exhaustAt), reset = Number(w?.resetsAt);
+    return Number.isFinite(at) && at > now && at < reset ? at : null;
+  };
+
   function availability(account) {
     if (!isConnected(account.provider, account) || account.error || account.stale || (account.capturedAt && Date.now() / 1000 - account.capturedAt > 1800)) return null;
     const windows = usableWindows(account), weekly = windows.filter(isMainWeekly);
@@ -50,5 +57,5 @@
     return Number(bb.available) - Number(aa.available) || bb.remaining - aa.remaining;
   }
   root.StatusQuota = {isSession, isWeekly, isCodexSpark, isFable, isScopedWeekly, isMainWeekly, used, isConnected,
-    mainWeekly, isLive, usableWindows, availability, weeklyReset, compareByReset, compareByRemaining};
+    mainWeekly, isLive, exhaustAt, usableWindows, availability, weeklyReset, compareByReset, compareByRemaining};
 })(typeof window !== 'undefined' ? window : globalThis);

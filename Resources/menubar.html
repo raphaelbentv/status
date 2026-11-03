@@ -134,9 +134,11 @@
   .quota-side .primary-rail{margin-top:6px}
   /* Une seule ligne, tronquée au pire : un retour à la ligne laissait « h » seul au bout. */
   .quota-side .reset{margin-top:5px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .session-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"l t v" "r r r";align-items:center;gap:5px 8px;margin-top:8px;padding-top:7px;border-top:1px solid var(--hair);font-size:12px;color:var(--muted)}
+  .session-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"l t v" "r r r" "x x x";align-items:center;gap:5px 8px;margin-top:8px;padding-top:7px;border-top:1px solid var(--hair);font-size:12px;color:var(--muted)}
   .session-row>span{grid-area:l}.session-row>b{grid-area:v;justify-self:end;color:var(--text);font-variant-numeric:tabular-nums}
   .session-row>.rail{grid-area:r}.session-row>small{grid-area:t;font-size:12px;font-variant-numeric:tabular-nums}
+  .exhaust{margin-top:3px;font-size:11.5px;font-weight:700;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .session-row>.sx{grid-area:x;margin:0;font-size:12px}
   .rail.thin{height:6px;margin:0;border-radius:3px}
   .quota-card footer{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:auto;padding-top:8px;min-width:0;width:100%}
   .quota-card .account-note{margin:0;min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quota-card .who{color:var(--text);font-weight:700;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -188,7 +190,9 @@ document.querySelector('.mac-tools').addEventListener('toggle',event=>
   send('setMacToolsVisible',{visible:event.currentTarget.open}));
 const I=StatusI18n;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const {isSession,isWeekly,isCodexSpark,isScopedWeekly,mainWeekly,isFable,used,isConnected,isLive}=StatusQuota;
+const {isSession,isWeekly,isCodexSpark,isScopedWeekly,mainWeekly,isFable,used,isConnected,isLive,exhaustAt}=StatusQuota;
+// « À sec vers jeu. 14 h » : seulement si le rythme actuel épuise la fenêtre avant son renouvellement.
+const exhaustLine=(w,cls='exhaust')=>{const at=exhaustAt(w);return at?`<div class="${cls}">${esc(t('q.exhaust',{at:I.date(at*1000,{weekday:'short',hour:'numeric'})}))}</div>`:''};
 // Même seuils que dashboard.html : data-level pour les thèmes qui colorent l'alerte (≤ 20 % restant : crit, ≤ 45 % : warn).
 const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
 const reset=w=>{
@@ -271,11 +275,11 @@ function provider(id,name,accounts,metric){
   const picker=(accounts||[]).length>1?`<select class="provider-picker" aria-label="${t('menu.account',{name})}" onchange="selectPopupAccount('${id}',this.value);this.blur()"><option value="" ${!pinned?'selected':''}>${t('menu.mostUsed')}</option>${accounts.map(a=>`<option value="${esc(a.accountId)}" ${pinned&&a.accountId===account?.accountId?'selected':''}>${esc(a.label)}</option>`).join('')}</select>`
     :account?`<span class="account-name">${esc(account.label)}</span>`:'';
   const action=!connected?`<button class="account-action" onclick="send('${account?(id==='openai'?'loginOpenAI':'connectClaudeWeb'):'addAccount'}',${account?`{accountId:'${account.accountId}'}`:`{provider:'${id}'}`})">${account?t('menu.connect'):t('menu.addAccount')}</button>`:'';
-  const sessionRow=session?`<div class="session-row" data-level="${levelOf(used(session))}"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${I.pct(100-used(session))}</b><small>${reset(session)}</small></div>`:'';
+  const sessionRow=session?`<div class="session-row" data-level="${levelOf(used(session))}"><span>5 h</span><div class="rail thin"><i style="width:${used(session)}%"></i></div><b>${I.pct(100-used(session))}</b><small>${reset(session)}</small>${exhaustLine(session,'exhaust sx')}</div>`:'';
   return `<section class="quota-card" data-provider="${id}" data-level="${levelOf(value)}" style="--provider:${ink}">
     <header><span class="provider-name">${name}</span>${picker}</header>
     <div class="quota-main"><div class="value ${level}">${value===null?'—':(100-value)+'<span class="unit">%</span>'}</div>
-      <div class="quota-side"><div class="quota-label">${t('menu.leftThisWeek')}</div>${quotaRail(weekly,true)}<div class="reset">${weekly?t('menu.renewal',{v:reset(weekly)}):'—'}</div></div></div>
+      <div class="quota-side"><div class="quota-label">${t('menu.leftThisWeek')}</div>${quotaRail(weekly,true)}<div class="reset">${weekly?t('menu.renewal',{v:reset(weekly)}):'—'}</div>${exhaustLine(weekly)}</div></div>
     ${sessionRow}${extraCredits(account)}
     <footer>${(accounts||[]).length>1&&!pinned&&account?`<b class="who" title="${esc(account.label)}">${esc(account.label)}</b>`:''}<span class="account-note ${noteClass}">${note}</span>${action}</footer></section>`;
 }

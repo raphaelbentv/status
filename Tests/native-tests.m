@@ -808,6 +808,131 @@ static void TestForecastExhaustion(void) {
     Check(TMForecastExhaustion(withGaps, @"k", now + 100 * hour, &at), @"entrées sans la clé : ignorées, pas fatales");
 }
 
+static NSDictionary *TMWin(NSString *wid, NSString *label, double used, long long resetsAt, long long minutes);
+
+static void TestQuotaProjection(void) {
+    Section(@"TMQuotaProjection — épuisement projeté (cartes et alerte)");
+    const NSTimeInterval now = 1000000, hour = 3600, min = 60;
+    NSTimeInterval at = 0;
+
+    // 50 % → 60 % en 1 h (10 %/h) : 40 points restants ⇒ épuisé dans 4 h, avant le reset.
+    NSArray *rising = TMHistoryFrom(@"k", (@[@50, @55, @60]), now, 0.5 * hour);
+    Check(TMQuotaProjection(rising, @"k", 60, now + 10 * hour, now, &at), @"montée régulière : projection rendue");
+    Check(fabs(at - (now + 4 * hour)) < 120, @"40 points à 10 %/h ⇒ à sec dans ~4 h");
+    Check(!TMQuotaProjection(rising, @"k", 60, now + 3 * hour, now, &at), @"renouvellement avant l'épuisement : rien à afficher");
+
+    // Rythme nul ou en baisse : jamais d'extrapolation.
+    NSArray *flat = TMHistoryFrom(@"k", (@[@60, @60, @60, @60]), now, 0.5 * hour);
+    Check(!TMQuotaProjection(flat, @"k", 60, now + 100 * hour, now, &at), @"rythme nul : rien");
+    NSArray *falling = TMHistoryFrom(@"k", (@[@62, @61, @60]), now, 0.5 * hour);
+    Check(!TMQuotaProjection(falling, @"k", 60, now + 100 * hour, now, &at), @"rythme négatif : rien");
+    NSArray *oneStep = TMHistoryFrom(@"k", (@[@60, @60, @61]), now, 0.5 * hour);
+    Check(!TMQuotaProjection(oneStep, @"k", 61, now + 100 * hour, now, &at), @"1 point de montée = bruit d'arrondi : rien");
+
+    // Pas assez d'historique.
+    Check(!TMQuotaProjection(@[], @"k", 60, now + 10 * hour, now, &at), @"historique vide : rien");
+    NSArray *tooShort = TMHistoryFrom(@"k", (@[@50, @60]), now, 5 * min);
+    Check(!TMQuotaProjection(tooShort, @"k", 60, now + 10 * hour, now, &at), @"moins de 15 min couvertes : rien");
+    Check(!TMQuotaProjection(rising, @"autre", 60, now + 10 * hour, now, &at), @"clé absente de l'historique : rien");
+
+    // Remise à zéro : la mesure vivante retombe avant que l'historique le sache, ou l'historique la contient.
+    Check(!TMQuotaProjection(rising, @"k", 2, now + 10 * hour, now, &at), @"quota remis à zéro en direct : rien");
+    NSArray *acrossReset = TMHistoryFrom(@"k", (@[@80, @90, @3, @10, @17]), now, 0.5 * hour);
+    Check(TMQuotaProjection(acrossReset, @"k", 17, now + 100 * hour, now, &at), @"reset dans l'historique : seule la montée suivante compte");
+    Check(fabs(at - (now + 83.0 / 14 * hour)) < 300, @"14 %/h depuis le reset, 83 points restants ⇒ ~5,9 h");
+    NSArray *justReset = TMHistoryFrom(@"k", (@[@70, @80, @90, @1]), now, 0.5 * hour);
+    Check(!TMQuotaProjection(justReset, @"k", 1, now + 100 * hour, now, &at), @"reset à l'instant : pas assez de recul");
+
+    // Fenêtre déjà échue ou déjà pleine.
+    Check(!TMQuotaProjection(rising, @"k", 60, now - 1, now, &at), @"fenêtre échue : rien");
+    Check(!TMQuotaProjection(rising, @"k", 100, now + 10 * hour, now, &at), @"déjà à 100 % : rien");
+
+    // Horloge qui recule : des points « futurs » ne doivent ni fabriquer ni masquer une pente.
+    NSMutableArray *future = [TMHistoryFrom(@"k", (@[@50, @55, @60]), now, 0.5 * hour) mutableCopy];
+    [future addObjectsFromArray:TMHistoryFrom(@"k", (@[@70, @80, @90]), now + 2 * hour, 0.5 * hour)];
+    Check(TMQuotaProjection(future, @"k", 60, now + 10 * hour, now, &at), @"points postérieurs à maintenant ignorés");
+    Check(fabs(at - (now + 4 * hour)) < 120, @"projection inchangée par les points futurs");
+    NSArray *onlyFuture = TMHistoryFrom(@"k", (@[@50, @55, @60]), now + 2 * hour, 0.5 * hour);
+    Check(!TMQuotaProjection(onlyFuture, @"k", 60, now + 10 * hour, now, &at), @"historique entièrement dans le futur : rien");
+    NSArray *shuffled = @[rising[2], rising[0], rising[1]];
+    Check(TMQuotaProjection(shuffled, @"k", 60, now + 10 * hour, now, &at), @"historique désordonné : retrié");
+    Check(fabs(at - (now + 4 * hour)) < 120, @"même projection une fois retrié");
+
+    // Trop ancien : le rythme d'il y a une demi-journée n'est pas le rythme actuel.
+    NSArray *old = TMHistoryFrom(@"k", (@[@10, @30, @50]), now - 12 * hour, hour);
+    Check(!TMQuotaProjection(old, @"k", 50, now + 100 * hour, now, &at), @"relevés de plus de 3 h : rien");
+
+    // TMWindowsWithProjection : pose exhaustAt sur la bonne fenêtre, laisse les autres intactes.
+    NSString *key = TMHistoryKey(@"claude", TM_ACC_A, @"seven_day");
+    NSArray *history = TMHistoryFrom(key, (@[@50, @55, @60]), now, 0.5 * hour);
+    NSArray *windows = @[TMWin(@"seven_day", @"Semaine", 60, now + 10 * hour, 10080),
+                         TMWin(@"five_hour", @"5 h", 30, now + 2 * hour, 300)];
+    NSArray *decorated = TMWindowsWithProjection(windows, history, @"claude", TM_ACC_A, now);
+    Check([decorated[0][@"exhaustAt"] doubleValue] > now, @"fenêtre projetée : exhaustAt posé");
+    Check(decorated[1][@"exhaustAt"] == nil, @"fenêtre sans historique : pas d'exhaustAt");
+    Check(windows[0][@"exhaustAt"] == nil, @"les fenêtres d'origine ne sont pas modifiées");
+}
+
+static void TestExhaustionAlert(void) {
+    Section(@"TMExhaustionAlertDecisions — alerte « à sec dans l'heure »");
+    const NSTimeInterval now = 1000000;
+    NSArray *(^pairs)(NSDictionary *) = ^NSArray *(NSDictionary *window) { return @[@[@"Claude#a", @[window]]]; };
+    NSDictionary *(^session)(double, NSTimeInterval) = ^NSDictionary *(double used, NSTimeInterval exhaustAt) {
+        NSMutableDictionary *w = [TMWin(@"five_hour", @"5 h", used, now + 4 * 3600, 300) mutableCopy];
+        if (exhaustAt) w[@"exhaustAt"] = @(exhaustAt);
+        return w;
+    };
+
+    NSDictionary *r = TMExhaustionAlertDecisions(nil, pairs(session(85, now + 40 * 60)), now);
+    NSArray *events = r[@"events"];
+    CheckEqual(@(events.count), @1, @"épuisement dans 40 min : une alerte");
+    CheckEqual(events.firstObject[@"kind"], @"exhaustion", @"de type exhaustion");
+    CheckEqual(events.firstObject[@"provider"], @"Claude#a", @"fournisseur#compte transmis");
+    CheckEqual(events.firstObject[@"exhaustAt"], @(now + 40 * 60), @"heure d'épuisement transmise");
+
+    // Anti-répétition : même épisode, même si la date de reset ou la projection bougent.
+    r = TMExhaustionAlertDecisions(r[@"state"], pairs(session(86, now + 30 * 60)), now + 600);
+    CheckEqual(@([r[@"events"] count]), @0, @"épisode déjà annoncé : silence");
+    NSMutableDictionary *drifted = [session(88, now + 20 * 60) mutableCopy];
+    drifted[@"resetsAt"] = @(now + 9 * 3600);
+    r = TMExhaustionAlertDecisions(r[@"state"], pairs(drifted), now + 1200);
+    CheckEqual(@([r[@"events"] count]), @0, @"resetsAt qui dérive (fenêtre glissante) : pas de nouvelle alerte");
+    r = TMExhaustionAlertDecisions(r[@"state"], pairs(session(88, 0)), now + 1800);
+    r = TMExhaustionAlertDecisions(r[@"state"], pairs(session(90, now + 10 * 60)), now + 2400);
+    CheckEqual(@([r[@"events"] count]), @0, @"projection disparue puis revenue dans le même épisode : silence");
+
+    // Renouvellement (le quota retombe nettement) : l'alerte se réarme.
+    r = TMExhaustionAlertDecisions(r[@"state"], pairs(session(2, 0)), now + 5 * 3600);
+    CheckEqual(@([r[@"events"] count]), @0, @"quota remis à zéro : rien à annoncer");
+    r = TMExhaustionAlertDecisions(r[@"state"], pairs(session(84, now + 7 * 3600 + 30 * 60)), now + 7 * 3600);
+    CheckEqual(@([r[@"events"] count]), @1, @"nouvelle période : l'alerte repart");
+
+    // Pas d'alerte quand l'épuisement est loin, absent ou déjà passé.
+    CheckEqual(@([TMExhaustionAlertDecisions(nil, pairs(session(60, now + 2 * 3600)), now)[@"events"] count]), @0, @"à sec dans 2 h : trop tôt");
+    CheckEqual(@([TMExhaustionAlertDecisions(nil, pairs(session(60, 0)), now)[@"events"] count]), @0, @"aucune projection : rien");
+    CheckEqual(@([TMExhaustionAlertDecisions(nil, pairs(session(99, now - 60)), now)[@"events"] count]), @0, @"échéance passée : rien");
+
+    // Deux comptes ne se réarment pas l'un l'autre ; sous-quota modèle et dépassement exclus.
+    r = TMExhaustionAlertDecisions(nil, @[@[@"Claude#a", @[session(85, now + 600)]], @[@"Claude#b", @[session(85, now + 600)]]], now);
+    CheckEqual(@([r[@"events"] count]), @2, @"deux comptes, deux alertes");
+    NSMutableDictionary *scoped = [TMWin(@"seven_day_scoped_fable", @"Fable", 85, now + 86400, 10080) mutableCopy];
+    scoped[@"exhaustAt"] = @(now + 600);
+    CheckEqual(@([TMExhaustionAlertDecisions(nil, pairs(scoped), now)[@"events"] count]), @0, @"sous-quota par modèle : exclu");
+    NSMutableDictionary *weekly = [TMWin(@"seven_day", @"Semaine", 90, now + 86400, 10080) mutableCopy];
+    weekly[@"exhaustAt"] = @(now + 1800);
+    CheckEqual(@([TMExhaustionAlertDecisions(nil, pairs(weekly), now)[@"events"] count]), @1, @"quota hebdo général : inclus");
+
+    // Seuil à 80 % : une seule notification par période, réarmée au renouvellement suivant.
+    NSArray *levels = @[@80];
+    NSDictionary *t1 = TMQuotaNotificationDecisions(nil, pairs(TMWin(@"seven_day", @"Semaine", 81, now + 86400, 10080)), levels, NO, now);
+    CheckEqual(@([t1[@"events"] count]), @1, @"80 % franchi : une notification");
+    NSDictionary *t2 = TMQuotaNotificationDecisions(t1[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 83, now + 86400, 10080)), levels, NO, now + 900);
+    CheckEqual(@([t2[@"events"] count]), @0, @"toujours au-dessus : pas de rappel");
+    NSDictionary *t3 = TMQuotaNotificationDecisions(t2[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 4, now + 8 * 86400, 10080)), levels, NO, now + 86500);
+    NSDictionary *t4 = TMQuotaNotificationDecisions(t3[@"state"], pairs(TMWin(@"seven_day", @"Semaine", 82, now + 8 * 86400, 10080)), levels, NO, now + 90000);
+    CheckEqual(@([t4[@"events"] count]), @1, @"renouvellement suivant : la notification repart");
+}
+
 // Fenêtre normalisée pour les tests de notifications quota.
 static NSDictionary *TMWin(NSString *wid, NSString *label, double used, long long resetsAt, long long minutes) {
     return @{ @"windowId": wid, @"label": label, @"usedPercent": @(used),
@@ -3120,6 +3245,8 @@ int main(void) {
         TestWatchdog();
         TestForecastExhaustion();
         TestQuotaNotificationDecisions();
+        TestQuotaProjection();
+        TestExhaustionAlert();
         TestWeeklyResetStatistics();
         TestMetricsDeltaPayload();
         TestTopProcesses();

@@ -2034,7 +2034,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
 - (NSDictionary *)payload {
     NSArray *history = TMLoadHistory();
     return @{
-        @"accounts": [self accountPayloadList],
+        @"accounts": [self accountPayloadListProjectedWithHistory:history],
         @"accountLimit": @(TMMaxAccountsPerProvider),
         @"apiAccounts": [self apiAccountPayloadList],
         @"apiAccountLimit": @(TMMaxApiAccountsPerProvider),
@@ -2450,10 +2450,10 @@ static NSNumber *TMFanInteger(id value) {
 // Valeurs par défaut des alertes. Les alertes système sont volontairement hautes : elles signalent
 // un état anormal, pas une machine qui travaille. Les alertes quota (seuil « entamé » réglable,
 // rappel fixe à 95 %, réinitialisation hebdo) sont le cœur du produit : actives d'office.
-// `quotaReset` est un événement sans seuil — son 0 n'est qu'un remplissage de structure.
+// `quotaReset` et `quotaExhaust` sont des événements sans seuil — leur 0 n'est qu'un remplissage de structure.
 // L'utilisateur règle ou coupe chaque alerte séparément (préférence `alerts`).
 static NSDictionary *TMAlertDefaults(void) {
-    return @{ @"temp": @90, @"disk": @90, @"memory": @4, @"quota": @80, @"quotaReset": @0, @"apiCredit": @10 };
+    return @{ @"temp": @90, @"disk": @90, @"memory": @4, @"quota": @80, @"quotaReset": @0, @"quotaExhaust": @0, @"apiCredit": @10 };
 }
 
 // Réglage d'une alerte : activée ? et à quel seuil ? Absent = activée au seuil par défaut, pour que
@@ -2762,6 +2762,21 @@ static NSDictionary *TMAlertDefaults(void) {
         [accounts enumerateObjectsUsingBlock:^(NSDictionary *account, NSUInteger index, BOOL *stop) {
             [out addObject:[self payloadForAccount:account index:index]];
         }];
+    }
+    return out;
+}
+
+// Comptes avec `exhaustAt` sur les fenêtres dont la projection tient. Un compte périmé n'est pas
+// extrapolé : sa mesure ne dit plus rien du rythme d'aujourd'hui.
+- (NSArray<NSDictionary *> *)accountPayloadListProjectedWithHistory:(NSArray *)history {
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSDictionary *payload in [self accountPayloadList]) {
+        NSArray *windows = [payload[@"windows"] isKindOfClass:NSArray.class] ? payload[@"windows"] : nil;
+        if (!windows.count || [payload[@"stale"] boolValue]) { [out addObject:payload]; continue; }
+        NSMutableDictionary *copy = [payload mutableCopy];
+        copy[@"windows"] = TMWindowsWithProjection(windows, history, payload[@"provider"], payload[@"accountId"], now);
+        [out addObject:copy];
     }
     return out;
 }
@@ -3525,17 +3540,39 @@ static NSDictionary *TMAlertDefaults(void) {
         labels[key] = payload[@"label"] ?: @"";
         [pairs addObject:@[key, windows]];
     }
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     NSDictionary *result = TMQuotaNotificationDecisions(
         [NSUserDefaults.standardUserDefaults dictionaryForKey:@"quotaNotificationState"],
-        pairs, levels, weeklyResets, NSDate.date.timeIntervalSince1970);
-    [NSUserDefaults.standardUserDefaults setObject:result[@"state"] forKey:@"quotaNotificationState"];
+        pairs, levels, weeklyResets, now);
+    NSMutableArray *events = [result[@"events"] mutableCopy];
+    NSDictionary *state = result[@"state"];
+    // Épuisement annoncé dans l'heure : l'état avance même alerte coupée, pour qu'un réglage
+    // réactivé en plein épisode ne notifie pas ce qui était déjà en cours.
+    NSArray *projected = [self accountPayloadListProjectedWithHistory:TMLoadHistory()];
+    NSMutableArray *projectedPairs = [NSMutableArray array];
+    for (NSDictionary *payload in projected) {
+        NSArray *windows = [payload[@"windows"] isKindOfClass:NSArray.class] ? payload[@"windows"] : @[];
+        [projectedPairs addObject:@[[NSString stringWithFormat:@"%@#%@", payload[@"provider"], payload[@"accountId"]], windows]];
+    }
+    NSDictionary *exhaustion = TMExhaustionAlertDecisions(state, projectedPairs, now);
+    state = exhaustion[@"state"];
+    if ([self alertEnabled:@"quotaExhaust" threshold:NULL]) [events addObjectsFromArray:exhaustion[@"events"]];
+    [NSUserDefaults.standardUserDefaults setObject:state forKey:@"quotaNotificationState"];
     // Aucune garde sur `notificationsAuthorized` ici. Ce drapeau n'est renseigné qu'en asynchrone,
     // après le premier sondage : le garder ferait taire les événements de ce premier tour — alors
     // que l'état, lui, a déjà avancé, si bien qu'un reset détecté dans les secondes suivant le
     // lancement était perdu pour de bon. On soumet toujours ; une notification non autorisée est
     // écartée par macOS, sans effet de bord.
-    for (NSDictionary *event in result[@"events"]) {
-        if ([event[@"kind"] isEqualToString:@"reset"]) {
+    for (NSDictionary *event in events) {
+        if ([event[@"kind"] isEqualToString:@"exhaustion"]) {
+            NSDateFormatter *fmt = [NSDateFormatter new];
+            fmt.locale = [NSLocale localeWithLocaleIdentifier:TMLocaleIdentifier()];
+            fmt.dateStyle = NSDateFormatterNoStyle;
+            fmt.timeStyle = NSDateFormatterShortStyle;
+            NSString *at = [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:TMNumber(event[@"exhaustAt"])]];
+            [self postNotificationTitle:TMTP(@"n.exhaust.title", @{@"provider": labels[event[@"provider"]] ?: event[@"provider"], @"label": TMTranslateQuotaLabel(event[@"label"])})
+                                   body:TMTP(@"n.exhaust.body", @{@"at": at})];
+        } else if ([event[@"kind"] isEqualToString:@"reset"]) {
             NSDateFormatter *fmt = [NSDateFormatter new];
             fmt.locale = [NSLocale localeWithLocaleIdentifier:TMLocaleIdentifier()];
             fmt.dateStyle = NSDateFormatterMediumStyle;
