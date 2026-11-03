@@ -54,7 +54,11 @@
   .extra-credits strong{display:block;margin-top:3px;font-variant-numeric:tabular-nums}
   /* Métriques système — mêmes marques que l'onglet Moniteur (paire validée), présence
      conditionnelle : une tuile n'existe que si sa source répond. */
-  .metrics{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
+  .metrics{display:flex;flex-wrap:wrap;gap:1px;background:var(--hair);border-top:1px solid var(--hair-strong);flex:none}
+  /* Ligne batterie : pleine largeur sous les tuiles, les chiffres de santé d'un coup d'œil. */
+  .mline{flex-basis:100%;display:flex;gap:8px;align-items:baseline;background:var(--panel-bg-strong);padding:6px 8px;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:0}
+  .mline .mlabel{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;flex:none}
+  .mline span:last-child{overflow:hidden;text-overflow:ellipsis;min-width:0}
   .mtile{flex:1;background:var(--panel-bg-strong);padding:7px 8px 6px;min-width:0}
   .mtile .mlabel{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
   .mtile .mvalue{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;margin:1px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -474,6 +478,14 @@ function renderMetrics(data){
   if(network)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.network')} ↓↑</div><div class="mvalue">${fmtBytes(network.now.rxBytesPerSec)}</div>${miniChart(network,[{key:'rxBytesPerSec',color:CHART_A},{key:'txBytesPerSec',color:CHART_B}],false)}</div>`);
   const sensors=familyById('sensors');
   if(sensors?.now.tempC!=null)tiles.push(`<div class="mtile"><div class="mlabel">${t('menu.temp')}</div><div class="mvalue">${Math.round(sensors.now.tempC)} °C</div>${miniChart(sensors,[{key:'tempC',color:CHART_A}],true)}</div>`);
+  const battery=familyById('battery')?.now;
+  if(battery){const parts=[];
+    if(battery.percent!=null)parts.push(I.pct(Math.round(battery.percent)));
+    if(battery.healthPercent!=null)parts.push(`${t('w.bat.health')} ${I.pct(Math.round(battery.healthPercent))}`);
+    if(battery.cycleCount!=null)parts.push(`${battery.cycleCount} ${t('w.bat.cycles')}`);
+    if(battery.powerWatts)parts.push(`${battery.powerWatts<0?'↓':'↑'} ${I.numMax(Math.abs(battery.powerWatts),1)} W`);
+    if(battery.temperatureC!=null)parts.push(`${Math.round(battery.temperatureC)} °C`);
+    if(parts.length)tiles.push(`<div class="mline"><span class="mlabel">${t('menu.battery')}</span><span>${parts.join(' · ')}</span></div>`)}
   document.querySelector('#metrics').innerHTML=tiles.join('');
 }
 // Tick incrémental : même mécanique que dashboard.html — le natif n'envoie les séries qu'à

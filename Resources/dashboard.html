@@ -1223,8 +1223,8 @@ function detailGPU(gpu){
 }
 const fmtMinutes=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} ${t('unit.hour')} ${String(mm).padStart(2,'0')}`:`${mm} ${t('unit.min')}`};
 const fmtDecimal=v=>I.numMax(+v,2);
-// Le dépliage complète la rangée de stats (santé/cycles/watts/autonomie déjà en tête) : santé
-// détaillée en mAh, condition, chargeur, température, tension.
+// Le dépliage complète la rangée de stats (santé/cycles/watts/autonomie/température déjà en tête) :
+// santé détaillée en mAh, condition, chargeur, tension.
 function detailBattery(battery){
   const n=battery.now;
   const row=(label,value)=>`<div class="detail-row"><span class="detail-label">${label}</span><span>${value}</span></div>`;
@@ -1232,7 +1232,6 @@ function detailBattery(battery){
   rows.push(row(t('mon.condition'),n.conditionOK?t('mon.conditionOK'):t('mon.conditionCheck')));
   if(n.designCapacity!=null&&n.fullCapacity!=null)rows.push(row(t('mon.capacity'),`${n.fullCapacity} / ${n.designCapacity} mAh`));
   if(n.adapterWatts!=null)rows.push(row(t('w.bat.charger'),n.adapterWatts+' W'));
-  if(n.temperatureC!=null)rows.push(row(t('w.bat.temperature'),Math.round(n.temperatureC)+' °C'));
   if(n.voltageV!=null)rows.push(row(t('w.bat.voltage'),fmtDecimal(n.voltageV)+' V'));
   return `<div class="detail-rows">${rows.join('')}</div>`;
 }
@@ -1274,6 +1273,7 @@ function batteryCard(){
   if(n.cycleCount!=null)stats.push(cell(n.cycleCount,t('w.bat.cycles')));
   if(n.powerWatts!=null&&n.powerWatts!==0)stats.push(cell(`${n.powerWatts<0?'↓':'↑'} ${I.numMax(Math.abs(n.powerWatts),1)} W`,n.powerWatts<0?t('w.bat.discharge'):t('w.bat.charge')));
   if(n.minutesRemaining!=null)stats.push(cell(fmtMinutes(n.minutesRemaining),n.charging?t('w.bat.untilFull'):t('w.bat.runtime')));
+  if(n.temperatureC!=null)stats.push(cell(Math.round(n.temperatureC)+' °C',t('w.bat.temperature'),n.temperatureC>=40));
   if(!n.conditionOK)stats.push(cell(t('mon.toReview'),t('mon.condition'),true));
   const statRow=stats.length?`<div class="stat-row">${stats.join('')}</div>`:'';
   return metricCard('battery',t('w.battery'),

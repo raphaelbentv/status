@@ -412,6 +412,7 @@
  "menu.awake": "sveglio",
  "menu.awakeOn": "resta sveglio",
  "menu.backlight": "Retroilluminazione",
+ "menu.battery": "batteria",
  "menu.cleaning": "pulizia",
  "menu.connect": "connetti",
  "menu.consumed": "{label} consumato",

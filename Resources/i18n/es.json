@@ -412,6 +412,7 @@
  "menu.awake": "reposo",
  "menu.awakeOn": "reposo bloqueado",
  "menu.backlight": "Retroiluminación",
+ "menu.battery": "batería",
  "menu.cleaning": "limpieza",
  "menu.connect": "conectar",
  "menu.consumed": "{label} consumido",

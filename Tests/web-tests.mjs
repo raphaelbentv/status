@@ -119,6 +119,16 @@ checkEqual(menubar('used')({ usedPercent: -5 }), 0, 'borné en bas : jamais de n
 checkEqual(menubar('used')({ usedPercent: 130 }), 100, 'borné en haut');
 checkEqual(menubar('used')(null), null, 'fenêtre absente : null, distinct de 0');
 
+// Popup : ligne batterie compacte sous les tuiles, seulement avec des chiffres réels.
+{
+  const metrics = { innerHTML: '' };
+  menubar('document').querySelector = () => metrics;
+  menubar('renderMetrics')({ families: [{ id: 'battery', now: { percent: 63, healthPercent: 90, cycleCount: 348, powerWatts: -37.1, temperatureC: 36 } }] });
+  check(/class="mline".*batterie.*63\s%.*santé 90\s%.*348 cycles.*↓ 37,1 W.*36 °C/u.test(metrics.innerHTML), 'popup : charge, santé, cycles, puissance signée et température');
+  menubar('renderMetrics')({ families: [{ id: 'battery', now: {} }] });
+  check(!/mline/.test(metrics.innerHTML), 'popup : pas de ligne batterie sans donnée');
+}
+
 // ── Cartes du popover (menubar.html) ───────────────────────────────────────
 section('provider — une carte par fournisseur, volume hebdo en tête');
 const openaiHTML = menubar('provider')('openai', 'OpenAI', [{ provider: 'openai', connected: true, label: 'Boulot', windows: [

@@ -715,6 +715,27 @@ static void TestCPUPercent(void) {
     Check(TMCPUPercentBetweenTicks(0, 400, 200, 500, &pct) && pct == 100.0, @"actifs > écoulés (arrondi noyau) : borné à 100");
 }
 
+static void TestBatteryValues(void) {
+    Section(@"TMBatteryValues — santé de la batterie");
+    // Relevé réel du Mac16,6 sous macOS 27 : plus de clé « Temperature », courant non signé côté IOKit.
+    NSDictionary *props = @{@"CurrentCapacity": @68, @"MaxCapacity": @100, @"IsCharging": @NO, @"ExternalConnected": @NO,
+        @"CycleCount": @348, @"Voltage": @11689, @"InstantAmperage": @(18446744073709549172ULL), @"AppleRawMaxCapacity": @5472,
+        @"BatteryData": @{@"DesignCapacity": @6249, @"NominalChargeCapacity": @5624}};
+    NSDictionary *v = TMBatteryValues(props, 35.2);
+    CheckEqual(v[@"percent"], @68, @"état de charge en %");
+    CheckEqual(v[@"cycleCount"], @348, @"cycles");
+    CheckEqual(v[@"healthPercent"], @90, @"santé : capacité nominale / conception (5624 / 6249)");
+    CheckEqual(v[@"powerWatts"], @(-28.6), @"décharge : puissance négative (11,689 V × -2,444 A)");
+    CheckEqual(v[@"temperatureC"], @35, @"sans clé registre : température SMC");
+    NSMutableDictionary *charging = [props mutableCopy];
+    charging[@"InstantAmperage"] = @1500; charging[@"IsCharging"] = @YES; charging[@"Temperature"] = @3012;
+    v = TMBatteryValues(charging, 50);
+    CheckEqual(v[@"powerWatts"], @(17.5), @"charge : puissance positive");
+    CheckEqual(v[@"temperatureC"], @30, @"clé registre (centi-°C) prioritaire sur le SMC");
+    v = TMBatteryValues(@{@"CurrentCapacity": @50, @"AppleRawMaxCapacity": @100}, NAN);
+    Check(!v[@"healthPercent"] && !v[@"temperatureC"], @"capacités trompeuses (%) et température inconnue : omises");
+}
+
 static void TestSystemMonitorSnapshot(void) {
     Section(@"TMSystemMonitor — collecteurs et snapshot");
     __block BOOL gpuAvailable = YES;
@@ -3105,6 +3126,7 @@ int main(void) {
         TestMetricRing();
         TestRatePerSecond();
         TestCPUPercent();
+        TestBatteryValues();
         TestSystemMonitorSnapshot();
         TestCostSince();
         TestModelBreakdown();
