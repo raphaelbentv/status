@@ -721,7 +721,7 @@
  "set.theme.title": "Theme",
  "set.thresholds.allowed": "Allowed",
  "set.thresholds.denied": "Denied — see System Settings › Notifications",
- "set.thresholds.desc": "Adjustable threshold, then a reminder at 95% of the overall weekly quota only. No alerts for specific models or the 5 h window.",
+ "set.thresholds.desc": "Adjustable threshold, then a reminder at 95% of the overall weekly quota only. No threshold alerts for specific models or the 5 h window (“Running out within the hour” covers the 5 h window).",
  "set.thresholds.title": "Threshold alerts",
  "set.title": "Settings",
  "set.update.auto.desc": "Status checks for new versions on its own, downloads them and installs them without asking.",

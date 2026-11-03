@@ -721,7 +721,7 @@
  "set.theme.title": "Thème",
  "set.thresholds.allowed": "Autorisées",
  "set.thresholds.denied": "Refusées — voir Réglages système › Notifications",
- "set.thresholds.desc": "Seuil réglable, puis rappel à 95 % du quota hebdomadaire global uniquement. Aucune alerte pour les modèles spécifiques ni la fenêtre de 5 h.",
+ "set.thresholds.desc": "Seuil réglable, puis rappel à 95 % du quota hebdomadaire global uniquement. Aucune alerte de seuil pour les modèles spécifiques ni la fenêtre de 5 h (« À sec dans l’heure » couvre la fenêtre de 5 h).",
  "set.thresholds.title": "Alertes de seuil",
  "set.title": "Réglages",
  "set.update.auto.desc": "Status vérifie les nouvelles versions de lui-même, les télécharge et les installe sans rien demander.",

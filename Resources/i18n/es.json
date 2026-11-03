@@ -721,7 +721,7 @@
  "set.theme.title": "Tema",
  "set.thresholds.allowed": "Permitidas",
  "set.thresholds.denied": "Denegadas — consulte Ajustes del Sistema › Notificaciones",
- "set.thresholds.desc": "Umbral ajustable y, después, recordatorio al 95 % de la cuota semanal global únicamente. Sin alertas para los modelos concretos ni para la ventana de 5 h.",
+ "set.thresholds.desc": "Umbral ajustable y, después, recordatorio al 95 % de la cuota semanal global únicamente. Sin alertas de umbral para los modelos concretos ni para la ventana de 5 h («Agotamiento en menos de una hora» cubre la ventana de 5 h).",
  "set.thresholds.title": "Alertas de umbral",
  "set.title": "Ajustes",
  "set.update.auto.desc": "Status busca nuevas versiones por sí mismo, las descarga y las instala sin preguntar.",

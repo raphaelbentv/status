@@ -721,7 +721,7 @@
  "set.theme.title": "Tema",
  "set.thresholds.allowed": "Consentite",
  "set.thresholds.denied": "Negate — vedere Impostazioni di Sistema › Notifiche",
- "set.thresholds.desc": "Soglia regolabile, poi promemoria al 95% della sola quota settimanale globale. Nessun avviso per i modelli specifici né per la finestra di 5 h.",
+ "set.thresholds.desc": "Soglia regolabile, poi promemoria al 95% della sola quota settimanale globale. Nessun avviso di soglia per i modelli specifici né per la finestra di 5 h (« Esaurimento entro un’ora » copre la finestra di 5 h).",
  "set.thresholds.title": "Avvisi di soglia",
  "set.title": "Impostazioni",
  "set.update.auto.desc": "Status cerca da solo le nuove versioni, le scarica e le installa senza chiedere.",

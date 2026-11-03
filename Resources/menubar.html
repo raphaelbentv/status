@@ -138,7 +138,7 @@
   .session-row>span{grid-area:l}.session-row>b{grid-area:v;justify-self:end;color:var(--text);font-variant-numeric:tabular-nums}
   .session-row>.rail{grid-area:r}.session-row>small{grid-area:t;font-size:12px;font-variant-numeric:tabular-nums}
   .exhaust{margin-top:3px;font-size:11.5px;font-weight:700;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .session-row>.sx{grid-area:x;margin:0;font-size:12px}
+  .session-row>.sx{grid-area:x;margin:0}
   .rail.thin{height:6px;margin:0;border-radius:3px}
   .quota-card footer{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:auto;padding-top:8px;min-width:0;width:100%}
   .quota-card .account-note{margin:0;min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quota-card .who{color:var(--text);font-weight:700;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -192,7 +192,7 @@ const I=StatusI18n;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const {isSession,isWeekly,isCodexSpark,isScopedWeekly,mainWeekly,isFable,used,isConnected,isLive,exhaustAt}=StatusQuota;
 // « À sec vers jeu. 14 h » : seulement si le rythme actuel épuise la fenêtre avant son renouvellement.
-const exhaustLine=(w,cls='exhaust')=>{const at=exhaustAt(w);return at?`<div class="${cls}">${esc(t('q.exhaust',{at:I.date(at*1000,{weekday:'short',hour:'numeric'})}))}</div>`:''};
+const exhaustLine=(w,cls='exhaust')=>{const at=exhaustAt(w);return at?`<div class="${cls}">${esc(t('q.exhaust',{at:I.date(Math.round(at/3600)*3600000,{weekday:'short',hour:'numeric'})}))}</div>`:''};
 // Même seuils que dashboard.html : data-level pour les thèmes qui colorent l'alerte (≤ 20 % restant : crit, ≤ 45 % : warn).
 const levelOf=value=>value===null?'':100-value<=20?'crit':100-value<=45?'warn':'ok';
 const reset=w=>{

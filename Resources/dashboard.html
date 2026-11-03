@@ -405,7 +405,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const I=StatusI18n;
 const providerColor=id=>id==='openai'?'var(--blue)':'var(--purple)';
 // « À sec vers jeu. 14 h » : seulement si le rythme actuel épuise la fenêtre avant son renouvellement.
-const exhaustLine=w=>{const at=StatusQuota.exhaustAt(w);return at?`<br><b class="exhaust">${esc(t('q.exhaust',{at:I.date(at*1000,{weekday:'short',hour:'numeric'})}))}</b>`:''};
+const exhaustLine=w=>{const at=StatusQuota.exhaustAt(w);return at?`<br><b class="exhaust">${esc(t('q.exhaust',{at:I.date(Math.round(at/3600)*3600000,{weekday:'short',hour:'numeric'})}))}</b>`:''};
 const resetFull=timestamp=>timestamp?I.date(timestamp*1000,{weekday:'short',hour:'2-digit',minute:'2-digit'}):'—';
 const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?t('d.now'):min<60?t('d.agoMin',{n:min}):t('d.agoHour',{n:Math.round(min/60)})};
 // "dans 2 h 14" is actionable in a way that "14:00" is not — you can decide whether to keep working.
