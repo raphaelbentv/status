@@ -26,7 +26,7 @@ static NSDictionary *Lid(NSDictionary *extra) {
 static NSDictionary *Running(double remaining) { return Lid(@{@"active":@YES,@"remainingSeconds":@(remaining),@"message":@"Actif · faible consommation imposée."}); }
 static TMLidAutoPilot *Pilot(void) { TMLidAutoPilot *p=[TMLidAutoPilot new]; p.enabled=YES; return p; }
 static TMLidAutoCommand Decide(TMLidAutoPilot *p, NSDictionary *lid, BOOL working, double now, NSInteger *minutes) {
-    NSInteger ignored; return [p decideWithService:lid working:working sleepDisabled:0 now:now minutes:minutes ?: &ignored];
+    NSInteger ignored; return [p decideWithService:lid working:working now:now minutes:minutes ?: &ignored];
 }
 static NSString *State(TMLidAutoPilot *p, double now) { return [p snapshot:now][@"state"]; }
 // Démarre une session automatique à `now` et la confirme.
@@ -69,11 +69,6 @@ int main(void){@autoreleasepool{
     Check(TMClaudeCodeWorking(@[root],now)&&!TMClaudeCodeWorking(@[root],now+180),@"format inconnu : seule une écriture récente compte");
     [NSFileManager.defaultManager removeItemAtPath:root error:nil];
 
-    NSString *pm=@"System-wide power settings:\n SleepDisabled\t\t1\nCurrently in use:\n sleep 1\n";
-    Check(TMLidParseSleepDisabled(pm)==1,@"pmset : blocage extérieur lu");
-    Check(TMLidParseSleepDisabled([pm stringByReplacingOccurrencesOfString:@"\t\t1" withString:@"\t\t0"])==0,@"pmset : veille permise");
-    Check(TMLidParseSleepDisabled(@"System-wide power settings:\nCurrently in use:\n")==0,@"pmset : ligne absente = veille permise");
-    Check(TMLidParseSleepDisabled(@"erreur")==-1&&TMLidParseSleepDisabled([pm stringByReplacingOccurrencesOfString:@"\t\t1" withString:@" x"])==-1,@"pmset : sortie illisible");
 
     // ── Pilote ──
     NSInteger minutes=0; TMLidAutoPilot *p=[TMLidAutoPilot new];
@@ -92,9 +87,6 @@ int main(void){@autoreleasepool{
     Check(Decide(p,Running(1100),NO,2900,NULL)==TMLidAutoStop,@"5 min sans travail : arrêt");
     Decide(p,Lid(@{@"message":@"Arrêt demandé."}),NO,2905,NULL);
     Check(!p.owns&&[[p snapshot:2905][@"cooldownSeconds"] isEqual:@0]&&Decide(p,Lid(nil),YES,2910,NULL)==TMLidAutoStart,@"notre arrêt : aucun délai, redémarrage dès le retour du travail");
-
-    p=Pilot(); [p decideWithService:Lid(nil) working:YES sleepDisabled:1 now:1000 minutes:&minutes];
-    Check([p decideWithService:Lid(nil) working:YES sleepDisabled:1 now:1000 minutes:&minutes]==TMLidAutoNone&&[State(p,1000) isEqual:@"otherTool"],@"veille bloquée par un autre outil : rien, et dit");
 
     p=Pilot();
     Check(Decide(p,Running(900),YES,1000,NULL)==TMLidAutoNone&&[State(p,1000) isEqual:@"manual"],@"session manuelle : laissée telle quelle");

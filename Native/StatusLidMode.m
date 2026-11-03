@@ -61,7 +61,7 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
 - (BOOL)fanlessProfile { return _fanless; }
 - (BOOL)validJournal:(NSDictionary *)j {
     return [j isKindOfClass:NSDictionary.class] && [j[@"version"] isEqual:@1] &&
-        [j[@"sleepDisabled"] isEqual:@0] && [@[@0,@1,@2] containsObject:j[@"batteryMode"] ?: @-1] &&
+        [@[@0,@1] containsObject:j[@"sleepDisabled"] ?: @-1] && [@[@0,@1,@2] containsObject:j[@"batteryMode"] ?: @-1] &&
         [@[@0,@1,@2] containsObject:j[@"acMode"] ?: @-1] &&
         (!j[@"lowPowerForced"] || [@[@0,@1] containsObject:j[@"lowPowerForced"]]);  // clé absente des anciens journaux
 }
@@ -83,14 +83,17 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
     NSString *unsafe = TMLidStopReasonForProfile(battery, thermal, now, constant ? now + 60 : now + minutes * 60, now, fanless, constant);
     if (unsafe) { _message = unsafe; return; }
     NSDictionary *power = [_backend powerSettings];
-    if (!power || ![power[@"sleepDisabled"] isEqual:@0]) {
-        _message = @"Impossible de lire les réglages, ou veille déjà bloquée par un autre outil."; return;
+    if (!power || ![@[@0,@1] containsObject:power[@"sleepDisabled"] ?: @-1]) {
+        _message = @"Impossible de lire les réglages d’énergie."; return;
     }
+    // Veille déjà bloquée par un autre outil : la session s'appuie sur ce blocage sans le prendre. Le journal
+    // garde sleepDisabled = 1, et la restauration n'y touche jamais (l'autre outil reste maître de son réglage).
+    BOOL inherited = [power[@"sleepDisabled"] isEqual:@1];
     // MacBook Air : le mode économie d'énergie n'est pas imposé (sans ventilateur, il n'apporte rien et brident
     // inutilement la machine). Le journal le dit, pour que la restauration — y compris après un crash du service —
     // ne « remette » jamais un mode que Status n'a pas changé.
     BOOL forceLowPower = !fanless;
-    NSDictionary *journal = @{@"version":@1, @"sleepDisabled":@0, @"lowPowerForced":@(forceLowPower),
+    NSDictionary *journal = @{@"version":@1, @"sleepDisabled":@(inherited), @"lowPowerForced":@(forceLowPower),
         @"batteryMode":power[@"batteryMode"] ?: @-1, @"acMode":power[@"acMode"] ?: @-1};
     if (![self validJournal:journal] || ![_backend saveJournal:journal]) {
         _message = @"Impossible de sauvegarder les réglages initiaux ; aucun changement appliqué."; return;
@@ -103,14 +106,25 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
             [self stop:@"Mode faible consommation non confirmé ; activation annulée."]; return;
         }
     }
-    if (![_backend setSleepDisabled:YES] || ![[_backend powerSettings][@"sleepDisabled"] isEqual:@1]) {
+    if (!inherited && (![_backend setSleepDisabled:YES] || ![[_backend powerSettings][@"sleepDisabled"] isEqual:@1])) {
         [self stop:@"Maintien éveillé non confirmé ; activation annulée."]; return;
     }
     _active = YES; _constant = constant; _fanless = fanless;
     _deadline = constant ? 0 : now + minutes * 60; _lastHeartbeat = _startedAt = now;
     if (fanless) _message = constant ? @"Actif · constant · économie d’énergie non imposée (MacBook Air)."
+                         : inherited ? @"Actif · économie d’énergie non imposée · veille déjà bloquée par un autre outil."
                                      : @"Actif · économie d’énergie non imposée (MacBook Air).";
-    else _message = @"Actif · faible consommation imposée.";
+    else _message = inherited ? @"Actif · faible consommation imposée · veille déjà bloquée par un autre outil."
+                              : @"Actif · faible consommation imposée.";
+}
+// L'autre outil a levé son blocage pendant la session : Status le reprend à son compte (journal d'abord),
+// pour que la session continue et que la restauration remette ensuite la veille.
+- (BOOL)takeOverSleepBlock {
+    NSMutableDictionary *journal = [_journal mutableCopy];
+    journal[@"sleepDisabled"] = @0;
+    if (![_backend saveJournal:journal]) return NO;
+    _journal = [journal copy];
+    return [_backend setSleepDisabled:YES] && [[_backend powerSettings][@"sleepDisabled"] isEqual:@1];
 }
 // Repousse l'échéance à maintenant + minutes, jamais au-delà de 240 min après le démarrage ni en deçà de l'actuelle.
 - (void)extendMinutes:(NSInteger)minutes now:(double)now {
@@ -123,6 +137,10 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
     if (!_active) { if (_journal && [self validJournal:_journal]) [self stop:_message]; return; }
     NSString *reason = TMLidStopReasonForProfile(battery, thermal, now, _deadline, _lastHeartbeat, _fanless, _constant);
     NSDictionary *power = [_backend powerSettings];
+    if (!reason && [_journal[@"sleepDisabled"] isEqual:@1] && [power[@"sleepDisabled"] isEqual:@0]) {
+        if (![self takeOverSleepBlock]) reason = @"Blocage de veille de l’autre outil levé ; reprise impossible.";
+        power = [_backend powerSettings];
+    }
     // Un Air n'impose pas la faible consommation : l'utilisateur peut la changer sans que la session s'arrête.
     BOOL lowPowerKept = _fanless || ([power[@"batteryMode"] isEqual:@1] && [power[@"acMode"] isEqual:@1]);
     if (!reason && (!power || ![power[@"sleepDisabled"] isEqual:@1] || !lowPowerKept))
@@ -144,9 +162,11 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
         ok = [_backend setPowerMode:[_journal[@"batteryMode"] integerValue] battery:YES] && ok;
     if (lowPowerForced && [power[@"acMode"] isEqual:@1] && ![_journal[@"acMode"] isEqual:@1])
         ok = [_backend setPowerMode:[_journal[@"acMode"] integerValue] battery:NO] && ok;
-    if ([power[@"sleepDisabled"] isEqual:@1]) ok = [_backend setSleepDisabled:NO] && ok;
+    // Blocage hérité d'un autre outil (journal à 1) : jamais levé par Status.
+    BOOL ownsSleep = [_journal[@"sleepDisabled"] isEqual:@0];
+    if (ownsSleep && [power[@"sleepDisabled"] isEqual:@1]) ok = [_backend setSleepDisabled:NO] && ok;
     NSDictionary *after = [_backend powerSettings];
-    if (!after || ![after[@"sleepDisabled"] isEqual:@0]) ok = NO;
+    if (!after || (ownsSleep && ![after[@"sleepDisabled"] isEqual:@0])) ok = NO;
     if (lowPowerForced && [power[@"batteryMode"] isEqual:@1] && ![after[@"batteryMode"] isEqual:_journal[@"batteryMode"]]) ok = NO;
     if (lowPowerForced && [power[@"acMode"] isEqual:@1] && ![after[@"acMode"] isEqual:_journal[@"acMode"]]) ok = NO;
     if (ok && [_backend clearJournal]) _journal = nil;

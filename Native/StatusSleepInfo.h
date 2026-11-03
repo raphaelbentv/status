@@ -24,8 +24,8 @@ NSArray<NSDictionary *> *TMSleepFlattenAssertions(NSDictionary *byPid, NSDate *n
 NSArray<NSDictionary *> *TMSleepGroupAssertions(NSArray<NSDictionary *> *flat,
                                                 NSArray<NSDictionary *> * _Nullable * _Nullable hidden);
 
-// SleepDisabled sans session capot fermé de Status : le mode capot fermé ne pourra pas démarrer
-// (il sauvegarde puis restaure le réglage), et seul l'utilisateur peut lever ce blocage.
+// SleepDisabled sans session capot fermé de Status : le Mac ne dort plus du tout. Le mode capot fermé
+// démarre quand même et laisse ce blocage en place ; seul l'utilisateur peut le lever.
 BOOL TMSleepDisabledBlocksLidMode(BOOL sleepDisabled, BOOL statusLidSession);
 
 // Relevé réel : { disabled, sleepMinutes (absent si illisible), onBattery, groups, hidden }.

@@ -8,10 +8,6 @@ typedef NS_ENUM(NSInteger, TMClaudeTurn) { TMClaudeTurnUnknown, TMClaudeTurnIdle
 TMClaudeTurn TMClaudeTranscriptTurn(NSData *tail, double *timestamp);
 // YES si une session Claude Code est en plein tour dans l'un des dossiers « projects » donnés.
 BOOL TMClaudeCodeWorking(NSArray<NSString *> *roots, double now);
-// Valeur de SleepDisabled dans la sortie de `pmset -g` : 0, 1, ou -1 si illisible.
-NSInteger TMLidParseSleepDisabled(NSString *text);
-// Lecture seule de `pmset -g`, sans privilège.
-NSInteger TMLidReadSleepDisabled(void);
 
 typedef NS_ENUM(NSInteger, TMLidAutoCommand) { TMLidAutoNone, TMLidAutoStart, TMLidAutoExtend, TMLidAutoStop };
 extern const double TMLidAutoGraceSeconds, TMLidAutoCooldownSeconds;
@@ -19,8 +15,8 @@ extern const NSInteger TMLidAutoChunkMinutes, TMLidAutoCapMinutes;
 
 @interface TMLidAutoPilot : NSObject
 @property (nonatomic) BOOL enabled;
-// `lid` : instantané du client du service. `sleepDisabled` : lu par pmset hors session (-1 inconnu).
-- (TMLidAutoCommand)decideWithService:(NSDictionary *)lid working:(BOOL)working sleepDisabled:(NSInteger)sleepDisabled
+// `lid` : instantané du client du service.
+- (TMLidAutoCommand)decideWithService:(NSDictionary *)lid working:(BOOL)working
                                   now:(double)now minutes:(NSInteger *)minutes;
 // Arrêt demandé à la main : plus de redémarrage automatique avant la fin du travail en cours.
 - (void)userStopped;

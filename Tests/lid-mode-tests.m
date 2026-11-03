@@ -59,7 +59,22 @@ int main(void){@autoreleasepool{
     }
     b=[FakePower new];m=Mode(b);[m extendMinutes:30 now:100];Check(!m.active&&m.deadline==0,@"prolongation sans session : sans effet");
     b=[FakePower new];b.failSave=YES;m=Mode(b);Start(m);Check(!m.active&&b.writes==0,@"sans journal aucune mutation");
-    b=[FakePower new];b.power[@"sleepDisabled"]=@1;m=Mode(b);Start(m);Check(!m.active&&b.writes==0,@"ne s'approprie pas un blocage extérieur");
+    // Veille déjà bloquée par un autre outil : la session démarre sans toucher ce blocage, et l'arrêt le laisse.
+    b=[FakePower new];b.power[@"sleepDisabled"]=@1;m=Mode(b);Start(m);
+    Check(m.active&&[b.journal[@"sleepDisabled"]isEqual:@1]&&[b.power[@"acMode"]isEqual:@1],@"blocage extérieur : session active, faible consommation imposée");
+    [m heartbeatAt:110];[m tickBattery:80 thermal:0 now:115];Check(m.active,@"blocage extérieur : la session se maintient");
+    [m stop:@"test"];
+    Check(!m.restorationPending&&[b.power isEqual:@{@"sleepDisabled":@1,@"batteryMode":@0,@"acMode":@2}],@"blocage extérieur : modes restaurés, blocage laissé");
+    b=[FakePower new];b.power[@"sleepDisabled"]=@1;m=Mode(b);Start(m);TMLidMode *crashed=Mode(b);[crashed recover];
+    Check(!crashed.restorationPending&&[b.power[@"sleepDisabled"]isEqual:@1]&&[b.power[@"acMode"]isEqual:@2],@"blocage extérieur : reprise après crash sans lever le blocage");
+    // L'autre outil lève son blocage en cours de session : Status le reprend, puis le restaure à l'arrêt.
+    b=[FakePower new];b.power[@"sleepDisabled"]=@1;m=Mode(b);Start(m);b.power[@"sleepDisabled"]=@0;
+    [m heartbeatAt:110];[m tickBattery:80 thermal:0 now:115];
+    Check(m.active&&[b.power[@"sleepDisabled"]isEqual:@1]&&[b.journal[@"sleepDisabled"]isEqual:@0],@"blocage levé par l'autre outil : repris par Status");
+    [m stop:@"test"];Check([b.power isEqual:@{@"sleepDisabled":@0,@"batteryMode":@0,@"acMode":@2}],@"blocage repris : restauré à l'arrêt");
+    b=[FakePower new];b.power[@"sleepDisabled"]=@1;m=Mode(b);Start(m);b.power[@"sleepDisabled"]=@0;b.failSleepOn=YES;
+    [m heartbeatAt:110];[m tickBattery:80 thermal:0 now:115];
+    Check(!m.active&&!m.restorationPending&&[b.power isEqual:@{@"sleepDisabled":@0,@"batteryMode":@0,@"acMode":@2}],@"reprise impossible : arrêt et restauration");
     b=[FakePower new];b.failLowPower=YES;m=Mode(b);Start(m);Check(!m.active&&!m.restorationPending,@"faible consommation refusée annule");
     b=[FakePower new];b.failSleepOn=YES;m=Mode(b);Start(m);Check(!m.active&&!m.restorationPending&&[b.power[@"acMode"]isEqual:@2],@"échec capot restaure modes");
     b=[FakePower new];b.lieAboutWrite=YES;m=Mode(b);Start(m);Check(!m.active,@"écriture réussie sans effet ne prétend pas active");

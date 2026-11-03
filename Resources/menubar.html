@@ -372,7 +372,7 @@ function lidStrip(tl){
   if(!lid||lid.available===false&&!lid.authorized)return '';  // machine sans le service : rien à proposer
   const active=lid.active===true&&!lid.unconfirmed,pending=(lid.restorationPending&&!active)||lid.unconfirmed;
   // Démarrage automatique activé : le titre le dit, l'infobulle donne l'état courant.
-  const a=lid.auto||{},st=['idle','starting','running','stopping','manual','otherTool','cooldown','waiting','paused','unavailable'].includes(a.state)?a.state:'idle';
+  const a=lid.auto||{},st=['idle','starting','running','stopping','manual','cooldown','waiting','paused','unavailable'].includes(a.state)?a.state:'idle';
   const autoTip=a.enabled?t('lid.auto.state.'+st,{n:Math.max(1,Math.ceil(((st==='cooldown'?a.cooldownSeconds:a.stopInSeconds)||0)/60))}):'';
   const title=`<span class="lid-title" ${a.enabled?`title="${esc(autoTip)}"`:''}>${a.enabled?t('menu.lidAutoOn'):t('menu.lid')}</span>`;
   const go=(action,label,extra='')=>`<button class="account-action lid-go" ${lid.busy?'disabled':''} onclick="${action}">${label}</button>${extra}`;

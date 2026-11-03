@@ -77,31 +77,6 @@ BOOL TMClaudeCodeWorking(NSArray<NSString *> *roots, double now) {
     return NO;
 }
 
-NSInteger TMLidParseSleepDisabled(NSString *text) {
-    if (![text isKindOfClass:NSString.class] || ![text containsString:@"System-wide power settings:"]) return -1;
-    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
-        NSArray *parts = [[raw componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
-            filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
-        if (parts.count < 2 || ![parts[0] isEqual:@"SleepDisabled"]) continue;
-        return [parts[1] isEqual:@"1"] ? 1 : [parts[1] isEqual:@"0"] ? 0 : -1;
-    }
-    return 0;  // pmset n'affiche pas toujours la ligne quand la veille est permise
-}
-
-NSInteger TMLidReadSleepDisabled(void) {
-    NSTask *task = [NSTask new];
-    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/pmset"];
-    task.arguments = @[@"-g"];
-    task.environment = @{@"PATH":@"/usr/bin:/bin:/usr/sbin:/sbin", @"LC_ALL":@"C"};
-    task.standardInput = task.standardError = NSFileHandle.fileHandleWithNullDevice;
-    NSPipe *pipe = [NSPipe pipe];
-    task.standardOutput = pipe;
-    if (![task launchAndReturnError:nil]) return -1;
-    NSData *data = [pipe.fileHandleForReading readDataToEndOfFile];  // sortie de quelques lignes
-    [task waitUntilExit];
-    return task.terminationStatus == 0 ? TMLidParseSleepDisabled([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]) : -1;
-}
-
 @implementation TMLidAutoPilot {
     BOOL _starting, _stopping, _userStop, _suppressed, _wasActive, _working, _legacy;
     double _lastWork, _episodeStart, _cooldownUntil, _lastExtend;
@@ -122,7 +97,7 @@ NSInteger TMLidReadSleepDisabled(void) {
     if (enabled && !_enabled && !_owns) _wasActive = NO;
     _enabled = enabled;
 }
-- (TMLidAutoCommand)decideWithService:(NSDictionary *)lid working:(BOOL)working sleepDisabled:(NSInteger)sleepDisabled
+- (TMLidAutoCommand)decideWithService:(NSDictionary *)lid working:(BOOL)working
                                   now:(double)now minutes:(NSInteger *)minutes {
     *minutes = 0;
     _working = working;
@@ -174,7 +149,6 @@ NSInteger TMLidReadSleepDisabled(void) {
     NSInteger thermal = [lid[@"thermalState"] integerValue];
     BOOL hot = [lid[@"fanlessMac"] boolValue] ? thermal >= NSProcessInfoThermalStateCritical : thermal != NSProcessInfoThermalStateNominal;
     if (!isfinite(battery) || battery < 35 || battery > 100 || hot) { _state = @"waiting"; return TMLidAutoNone; }
-    if (sleepDisabled == 1) { _state = @"otherTool"; return TMLidAutoNone; }
     double capLeft = [self capLeft:now];
     if (capLeft < 60) { _suppressed = YES; _state = @"paused"; return TMLidAutoNone; }
     if (!_episodeStart) _episodeStart = now;

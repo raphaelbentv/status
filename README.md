@@ -283,9 +283,10 @@ par app avec leur libellé et leur durée, ainsi que le réglage de veille actif
 moins d’une minute et celles de `powerd` et `nsurlsessiond` sont masquées (« Tout afficher » les
 rend). Le popup ne montre qu’une ligne, et seulement s’il y a un blocage.
 
-Si `SleepDisabled = 1` sans session capot fermé de Status, un avertissement dit que le mode
-capot fermé ne pourra pas démarrer et affiche `sudo pmset -a disablesleep 0` : Status ne
-l’exécute jamais. Le relevé a lieu toutes les 10 s au plus, uniquement panneau ou popup visible.
+Si `SleepDisabled = 1` sans session capot fermé de Status, un avertissement dit que le Mac ne dort
+plus, même capot fermé, et affiche `sudo pmset -a disablesleep 0` : Status ne l’exécute jamais.
+Le mode capot fermé démarre quand même : il s’appuie sur ce blocage sans le lever à l’arrêt,
+et le reprend à son compte si l’autre outil le lève en cours de session. Le relevé a lieu toutes les 10 s au plus, uniquement panneau ou popup visible.
 
 ## Mode capot fermé à durée définie (0.8.5)
 

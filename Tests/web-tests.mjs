@@ -1256,7 +1256,6 @@ section('Capot fermé : démarrage automatique pendant que Claude Code travaille
   check(off.includes('Démarrer automatiquement pendant que Claude Code travaille')&&!off.includes('type="checkbox" checked')&&!off.includes('En attente'),'Réglages : option présente, décochée par défaut, sans état');
   check(off.includes("send('setLidAuto',{enabled:this.checked})"),'Réglages : la case envoie setLidAuto');
   check(set({authorized:true,auto:{enabled:true,state:'idle'}}).includes('type="checkbox" checked')&&set({authorized:true,auto:{enabled:true,state:'idle'}}).includes('aucune session Claude Code ne travaille'),'Réglages : activée, état « en attente »');
-  check(set({authorized:true,auto:{enabled:true,state:'otherTool'}}).includes('déjà bloquée par un autre outil'),'Réglages : blocage par un autre outil affiché');
   check(set({authorized:true,auto:{enabled:true,state:'cooldown',cooldownSeconds:420}}).includes('dans 7 min'),'Réglages : délai après un arrêt de sécurité');
   check(set({authorized:true,auto:{enabled:true,state:'manual'}}).includes('lancée à la main'),'Réglages : session manuelle respectée');
   const running=set({authorized:true,active:true,remainingSeconds:1500,auto:{enabled:true,state:'running',legacy:true}});
@@ -1267,7 +1266,7 @@ section('Capot fermé : démarrage automatique pendant que Claude Code travaille
   const strip=lidMode=>menubar('lidStrip')({lidMode});
   const runStrip=strip({authorized:true,active:true,remainingSeconds:1500,auto:{enabled:true,state:'running'}});
   check(runStrip.includes('capot fermé · auto')&&runStrip.includes('Automatique · 25 min restantes')&&runStrip.includes("send('stopLidMode')"),'popup : session automatique signalée et arrêtable');
-  check(strip({authorized:true,auto:{enabled:true,state:'otherTool'}}).includes('title="La veille est déjà bloquée'),'popup : état dans l’infobulle');
+  check(strip({authorized:true,auto:{enabled:true,state:'idle'}}).includes('title="'),'popup : état dans l’infobulle');
   const manual=strip({authorized:true,active:true,remainingSeconds:600,auto:{enabled:true,state:'manual'}});
   check(!manual.includes('Automatique ·')&&manual.includes('10 min restantes'),'popup : session manuelle non étiquetée automatique');
   check(!strip({authorized:true,auto:{enabled:false,state:'off'}}).includes('auto'),'popup : option désactivée, rien d’affiché');
@@ -1643,7 +1642,7 @@ section('Veille — panneau Système et popup');
   html = plain(menubar('sleepStrip')({ sleep: { warning: false, groups: [group('Claude', 90), group('caffeinate', 120)] } }));
   check(html.includes('Veille retenue par Claude, caffeinate'), 'popup : une ligne compacte nomme les apps');
   html = plain(menubar('sleepStrip')({ sleep: { warning: true, groups: [group('Claude', 90)] } }));
-  check(html.includes('le mode capot fermé ne démarrera pas') && !html.includes('Claude'), 'popup : l’avertissement prime');
+  check(html.includes('le Mac ne dort plus, même capot fermé') && !html.includes('Claude'), 'popup : l’avertissement prime');
 }
 
 process.stdout.write(`\n${failures ? '\x1b[31m' : '\x1b[32m'}${checks} vérifications, ${failures} échec(s)\x1b[0m\n\n`);

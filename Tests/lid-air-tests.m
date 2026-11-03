@@ -125,7 +125,8 @@ int main(void) { @autoreleasepool {
     [m stop:nil];
     b = [AirPower new]; b.power[@"sleepDisabled"] = @1; m = ModeOn(Air, b);
     [m startMinutes:0 battery:80 thermal:0 now:100];
-    Check(!m.active, @"Air : ne s'approprie pas un blocage extérieur de la veille");
+    [m stop:@"test"];
+    Check([b.power[@"sleepDisabled"] isEqual:@1] && !m.restorationPending, @"Air : blocage extérieur de la veille utilisé, laissé à l'arrêt");
     // Un second démarrage ne change rien à une session constante.
     b = [AirPower new]; m = ModeOn(Air, b);
     [m startMinutes:0 battery:80 thermal:0 now:100];

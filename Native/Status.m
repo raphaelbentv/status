@@ -462,7 +462,6 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property TMLidAutoPilot *lidAuto;
 @property NSTimer *lidAutoTimer;
 @property BOOL claudeWorking, lidAutoScanning;
-@property NSInteger sleepDisabled;
 // Modes des ventilateurs (auto / courbe / manuel), pilotés via le service existant. Voir driveFans.
 @property TMFanController *fanController;
 @property double fanTempC;          // dernier relevé (NAN si absent), pour l'aperçu de la courbe
@@ -494,7 +493,6 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     self.lidAuto = [TMLidAutoPilot new];
     self.lidAuto.enabled = [defaults boolForKey:@"lidAutoClaude"];  // désactivé par défaut
-    self.sleepDisabled = -1;
     self.lidAutoTimer = [NSTimer scheduledTimerWithTimeInterval:20 repeats:YES block:^(NSTimer *timer) { [weakSelf scanClaudeActivity]; }];
     self.lidAutoTimer.tolerance = 5;
     [self scanClaudeActivity];
@@ -2443,16 +2441,13 @@ static NSNumber *TMFanInteger(id value) {
     if (self.lidAutoScanning) return;
     self.lidAutoScanning = YES;
     NSArray *roots = [self claudeTranscriptRoots];
-    BOOL sessionActive = [self.lidMode.snapshot[@"active"] boolValue];
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         BOOL working = TMClaudeCodeWorking(roots, NSDate.date.timeIntervalSince1970);
-        // Pendant une session, SleepDisabled vaut 1 de notre fait : la lecture ne sert qu'avant un démarrage.
-        NSInteger sleepDisabled = working && !sessionActive ? TMLidReadSleepDisabled() : -1;
         dispatch_async(dispatch_get_main_queue(), ^{
             typeof(self) self = weakSelf; if (!self) return;
             self.lidAutoScanning = NO;
-            self.claudeWorking = working; self.sleepDisabled = sleepDisabled;
+            self.claudeWorking = working;
             [self driveLidAuto];
             [self pushTools];
         });
@@ -2464,7 +2459,7 @@ static NSNumber *TMFanInteger(id value) {
     if (!self.lidAuto.enabled && !self.lidAuto.owns) return;  // l'instantané interroge smd : pas pour rien
     NSInteger minutes = 0;
     TMLidAutoCommand command = [self.lidAuto decideWithService:self.lidMode.snapshot ?: @{} working:self.claudeWorking
-        sleepDisabled:self.sleepDisabled now:NSDate.date.timeIntervalSince1970 minutes:&minutes];
+        now:NSDate.date.timeIntervalSince1970 minutes:&minutes];
     if (command == TMLidAutoStart) [self.lidMode startMinutes:minutes];
     else if (command == TMLidAutoExtend) [self.lidMode extendMinutes:minutes];
     else if (command == TMLidAutoStop) [self.lidMode stop];

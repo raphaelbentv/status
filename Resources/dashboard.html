@@ -855,7 +855,7 @@ function startLidMode(){
   send('startLidMode',{minutes:lidMinutes});
 }
 // Démarrage automatique pendant que Claude Code travaille : décidé par le natif, la page ne fait qu'afficher l'état.
-const LID_AUTO_STATES=['idle','starting','running','stopping','manual','otherTool','cooldown','waiting','paused','unavailable'];
+const LID_AUTO_STATES=['idle','starting','running','stopping','manual','cooldown','waiting','paused','unavailable'];
 function lidAutoText(a){
   const state=LID_AUTO_STATES.includes(a?.state)?a.state:'idle';
   const n=Math.max(1,Math.ceil(((state==='cooldown'?a.cooldownSeconds:a.stopInSeconds)||0)/60));
