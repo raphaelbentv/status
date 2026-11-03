@@ -783,6 +783,7 @@
  "sleep.warn.body": "Another tool has disabled sleep on this Mac. Status’s closed-lid mode cannot start while this setting stays on. Status never changes it: to clear it, run this command yourself in Terminal:",
  "sleep.warn.title": "Sleep is disabled (SleepDisabled = 1)",
  "state.attention": "Attention needed",
+ "switch.suggest": "Suggested switch: {label}, {v} used",
  "sys.sp.custom": "Custom value detected",
  "sys.sp.desc": "System setting: it changes the space between ALL menu bar icons, not only Status’s.",
  "sys.sp.normal": "Normal",

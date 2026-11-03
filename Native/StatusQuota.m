@@ -1133,3 +1133,57 @@ BOOL TMMaxUsedPercent(NSArray<NSArray *> *windowArrays, BOOL (^predicate)(NSDict
     if (found && outValue) *outValue = best;
     return found;
 }
+
+#pragma mark - Bascule conseillée
+
+BOOL TMAccountPressure(NSDictionary *account, NSTimeInterval now, double *outUsed, NSTimeInterval *outResetsAt) {
+    if (![account isKindOfClass:NSDictionary.class] || [account[@"stale"] boolValue]) return NO;
+    if ([account[@"error"] isKindOfClass:NSString.class] && [account[@"error"] length]) return NO;
+    NSTimeInterval captured = TMNumber(account[@"capturedAt"]);
+    if (captured > 0 && now - captured > 1800) return NO;
+    NSArray *windows = [account[@"windows"] isKindOfClass:NSArray.class] ? account[@"windows"] : @[];
+    BOOL weekly = NO, any = NO;
+    double used = 0; NSTimeInterval resetsAt = 0;
+    for (NSDictionary *window in windows) {
+        if (![window isKindOfClass:NSDictionary.class] || ![window[@"usedPercent"] isKindOfClass:NSNumber.class]) continue;
+        BOOL session = TMWindowIsSession(window) && (!window[@"primaryLimit"] || [window[@"primaryLimit"] boolValue]);
+        BOOL primary = TMWindowIsPrimaryWeekly(window);
+        if (!session && !primary) continue;
+        double value = TMNumber(window[@"usedPercent"]);
+        if (!isfinite(value)) continue;
+        weekly = weekly || primary;
+        NSTimeInterval reset = TMNumber(window[@"resetsAt"]);
+        if (reset > 0 && reset <= now) value = 0;
+        value = MAX(0, MIN(100, value));
+        if (!any || value > used) { used = value; resetsAt = reset; any = YES; }
+    }
+    if (!weekly) return NO;
+    if (outUsed) *outUsed = used;
+    if (outResetsAt) *outResetsAt = resetsAt;
+    return YES;
+}
+
+NSDictionary *TMSwitchSuggestions(NSArray *accounts, double threshold, NSTimeInterval now) {
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    for (NSDictionary *current in accounts) {
+        double used = 0; NSTimeInterval resetsAt = 0;
+        if (!TMAccountPressure(current, now, &used, &resetsAt) || used < threshold) continue;
+        if (resetsAt > now && resetsAt - now <= 3600) continue;
+        NSDictionary *best = nil; double bestUsed = 0; NSTimeInterval bestReset = 0;
+        for (NSDictionary *candidate in accounts) {
+            if (candidate == current || ![candidate[@"provider"] isEqual:current[@"provider"]]
+                || [candidate[@"accountId"] isEqual:current[@"accountId"]]) continue;
+            double value = 0; NSTimeInterval reset = 0;
+            if (!TMAccountPressure(candidate, now, &value, &reset) || value > used - 15) continue;
+            BOOL better = !best || value < bestUsed - 0.5
+                || (fabs(value - bestUsed) <= 0.5 && reset > 0 && (bestReset <= 0 || reset < bestReset));
+            if (better) { best = candidate; bestUsed = value; bestReset = reset; }
+        }
+        NSString *accountId = [current[@"accountId"] isKindOfClass:NSString.class] ? current[@"accountId"] : nil;
+        if (!best || !accountId.length) continue;
+        out[accountId] = @{ @"accountId": best[@"accountId"] ?: @"",
+                            @"label": [best[@"label"] isKindOfClass:NSString.class] ? best[@"label"] : @"",
+                            @"usedPercent": @((long long)llround(bestUsed)) };
+    }
+    return out;
+}

@@ -2063,7 +2063,8 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         @"accountLimit": @(TMMaxAccountsPerProvider),
         @"apiAccounts": [self apiAccountPayloadList],
         @"apiAccountLimit": @(TMMaxApiAccountsPerProvider),
-        @"history": TMHistoryForDisplay(history, NSDate.date.timeIntervalSince1970),
+        @"switchSuggestions": [self switchSuggestions],
+        @"history":TMHistoryForDisplay(history, NSDate.date.timeIntervalSince1970),
         @"displays": [self.displayManager snapshot] ?: @[],
         @"costs": [self costPayload],
         @"metricsLog": self.metricsLog ?: @[],  // 24 h, une ligne/minute — cadence lente, pas dans pushMetrics
@@ -2925,6 +2926,13 @@ static NSDictionary *TMAlertDefaults(void) {
     if ([billing[@"status"] isEqual:@"known"]) return billing;
     NSDictionary *previous = [self knownPayload:accountId][@"billing"];
     return [previous isKindOfClass:NSDictionary.class] ? previous : @{@"status":@"unknown"};
+}
+
+// Compte vers lequel basculer, au seuil de l'alerte « Quota entamé » (même réglage, même sens).
+- (NSDictionary *)switchSuggestions {
+    double threshold = 80;
+    [self alertEnabled:@"quota" threshold:&threshold];
+    return TMSwitchSuggestions([self accountPayloadList], threshold, NSDate.date.timeIntervalSince1970);
 }
 
 // Tous les comptes, dans l'ordre d'affichage, chacun avec son payload courant.

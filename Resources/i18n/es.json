@@ -783,6 +783,7 @@
  "sleep.warn.body": "Otra herramienta ha desactivado la suspensión del Mac. El modo con la tapa cerrada de Status no podrá iniciarse mientras este ajuste siga activo. Status nunca lo modifica: para quitarlo, ejecuta tú mismo este comando en Terminal:",
  "sleep.warn.title": "La suspensión está desactivada (SleepDisabled = 1)",
  "state.attention": "Requiere atención",
+ "switch.suggest": "Cambio recomendado: {label}, {v} usado",
  "sys.sp.custom": "Valor personalizado detectado",
  "sys.sp.desc": "Ajuste del sistema: cambia el espacio entre TODOS los iconos de la barra de menús, no solo los de Status.",
  "sys.sp.normal": "Normal",

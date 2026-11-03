@@ -1019,6 +1019,51 @@ static NSDictionary *TMWin(NSString *wid, NSString *label, double used, long lon
               @"remainingPercent": @(100 - used), @"resetsAt": @(resetsAt), @"durationMinutes": @(minutes) };
 }
 
+static NSDictionary *TMSwitchAccount(NSString *accountId, NSString *provider, NSArray *windows) {
+    return @{ @"accountId": accountId, @"provider": provider, @"label": accountId, @"windows": windows, @"capturedAt": @1000000 };
+}
+
+static void TestSwitchSuggestions(void) {
+    Section(@"Bascule conseillée — compte du même fournisseur qui a le plus de marge");
+    NSTimeInterval now = 1000000, day = 86400;
+    NSDictionary *full = TMSwitchAccount(@"A", @"claude", @[TMWin(@"seven_day", @"Semaine", 88, now + day, 10080),
+                                                             TMWin(@"five_hour", @"5 h", 20, now + 9000, 300)]);
+    NSDictionary *light = TMSwitchAccount(@"B", @"claude", @[TMWin(@"seven_day", @"Semaine", 12, now + 3 * day, 10080)]);
+    NSDictionary *lighter = TMSwitchAccount(@"C", @"claude", @[TMWin(@"seven_day", @"Semaine", 30, now + day, 10080)]);
+    NSDictionary *other = TMSwitchAccount(@"D", @"openai", @[TMWin(@"codex-10080", @"Semaine", 0, now + day, 10080)]);
+    NSDictionary *r = TMSwitchSuggestions(@[full, light, lighter, other], 80, now);
+    CheckEqual(r[@"A"][@"accountId"], @"B", @"le compte le moins entamé du même fournisseur");
+    CheckEqual(r[@"A"][@"usedPercent"], @12, @"son pourcentage utilisé est donné");
+    Check(!r[@"B"] && !r[@"D"], @"sous le seuil : aucune suggestion");
+
+    r = TMSwitchSuggestions(@[full, other], 80, now);
+    Check(!r[@"A"], @"jamais un compte d'un autre fournisseur");
+
+    NSDictionary *expired = TMSwitchAccount(@"E", @"claude", @[TMWin(@"seven_day", @"Semaine", 97, now - 60, 10080)]);
+    CheckEqual(TMSwitchSuggestions(@[full, expired], 80, now)[@"A"][@"accountId"], @"E", @"une fenêtre échue compte pour 0 : renouvelée");
+    CheckEqual(TMSwitchSuggestions(@[full, expired], 80, now)[@"A"][@"usedPercent"], @0, @"et s'affiche à 0 %");
+
+    NSDictionary *tieLate = TMSwitchAccount(@"F", @"claude", @[TMWin(@"seven_day", @"Semaine", 12, now + 5 * day, 10080)]);
+    CheckEqual(TMSwitchSuggestions(@[full, tieLate, light], 80, now)[@"A"][@"accountId"], @"B", @"à marge égale, le renouvellement le plus proche");
+
+    NSDictionary *session = TMSwitchAccount(@"G", @"claude", @[TMWin(@"seven_day", @"Semaine", 10, now + day, 10080),
+                                                               TMWin(@"five_hour", @"5 h", 95, now + 9000, 300)]);
+    CheckEqual(TMSwitchSuggestions(@[session, light], 80, now)[@"G"][@"accountId"], @"B", @"une session 5 h pleine déclenche aussi");
+    Check(!TMSwitchSuggestions(@[full, session], 80, now)[@"A"], @"un candidat à sec sur sa session 5 h n'est pas conseillé");
+
+    NSDictionary *close = TMSwitchAccount(@"H", @"claude", @[TMWin(@"seven_day", @"Semaine", 75, now + day, 10080)]);
+    Check(!TMSwitchSuggestions(@[full, close], 80, now)[@"A"], @"moins de 15 points d'écart : rien");
+
+    NSDictionary *soon = TMSwitchAccount(@"I", @"claude", @[TMWin(@"seven_day", @"Semaine", 92, now + 1800, 10080)]);
+    Check(!TMSwitchSuggestions(@[soon, light], 80, now)[@"I"], @"renouvellement dans l'heure : on attend");
+
+    NSMutableDictionary *broken = [light mutableCopy]; broken[@"error"] = @"cookie expiré";
+    NSMutableDictionary *stale = [light mutableCopy]; stale[@"stale"] = @YES;
+    NSMutableDictionary *old = [light mutableCopy]; old[@"capturedAt"] = @(now - 3600);
+    Check(!TMSwitchSuggestions(@[full, broken, stale, old], 80, now)[@"A"], @"candidat en erreur, périmé ou ancien : écarté");
+    Check(!TMSwitchSuggestions(@[full, TMSwitchAccount(@"J", @"claude", @[])], 80, now)[@"A"], @"candidat sans mesure : écarté");
+}
+
 static void TestWeeklyResetStatistics(void) {
     Section(@"Statistiques de renouvellement — observations globales par compte");
     double day=86400, now=2000000000;
@@ -3361,6 +3406,7 @@ int main(void) {
         TestStaleAlert();
         TestWatchdog();
         TestForecastExhaustion();
+        TestSwitchSuggestions();
         TestQuotaNotificationDecisions();
         TestQuotaProjection();
         TestExhaustionAlert();

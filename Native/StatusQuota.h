@@ -214,3 +214,14 @@ NSDictionary *TMWeeklyResetStatistics(NSDictionary *state, NSString *accountKey,
 
 // Métrique persistée indépendamment pour chaque jauge, avec reprise de l’ancien choix.
 NSString *TMProviderMenuMetric(NSString *provider, NSDictionary *selections, NSString *legacyMetric);
+
+#pragma mark - Bascule conseillée
+// Compte le plus utilisé d'un fournisseur : max des fenêtres 5 h et hebdo générales ; une fenêtre
+// échue compte pour 0 (le renouvellement a eu lieu). NO si le compte n'a rien de mesurable, est en
+// erreur, périmé ou sondé il y a plus de 30 min.
+BOOL TMAccountPressure(NSDictionary *account, NSTimeInterval now, double *outUsed, NSTimeInterval *outResetsAt);
+// Pour chaque compte au-dessus de `threshold`, le compte du même fournisseur qui a le plus de marge :
+// { <accountId>: { accountId, label, usedPercent } }. Rien si cette marge ne dépasse pas d'au moins
+// 15 points celle du compte, ni si sa fenêtre limitante se renouvelle dans l'heure.
+// À égalité de marge, le renouvellement le plus proche l'emporte.
+NSDictionary *TMSwitchSuggestions(NSArray *accounts, double threshold, NSTimeInterval now);

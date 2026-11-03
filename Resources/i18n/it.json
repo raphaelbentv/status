@@ -783,6 +783,7 @@
  "sleep.warn.body": "Un altro strumento ha disattivato la sospensione del Mac. La modalità a coperchio chiuso di Status non potrà avviarsi finché questa impostazione resta attiva. Status non la modifica mai: per rimuoverla, esegui tu stesso questo comando nel Terminale:",
  "sleep.warn.title": "La sospensione è disattivata (SleepDisabled = 1)",
  "state.attention": "Richiede attenzione",
+ "switch.suggest": "Passaggio consigliato: {label}, {v} usato",
  "sys.sp.custom": "Valore personalizzato rilevato",
  "sys.sp.desc": "Impostazione di sistema: cambia lo spazio tra TUTTE le icone della barra dei menu, non solo quelle di Status.",
  "sys.sp.normal": "Normale",

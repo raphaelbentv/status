@@ -368,6 +368,7 @@
   .fan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
   .fan-actions strong{flex:1;font-size:12px;color:var(--blue)}
   .fan-actions .seg{padding:5px 8px;font-size:12px}
+  .switch-hint{font-size:12px;font-weight:700;color:var(--green);margin:4px 0 10px}
   .billing-line{font-size:12px;color:var(--muted);margin:4px 0 10px}.billing-line.soon{color:var(--amber)}
   .reset-expiries{margin:4px 0 0;padding-left:16px;font-weight:400}.reset-expiries li{margin-top:2px}.reset-expiries li.soon{color:var(--amber)}
   .reset-later{color:var(--muted)}
@@ -754,12 +755,14 @@ function extraCreditsCard(account){
   if(c.observedAt&&Date.now()/1000-c.observedAt>120)detail=[detail,t('credits.lastReading',{v:ageLabel(c.observedAt)})].filter(Boolean).join(' · ');
   return `<div class="extra-credits" style="padding:12px 14px;margin-top:12px;border:1px solid var(--hair);border-radius:8px;background:var(--panel-bg)"><span style="font-size:12px;color:var(--muted)">${t('credits.title')}</span><strong style="display:block;margin-top:4px">${esc(value)}</strong>${detail?`<small style="display:block;margin-top:4px;color:var(--muted)">${esc(detail)}</small>`:''}</div>`;
 }
+// Calculée côté natif (TMSwitchSuggestions) : un autre compte du même fournisseur, nettement moins entamé.
+const switchLine=account=>{const s=appData?.switchSuggestions?.[account.accountId];return s?`<div class="switch-hint">${esc(t('switch.suggest',{label:s.label,v:I.pct(s.usedPercent)}))}</div>`:''};
 function accountBlock(account,history){
   const windows=windowsFor(account.provider,account),connected=isConnected(account.provider,account);
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?t('acct.noWindow'):`${t('acct.notConnected')}.<br><button class="account-action" onclick="goToView('connections')">${t('acct.openConnections')}</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?t('acct.live'):account.stale?t('acct.staleReading'):t('acct.lastReading')}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
-  return `<div class="account-block" data-connected="${connected?1:0}" data-error="${account.error?1:0}"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?t('acct.attention'):t('acct.connected')):t('acct.notConnected')}</span></div>${freshness}${billingLine(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(I.tm(account.error))}</div>`:''}</div>`;
+  return `<div class="account-block" data-connected="${connected?1:0}" data-error="${account.error?1:0}"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?t('acct.attention'):t('acct.connected')):t('acct.notConnected')}</span></div>${freshness}${billingLine(account)}${switchLine(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(I.tm(account.error))}</div>`:''}</div>`;
 }
 function providerBlock(provider,accounts,history){
   const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">${t('acct.none',{name:provider.name})}<br><button class="account-action" onclick="goToView('connections')">${t('acct.add')}</button></div>`;
