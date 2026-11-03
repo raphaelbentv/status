@@ -402,6 +402,8 @@ NSArray *TMLoadMetricsHistory(void) {
 }
 
 const NSTimeInterval TMForecastMinimumSpan = 900;
+const NSTimeInterval TMExhaustionAlertHorizon = 3600;
+static const double TMForecastResetDrop = 5;  // chute (points) lue comme une remise à zéro, pas du bruit
 
 BOOL TMStaleAlertShouldFire(BOOL *wasStale, BOOL isStale) {
     BOOL fire = isStale && !*wasStale;  // uniquement le front montant
@@ -438,7 +440,7 @@ BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resets
     NSUInteger start = 0;
     for (NSUInteger i = 1; i < points.count; i++) {
         double previous = points[i - 1][1].doubleValue, current = points[i][1].doubleValue;
-        if (current < previous - 5) start = i;
+        if (current < previous - TMForecastResetDrop) start = i;
     }
     if (points.count - start < 2) return NO;
 
@@ -464,6 +466,101 @@ BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resets
     if (resetsAt > 0 && exhaustAt >= resetsAt) return NO;    // tiendra jusqu'au reset
     if (outAt) *outAt = exhaustAt;
     return YES;
+}
+
+// Projection affichée et alertée : le rythme des TMProjectionLookback dernières heures, prolongé
+// par la mesure vivante. Elle joue deux rôles — une remise à zéro vue en direct (la mesure retombe
+// avant que l'historique le sache) coupe la pente, et une horloge qui a reculé laisse des points
+// « futurs » qu'il faut écarter plutôt que mêler à la régression.
+static const NSTimeInterval TMProjectionLookback = 3 * 3600;
+static const double TMProjectionMinimumRise = 2;  // les relevés sont arrondis au point : 1 point n'est pas une pente
+
+BOOL TMQuotaProjection(NSArray *history, NSString *key, double usedPercent, NSTimeInterval resetsAt,
+                       NSTimeInterval now, NSTimeInterval *outAt) {
+    if (!key.length || !isfinite(usedPercent) || usedPercent < 0 || usedPercent >= 100) return NO;
+    if (resetsAt <= now) return NO;
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+    for (NSDictionary *row in history) {
+        if (![row isKindOfClass:NSDictionary.class] || ![row[@"p"] isKindOfClass:NSDictionary.class]) continue;
+        NSTimeInterval t = TMNumber(row[@"t"]);
+        if (t > now || t < now - TMProjectionLookback) continue;
+        if (![row[@"p"][key] isKindOfClass:NSNumber.class]) continue;
+        [rows addObject:row];
+    }
+    [rows sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [@(TMNumber(a[@"t"])) compare:@(TMNumber(b[@"t"]))];
+    }];
+    [rows addObject:@{ @"t": @(now), @"p": @{ key: @(usedPercent) } }];
+
+    // Montée constatée depuis la dernière remise à zéro, mêmes règles que TMForecastExhaustion.
+    double segmentStart = usedPercent, previous = -1;
+    for (NSDictionary *row in rows) {
+        double value = [row[@"p"][key] doubleValue];
+        if (previous < 0 || value < previous - TMForecastResetDrop) segmentStart = value;
+        previous = value;
+    }
+    if (usedPercent - segmentStart < TMProjectionMinimumRise) return NO;
+
+    NSTimeInterval at = 0;
+    if (!TMForecastExhaustion(rows, key, resetsAt, &at) || at <= now) return NO;
+    if (outAt) *outAt = at;
+    return YES;
+}
+
+NSArray *TMWindowsWithProjection(NSArray *windows, NSArray *history, NSString *provider, NSString *accountId,
+                                 NSTimeInterval now) {
+    NSMutableArray *out = [NSMutableArray arrayWithCapacity:windows.count];
+    for (NSDictionary *window in windows) {
+        NSString *windowId = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"] : window[@"label"];
+        NSTimeInterval at = 0;
+        if ([window isKindOfClass:NSDictionary.class] && [windowId isKindOfClass:NSString.class] && windowId.length
+            && TMQuotaProjection(history, TMHistoryKey(provider, accountId, windowId), TMNumber(window[@"usedPercent"]),
+                                 TMNumber(window[@"resetsAt"]), now, &at)) {
+            NSMutableDictionary *copy = [window mutableCopy];
+            copy[@"exhaustAt"] = @((long long)at);
+            [out addObject:copy];
+        } else {
+            [out addObject:window];
+        }
+    }
+    return out;
+}
+
+NSDictionary *TMExhaustionAlertDecisions(NSDictionary *state, NSArray *pairs, NSTimeInterval now) {
+    NSMutableDictionary *next = [state mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableArray *events = [NSMutableArray array];
+    for (NSArray *pair in pairs) {
+        if (![pair isKindOfClass:NSArray.class] || pair.count < 2) continue;
+        NSString *provider = pair[0];
+        for (NSDictionary *window in pair[1]) {
+            if (![window isKindOfClass:NSDictionary.class]) continue;
+            // Session 5 h et quota hebdo général : les sous-quotas par modèle et les dépassements
+            // n'ont rien à annoncer, comme pour les seuils.
+            BOOL session = TMWindowIsSession(window) && (!window[@"primaryLimit"] || [window[@"primaryLimit"] boolValue]);
+            if (!session && !TMWindowIsPrimaryWeekly(window)) continue;
+            NSString *identifier = [window[@"windowId"] isKindOfClass:NSString.class] ? window[@"windowId"] : window[@"label"];
+            if (![identifier isKindOfClass:NSString.class] || !identifier.length) continue;
+            double used = TMNumber(window[@"usedPercent"]);
+            NSString *peakKey = [NSString stringWithFormat:@"exmax:%@:%@", provider, identifier];
+            NSNumber *peak = [next[peakKey] isKindOfClass:NSNumber.class] ? next[peakKey] : nil;
+
+            // Une seule alerte par épisode : la trace du point haut ne s'efface que quand le quota
+            // retombe nettement (renouvellement), jamais parce que la date de reset a bougé — la
+            // fenêtre glissante d'OpenAI la déplace sans rien recharger.
+            if (peak) {
+                if (used <= peak.doubleValue - 20) [next removeObjectForKey:peakKey];
+                else if (used > peak.doubleValue) next[peakKey] = @(used);
+                continue;
+            }
+            NSTimeInterval exhaustAt = TMNumber(window[@"exhaustAt"]);
+            if (exhaustAt <= now || exhaustAt - now > TMExhaustionAlertHorizon) continue;
+            next[peakKey] = @(used);
+            [events addObject:@{ @"kind": @"exhaustion", @"provider": provider,
+                                 @"label": [window[@"label"] isKindOfClass:NSString.class] ? window[@"label"] : identifier,
+                                 @"usedPercent": @(used), @"exhaustAt": @((long long)exhaustAt) }];
+        }
+    }
+    return @{ @"events": events, @"state": next };
 }
 
 NSString *TMHistoryToCSV(NSArray *history) {

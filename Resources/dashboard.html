@@ -98,6 +98,7 @@
   .quota-empty{padding:13px;border:1px dashed var(--hair-strong);border-radius:var(--radius)}
   .quota-error,.quota-stale{font-size:12px;margin-top:10px}.quota-error{color:var(--danger)}.quota-stale{color:var(--amber)}
   .quota-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:2px}.quota-foot small{flex:1;min-width:0}
+  .quota-card .exhaust{color:var(--amber)}
   .manual-reset{margin-top:7px;font-size:11px;line-height:1.35;color:var(--muted)}
   .manual-reset.available{color:var(--green);font-weight:700}
   .spark{width:132px;height:26px;flex:none;overflow:visible}.spark .area{fill:color-mix(in srgb,var(--c) 12%,transparent);stroke:none}.spark .line{fill:none;stroke:var(--c);stroke-width:1;vector-effect:non-scaling-stroke}.spark .tip{fill:var(--c)}
@@ -420,6 +421,8 @@ const send=(action,extra={})=>window.webkit?.messageHandlers?.native?.postMessag
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const I=StatusI18n;
 const providerColor=id=>id==='openai'?'var(--blue)':'var(--purple)';
+// « À sec vers jeu. 14 h » : seulement si le rythme actuel épuise la fenêtre avant son renouvellement.
+const exhaustLine=w=>{const at=StatusQuota.exhaustAt(w);return at?`<br><b class="exhaust">${esc(t('q.exhaust',{at:I.date(Math.round(at/3600)*3600000,{weekday:'short',hour:'numeric'})}))}</b>`:''};
 const resetFull=timestamp=>timestamp?I.date(timestamp*1000,{weekday:'short',hour:'2-digit',minute:'2-digit'}):'—';
 const ageLabel=timestamp=>{if(!timestamp)return '';const min=Math.max(0,Math.round((Date.now()/1000-timestamp)/60));return min<1?t('d.now'):min<60?t('d.agoMin',{n:min}):t('d.agoHour',{n:Math.round(min/60)})};
 // "dans 2 h 14" is actionable in a way that "14:00" is not — you can decide whether to keep working.
@@ -560,6 +563,7 @@ const PANEL_SECTIONS={
 const ALERTS=[
   ['quota',[70,75,80,85,90],v=>I.pct(v)],
   ['quotaReset',[],null],
+  ['quotaExhaust',[],null],
   ['apiCredit',[5,10,20,50,100],v=>I.money(v,'USD',0)],
   ['temp',[75,85,90,95,100],v=>v+' °C'],
   ['disk',[80,85,90,95],v=>I.pct(v)],
@@ -674,7 +678,7 @@ function resetExpiries(reset){
   }
   return reset.expiryText?`<span class="reset-expiry"> · ${esc(reset.expiryText)}</span>`:'';
 }
-function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card" data-level="${levelOf(value)}" data-kind="${isWeekly(w)?'weekly':'session'}" style="--pct:${value??0}"><div class="quota-top"><span>${esc(I.label(w.label))}</span><strong>${value===null?'—':t('q.remaining',{v:I.pct(100-value)})}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>${t('q.resetLine',{in:countdown(w.resetsAt),at:resetFull(w.resetsAt)})}</small>${quotaSparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
+function quotaCard(w,account,history){const id=account.provider,value=used(w),key=historyKey(account,w);return `<div class="quota-card" data-level="${levelOf(value)}" data-kind="${isWeekly(w)?'weekly':'session'}" style="--pct:${value??0}"><div class="quota-top"><span>${esc(I.label(w.label))}</span><strong>${value===null?'—':t('q.remaining',{v:I.pct(100-value)})}</strong></div><div class="quota-track" style="--provider:${providerColor(id)}"><i style="width:${value??0}%"></i></div><div class="quota-foot"><small>${t('q.resetLine',{in:countdown(w.resetsAt),at:resetFull(w.resetsAt)})}${exhaustLine(w)}</small>${quotaSparkline(history,key,providerColor(id))}</div>${manualResetLine(w,account)}</div>`}
 // Toujours en millions de tokens, homogène d'une ligne à l'autre : une décimale sous le milliard,
 // entier avec séparateur de milliers au-delà (« 9 741 M » plutôt que « 9.7 G »).
 const fmtTokens=v=>{if(v==null)return '';const m=v/1e6;return `${m>=1000?I.num(Math.round(m),0):I.num(m,1)} M`;};

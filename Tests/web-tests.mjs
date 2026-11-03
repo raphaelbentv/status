@@ -1145,6 +1145,19 @@ section('Disponibilité : fraîcheur, fenêtres comparables et quotas non cumul�
   const popupOrder=[...menubar('accountList')(fleet).matchAll(/<span title="([^"]*)"/g)].map(m=>m[1]);
   checkEqual(popupOrder,dashboard('sortedAccounts')(fleet,'reset').map(a=>a.label),'popover et tableau de bord ordonnent les comptes à l’identique (renouvellement)');
 }
+section('Projection d’épuisement : « À sec vers … »');
+{
+  const now=Date.now()/1000,w=(exhaustAt,resetsAt)=>({windowId:'five_hour',label:'5 h',usedPercent:80,resetsAt,exhaustAt});
+  const line=menubar('exhaustLine'),dash=dashboard('exhaustLine');
+  const ok=line(w(now+3600,now+7200));
+  check(/^<div class="exhaust">À sec vers .+<\/div>$/.test(ok),'popup : « À sec vers … » quand l’épuisement précède le renouvellement');
+  check(/À sec vers .*\d+ h/.test(ok),'popup : jour abrégé et heure, sans minutes');
+  check(dash(w(now+3600,now+7200)).includes('À sec vers '),'tableau de bord : même ligne');
+  checkEqual(line(w(now+7300,now+7200)),'','épuisement après le renouvellement : rien');
+  checkEqual(line(w(now-60,now+7200)),'','projection périmée : rien');
+  checkEqual(line({windowId:'five_hour',usedPercent:80,resetsAt:now+7200}),'','pas de projection : rien');
+  checkEqual(dash(w(NaN,now+7200)),'','valeur invalide : rien');
+}
 section('Popup : capot fermé démarrable directement');
 {
   const strip=(lidMode)=>menubar('lidStrip')({lidMode});

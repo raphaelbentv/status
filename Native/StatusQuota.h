@@ -151,6 +151,24 @@ BOOL TMWatchdogShouldReload(NSInteger *failures, BOOL success, NSInteger thresho
 
 extern const NSTimeInterval TMForecastMinimumSpan;
 BOOL TMForecastExhaustion(NSArray *history, NSString *key, NSTimeInterval resetsAt, NSTimeInterval *outAt);
+
+#pragma mark - Projection d'épuisement (cartes et alerte)
+// Épuisement prévu d'une fenêtre VIVANTE (`usedPercent` : la mesure du moment), au rythme des
+// dernières heures, avant son renouvellement. NO — `outAt` intact — sans historique assez long ni
+// montée d'au moins 2 points, à rythme nul ou négatif, après une remise à zéro, quota déjà plein,
+// fenêtre échue, ou épuisement prévu après `resetsAt`. Les points postérieurs à `now` (horloge
+// qui a reculé) sont ignorés. Jamais d'extrapolation à l'aveugle.
+BOOL TMQuotaProjection(NSArray *history, NSString *key, double usedPercent, NSTimeInterval resetsAt,
+                       NSTimeInterval now, NSTimeInterval *outAt);
+// Copie des fenêtres d'un compte, `exhaustAt` (epoch, s) ajouté à celles dont la projection tient.
+NSArray *TMWindowsWithProjection(NSArray *windows, NSArray *history, NSString *provider, NSString *accountId,
+                                 NSTimeInterval now);
+// Alerte « à sec dans moins d'une heure » (fenêtres déjà passées par TMWindowsWithProjection).
+// `pairs` comme TMQuotaNotificationDecisions ; même `state`, clés « exmax:<provider>:<id> ».
+// Une alerte par épisode : réarmée seulement quand le quota retombe d'au moins 20 points.
+// Retourne { events: [ { kind: "exhaustion", provider, label, usedPercent, exhaustAt } ], state }.
+extern const NSTimeInterval TMExhaustionAlertHorizon;
+NSDictionary *TMExhaustionAlertDecisions(NSDictionary *state, NSArray *pairs, NSTimeInterval now);
 #pragma mark - Clés d'historique par compte
 // Forme : `<provider>:<accountId>:<windowId>`. L'accountId est dans la clé, jamais le libellé :
 // renommer un compte réécrirait sinon tout son historique. Le libellé est résolu à l'affichage.
