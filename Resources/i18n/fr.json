@@ -915,5 +915,12 @@
  "menu.ram": "RAM",
  "menu.ramRunning": "RAM…",
  "menu.ramDone": "{v} Go libérés",
- "menu.ramNothing": "RAM déjà libre"
+ "menu.ramNothing": "RAM déjà libre",
+ "cost.export": "Exporter en CSV",
+ "cost.csv.provider": "Fournisseur",
+ "cost.csv.account": "Compte",
+ "cost.csv.week": "Semaine",
+ "cost.csv.cost": "Coût",
+ "cost.csv.currency": "Devise",
+ "cost.csv.source": "Source"
 }

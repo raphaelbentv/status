@@ -915,5 +915,12 @@
  "menu.ram": "RAM",
  "menu.ramRunning": "RAM…",
  "menu.ramDone": "{v} GB freed",
- "menu.ramNothing": "RAM already free"
+ "menu.ramNothing": "RAM already free",
+ "cost.export": "Export as CSV",
+ "cost.csv.provider": "Provider",
+ "cost.csv.account": "Account",
+ "cost.csv.week": "Week",
+ "cost.csv.cost": "Cost",
+ "cost.csv.currency": "Currency",
+ "cost.csv.source": "Source"
 }
