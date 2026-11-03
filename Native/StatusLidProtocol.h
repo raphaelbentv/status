@@ -12,6 +12,8 @@
 - (void)statusWithReply:(void (^)(NSDictionary *))reply;
 - (void)startMinutes:(NSInteger)minutes reply:(void (^)(NSDictionary *))reply;
 - (void)stopWithReply:(void (^)(NSDictionary *))reply;
+// Absente des services antérieurs : n'appeler que si l'état annonce « extendSupported ».
+- (void)extendMinutes:(NSInteger)minutes reply:(void (^)(NSDictionary *))reply;
 - (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent reply:(void (^)(NSDictionary *))reply;
 - (void)stopFanBoostWithReply:(void (^)(NSDictionary *))reply;
 @end

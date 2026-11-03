@@ -915,5 +915,21 @@
  "menu.ram": "RAM",
  "menu.ramRunning": "RAM…",
  "menu.ramDone": "{v} GB freed",
- "menu.ramNothing": "RAM already free"
+ "menu.ramNothing": "RAM already free",
+ "lid.auto.toggle": "Start automatically while Claude Code is working",
+ "lid.auto.desc": "30-minute sessions, extended while Claude Code keeps working (240 min at most), stopped 5 min after the work ends. Safety stops still take priority, and a session started by hand is never stopped.",
+ "lid.auto.tag": "Automatic",
+ "lid.auto.legacy": "Update the macOS service to allow extensions: single session of 240 min at most.",
+ "lid.auto.state.idle": "Waiting: no Claude Code session is working.",
+ "lid.auto.state.starting": "Starting automatically…",
+ "lid.auto.state.running": "Started automatically: Claude Code is working.",
+ "lid.auto.state.stopping": "Claude Code has finished: automatic stop in {n} min.",
+ "lid.auto.state.manual": "Session started by hand: automatic mode leaves it alone.",
+ "lid.auto.state.otherTool": "Sleep is already blocked by another tool (SleepDisabled = 1): nothing is started.",
+ "lid.auto.state.cooldown": "Safety stop: next attempt in {n} min at the earliest.",
+ "lid.auto.state.waiting": "Waiting: battery below 35% or thermal pressure.",
+ "lid.auto.state.paused": "Paused until Claude Code finishes its current work.",
+ "lid.auto.state.unavailable": "macOS service unavailable: authorize it to start automatically.",
+ "menu.lidAuto": "lid · auto · {n} min",
+ "menu.lidAutoOn": "closed lid · auto"
 }

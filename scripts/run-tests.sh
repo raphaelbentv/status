@@ -27,6 +27,11 @@ clang -fobjc-arc -I "$ROOT/Native" -framework Foundation -framework Security -fr
   -o "$BUILD/lid-mode-tests"
 "$BUILD/lid-mode-tests"
 
+echo "── Capot fermé automatique pendant que Claude Code travaille (simulé) ──"
+clang -fobjc-arc -I "$ROOT/Native" -framework Foundation \
+  "$ROOT/Tests/lid-auto-tests.m" "$ROOT/Native/StatusLidAuto.m" -o "$BUILD/lid-auto-tests"
+"$BUILD/lid-auto-tests"
+
 echo "── Mode capot fermé sur MacBook Air (profil sans ventilateur, session constante) ──"
 clang -fobjc-arc -I "$ROOT/Native" -framework Foundation \
   "$ROOT/Tests/lid-air-tests.m" "$ROOT/Native/StatusLidMode.m" "$ROOT/Native/StatusMachine.m" \

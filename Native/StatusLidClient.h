@@ -7,6 +7,8 @@
 - (void)startMinutes:(NSInteger)minutes;
 // Session sans échéance, réservée aux MacBook Air (sans ventilateur). Le service revérifie la machine.
 - (void)startConstant;
+// Prolongation explicite (démarrage automatique), si le service la prend en charge.
+- (void)extendMinutes:(NSInteger)minutes;
 - (void)stop;
 - (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent;
 - (void)stopFanBoost;

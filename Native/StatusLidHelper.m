@@ -119,7 +119,7 @@ static uint64_t ClientToken(NSXPCConnection *connection) {
     double battery=Battery();
     return @{@"active":@(self.mode.active), @"restorationPending":@(self.mode.restorationPending),
         @"controlVersion":@4, @"remainingSeconds":@(MAX(0,self.mode.deadline-Clock())), @"message":self.mode.message ?: @"",
-        @"constant":@(self.mode.constant), @"constantSupported":@YES, @"fanlessMac":@(TMMachineIsFanlessMacBook(TMMachineModel())),
+        @"constant":@(self.mode.constant), @"constantSupported":@YES, @"extendSupported":@YES, @"fanlessMac":@(TMMachineIsFanlessMacBook(TMMachineModel())),
         @"batteryPercent":@(battery), @"thermalState":@(NSProcessInfo.processInfo.thermalState),
         @"fanBoost":[self.fanBoost snapshot:Clock()]};
 }
@@ -158,6 +158,13 @@ static uint64_t ClientToken(NSXPCConnection *connection) {
         if (!self.mode.active) [self.owner clear];  // session terminée d'elle-même : plus de propriétaire
         [self.mode startMinutes:minutes battery:Battery() thermal:NSProcessInfo.processInfo.thermalState now:Clock()];
         if (self.mode.active) [self.owner claim:client];
+        reply([self snapshot]);
+    });
+}
+- (void)extendMinutes:(NSInteger)minutes reply:(void (^)(NSDictionary *))reply {
+    uint64_t client=ClientToken(NSXPCConnection.currentConnection);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([self.owner isOwner:client]) [self.mode extendMinutes:minutes now:Clock()];
         reply([self snapshot]);
     });
 }

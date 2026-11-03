@@ -50,7 +50,7 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
 @implementation TMLidMode {
     id<TMLidBackend> _backend;
     NSDictionary *_journal;
-    double _lastHeartbeat;
+    double _lastHeartbeat, _startedAt;
     BOOL _fanless;
 }
 - (instancetype)initWithBackend:(id<TMLidBackend>)backend {
@@ -107,10 +107,16 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
         [self stop:@"Maintien éveillé non confirmé ; activation annulée."]; return;
     }
     _active = YES; _constant = constant; _fanless = fanless;
-    _deadline = constant ? 0 : now + minutes * 60; _lastHeartbeat = now;
+    _deadline = constant ? 0 : now + minutes * 60; _lastHeartbeat = _startedAt = now;
     if (fanless) _message = constant ? @"Actif · constant · économie d’énergie non imposée (MacBook Air)."
                                      : @"Actif · économie d’énergie non imposée (MacBook Air).";
     else _message = @"Actif · faible consommation imposée.";
+}
+// Repousse l'échéance à maintenant + minutes, jamais au-delà de 240 min après le démarrage ni en deçà de l'actuelle.
+- (void)extendMinutes:(NSInteger)minutes now:(double)now {
+    if (!_active || _constant || !TMLidDurationAllowed(minutes)) return;
+    double deadline = MIN(now + minutes * 60, _startedAt + 240 * 60);
+    if (deadline > _deadline) _deadline = deadline;
 }
 - (void)heartbeatAt:(double)now { if (_active) _lastHeartbeat = now; }
 - (void)tickBattery:(double)battery thermal:(NSInteger)thermal now:(double)now {

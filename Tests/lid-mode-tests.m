@@ -43,6 +43,10 @@ int main(void){@autoreleasepool{
     Check([b.power isEqual:@{@"sleepDisabled":@1,@"batteryMode":@1,@"acMode":@1}],@"faible consommation batterie et secteur");
     [m heartbeatAt:110];[m tickBattery:70 thermal:0 now:115];Check(m.active,@"heartbeat maintient sans prolonger");
     Start(m);Check(m.deadline==1120,@"double clic ne prolonge pas");
+    [m extendMinutes:30 now:1000];Check(m.deadline==2800,@"prolongation explicite : maintenant + durée");
+    [m extendMinutes:1 now:1100];Check(m.deadline==2800,@"prolongation : jamais d'échéance raccourcie");
+    [m extendMinutes:241 now:1100];[m extendMinutes:0 now:1100];Check(m.deadline==2800,@"prolongation : durée bornée");
+    [m extendMinutes:240 now:14000];Check(m.deadline==100+240*60,@"prolongation : jamais au-delà de 240 min après le démarrage");
     [m stop:@"test"];Check(!m.active&&!m.restorationPending&&!b.journal,@"arrêt termine et efface journal");
     Check([b.power isEqual:@{@"sleepDisabled":@0,@"batteryMode":@0,@"acMode":@2}],@"réglages originaux restaurés exactement");
     for(int reason=0;reason<4;reason++){
@@ -53,6 +57,7 @@ int main(void){@autoreleasepool{
         if(reason==3)[m tickBattery:80 thermal:0 now:121];
         Check(!m.active&&!m.restorationPending&&[b.power[@"sleepDisabled"]isEqual:@0],@"chaque limite restaure");
     }
+    b=[FakePower new];m=Mode(b);[m extendMinutes:30 now:100];Check(!m.active&&m.deadline==0,@"prolongation sans session : sans effet");
     b=[FakePower new];b.failSave=YES;m=Mode(b);Start(m);Check(!m.active&&b.writes==0,@"sans journal aucune mutation");
     b=[FakePower new];b.power[@"sleepDisabled"]=@1;m=Mode(b);Start(m);Check(!m.active&&b.writes==0,@"ne s'approprie pas un blocage extérieur");
     b=[FakePower new];b.failLowPower=YES;m=Mode(b);Start(m);Check(!m.active&&!m.restorationPending,@"faible consommation refusée annule");

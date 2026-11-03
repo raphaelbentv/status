@@ -106,6 +106,7 @@
     if (kind==1 && ![_remote[@"controlVersion"] isEqual:@4]) {
         _error=@"Connexion au service à vérifier avant le démarrage."; [self changed]; [self refresh]; return;
     }
+    if (kind==5 && ![_remote[@"extendSupported"] boolValue]) return;
     if ((kind==3 || kind==4) && ![_remote[@"fanBoost"][@"version"] isEqual:@2]) {
         _error=@"Mettez le service macOS à jour pour contrôler les ventilateurs."; [self changed]; return;
     }
@@ -131,6 +132,7 @@
     else if (kind==2) [remote stopWithReply:reply];
     else if (kind==3) [remote startFanBoostMinutes:minutes percent:percent reply:reply];
     else if (kind==4) [remote stopFanBoostWithReply:reply];
+    else if (kind==5) [remote extendMinutes:minutes reply:reply];
     else [remote statusWithReply:reply];
     // Prise de main des ventilateurs : thermalmonitord met 3 à 6 s à céder, puis chaque écriture est relue.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(kind==3||kind==4?35:12)*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
@@ -153,6 +155,7 @@
     }
     [self request:1 minutes:0];
 }
+- (void)extendMinutes:(NSInteger)minutes { [self request:5 minutes:minutes]; }
 - (void)stop { [self request:2 minutes:0]; }
 - (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent { [self request:3 minutes:minutes percent:percent]; }
 - (void)stopFanBoost { [self request:4 minutes:0]; }

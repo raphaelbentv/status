@@ -1,4 +1,5 @@
 #import "StatusLidClient.h"
+#import "StatusLidAuto.h"
 #import "StatusLidProtocol.h"
 #import "StatusFanCurve.h"
 #import <Cocoa/Cocoa.h>
@@ -452,6 +453,11 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 @property NSDictionary *ramCleanState;  // dernier état, relayé au popup via toolsPayload
 @property TMLidClient *lidMode;
 @property NSTimer *lidTimer;
+// Démarrage automatique pendant que Claude Code travaille : relevé des transcriptions en fond, toutes les 20 s.
+@property TMLidAutoPilot *lidAuto;
+@property NSTimer *lidAutoTimer;
+@property BOOL claudeWorking, lidAutoScanning;
+@property NSInteger sleepDisabled;
 // Modes des ventilateurs (auto / courbe / manuel), pilotés via le service existant. Voir driveFans.
 @property TMFanController *fanController;
 @property double fanTempC;          // dernier relevé (NAN si absent), pour l'aperçu de la courbe
@@ -473,7 +479,7 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
     // Le service répond toutes les 5 s (vitesse des ventilateurs) : seul l'état des outils est
     // renvoyé, pas tout le payload (historique, comptes…) à chaque fois.
     // Chaque réponse du service peut débloquer la commande suivante (arrêt puis relance d'un palier).
-    self.lidMode.onChange = ^{ [weakSelf pushTools]; [weakSelf driveFans]; };
+    self.lidMode.onChange = ^{ [weakSelf driveLidAuto]; [weakSelf pushTools]; [weakSelf driveFans]; };
     self.lidTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
         [weakSelf.lidMode refresh];
     }];
@@ -481,6 +487,12 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
     // 1 s de tolérance laisse macOS grouper les réveils sans approcher ce délai.
     self.lidTimer.tolerance = 1;
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    self.lidAuto = [TMLidAutoPilot new];
+    self.lidAuto.enabled = [defaults boolForKey:@"lidAutoClaude"];  // désactivé par défaut
+    self.sleepDisabled = -1;
+    self.lidAutoTimer = [NSTimer scheduledTimerWithTimeInterval:20 repeats:YES block:^(NSTimer *timer) { [weakSelf scanClaudeActivity]; }];
+    self.lidAutoTimer.tolerance = 5;
+    [self scanClaudeActivity];
     // Ventilateurs : le préréglage de courbe est mémorisé, mais chaque lancement repart en Auto —
     // jamais de ventilateurs forcés sans geste de l'utilisateur dans la session.
     self.fanController = [TMFanController new];
@@ -572,6 +584,7 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self.lidTimer invalidate];
+    [self.lidAutoTimer invalidate];
     [self stopFansForTermination];
     [self.lidMode invalidate];  // Le service indépendant restaure après 20 s sans battement.
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
@@ -1954,7 +1967,13 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
             [self.lidMode startMinutes:minutes.integerValue];
     }
     if ([action isEqualToString:@"startLidConstant"]) [self.lidMode startConstant];  // le client et le service revérifient la machine
-    if ([action isEqualToString:@"stopLidMode"]) [self.lidMode stop];
+    if ([action isEqualToString:@"stopLidMode"]) { [self.lidAuto userStopped]; [self.lidMode stop]; }
+    if ([action isEqualToString:@"setLidAuto"] && [body[@"enabled"] isKindOfClass:NSNumber.class]) {
+        self.lidAuto.enabled = [body[@"enabled"] boolValue];
+        [NSUserDefaults.standardUserDefaults setBool:self.lidAuto.enabled forKey:@"lidAutoClaude"];
+        [self scanClaudeActivity];
+        [self pushTools];
+    }
     // Boost du popup quota et des Réglages = mode Manuel : le contrôleur arrête proprement un palier
     // de courbe en cours avant de lancer celui-ci (le service refuse de relancer un boost actif).
     if ([action isEqualToString:@"startFanBoost"]) {
@@ -2343,7 +2362,7 @@ static NSNumber *TMFanInteger(id value) {
     return @{
         @"awake": @{ @"active": @(self.awake.isEnabled) },
         @"ramClean": self.ramCleanState ?: @{},
-        @"lidMode": self.lidMode.snapshot ?: @{},
+        @"lidMode": [self lidModePayload],
         // Mode des ventilateurs : le popup quota et les Réglages affichent une courbe active.
         @"fanMode": @{ @"mode": self.fanController.mode ?: @"auto", @"preset": self.fanController.preset ?: @"balanced",
                        @"target": @(self.fanController.desiredPercent) },
@@ -2368,6 +2387,53 @@ static NSNumber *TMFanInteger(id value) {
     }
     [self pushData];
     [self pushWidgetMetrics];
+}
+
+- (NSDictionary *)lidModePayload {
+    NSMutableDictionary *lid = [(self.lidMode.snapshot ?: @{}) mutableCopy];
+    lid[@"auto"] = [self.lidAuto snapshot:NSDate.date.timeIntervalSince1970] ?: @{};
+    return lid;
+}
+
+// Transcriptions de ~/.claude et des profils Claude Code propres à Status.
+- (NSArray<NSString *> *)claudeTranscriptRoots {
+    NSMutableArray *roots = [NSMutableArray arrayWithObject:[NSHomeDirectory() stringByAppendingPathComponent:@".claude/projects"]];
+    NSString *profiles = [TMSupportDirectory() stringByAppendingPathComponent:@"ClaudeCode"];
+    for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:profiles error:nil])
+        [roots addObject:[[profiles stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"projects"]];
+    return roots;
+}
+
+- (void)scanClaudeActivity {
+    if (!self.lidAuto.enabled) { self.claudeWorking = NO; [self driveLidAuto]; return; }
+    if (self.lidAutoScanning) return;
+    self.lidAutoScanning = YES;
+    NSArray *roots = [self claudeTranscriptRoots];
+    BOOL sessionActive = [self.lidMode.snapshot[@"active"] boolValue];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        BOOL working = TMClaudeCodeWorking(roots, NSDate.date.timeIntervalSince1970);
+        // Pendant une session, SleepDisabled vaut 1 de notre fait : la lecture ne sert qu'avant un démarrage.
+        NSInteger sleepDisabled = working && !sessionActive ? TMLidReadSleepDisabled() : -1;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            typeof(self) self = weakSelf; if (!self) return;
+            self.lidAutoScanning = NO;
+            self.claudeWorking = working; self.sleepDisabled = sleepDisabled;
+            [self driveLidAuto];
+            [self pushTools];
+        });
+    });
+}
+
+// Le pilote choisit, le client transmet, le service vérifie : batterie, thermique et réglages restent son affaire.
+- (void)driveLidAuto {
+    if (!self.lidAuto.enabled && !self.lidAuto.owns) return;  // l'instantané interroge smd : pas pour rien
+    NSInteger minutes = 0;
+    TMLidAutoCommand command = [self.lidAuto decideWithService:self.lidMode.snapshot ?: @{} working:self.claudeWorking
+        sleepDisabled:self.sleepDisabled now:NSDate.date.timeIntervalSince1970 minutes:&minutes];
+    if (command == TMLidAutoStart) [self.lidMode startMinutes:minutes];
+    else if (command == TMLidAutoExtend) [self.lidMode extendMinutes:minutes];
+    else if (command == TMLidAutoStop) [self.lidMode stop];
 }
 
 - (void)pushTools {
