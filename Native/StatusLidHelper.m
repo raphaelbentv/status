@@ -8,6 +8,7 @@
 #import <signal.h>
 #import <unistd.h>
 #import <errno.h>
+#import <objc/runtime.h>
 
 static NSString *const JournalDirectory = @"/var/db/com.raphael.status.lid";
 static NSString *const JournalPath = @"/var/db/com.raphael.status.lid/restore.plist";
@@ -100,11 +101,20 @@ static BOOL PrivateDirectory(void) {
 
 @interface TMLidServer : NSObject <NSXPCListenerDelegate,TMLidService>
 @property TMLidMode *mode;
-@property (weak) NSXPCConnection *owner;
+@property TMLidOwnership *owner;
 @property TMFanBoost *fanBoost;
-@property (weak) NSXPCConnection *fanOwner;
+@property TMLidOwnership *fanOwner;
+@property uint64_t lastClient;  // compteur des connexions acceptées (file du listener, en série)
 @end
+static char ClientTokenKey;
+static uint64_t ClientToken(NSXPCConnection *connection) {
+    return connection ? [objc_getAssociatedObject(connection,&ClientTokenKey) unsignedLongLongValue] : 0;
+}
 @implementation TMLidServer
+- (instancetype)init {
+    if ((self=[super init])) { _owner=[TMLidOwnership new]; _fanOwner=[TMLidOwnership new]; }
+    return self;
+}
 - (NSDictionary *)snapshot {
     double battery=Battery();
     return @{@"active":@(self.mode.active), @"restorationPending":@(self.mode.restorationPending),
@@ -119,51 +129,60 @@ static BOOL PrivateDirectory(void) {
     [connection setCodeSigningRequirement:requirement];
     connection.exportedInterface=[NSXPCInterface interfaceWithProtocol:@protocol(TMLidService)];
     connection.exportedObject=self;
-    __weak NSXPCConnection *weakConnection=connection;
+    // Jeton capturé par valeur : la déconnexion du propriétaire se reconnaît même connexion libérée.
+    uint64_t token=++self.lastClient;
+    objc_setAssociatedObject(connection,&ClientTokenKey,@(token),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     connection.invalidationHandler=^{ dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.owner==weakConnection) { [self.mode stop:@"Status a été fermé ou déconnecté."]; self.owner=nil; }
-        if (self.fanOwner==weakConnection) { [self.fanBoost stop:@"Status a été fermé · Auto Apple."]; self.fanOwner=nil; }
+        // Capot fermé : une rupture XPC n'arrête pas la session. Fermer puis rouvrir le capot peut retarder une
+        // réponse au-delà du délai du client, qui coupe alors sa connexion et en rouvre une. La nouvelle connexion
+        // reprend la session au relevé suivant ; si Status est vraiment fermé, l'absence de battement l'arrête (20 s).
+        [self.owner releaseClient:token];
+        if ([self.fanOwner releaseClient:token] && self.fanBoost.active) [self.fanBoost stop:@"Status a été fermé · Auto Apple."];
     }); };
     connection.interruptionHandler=connection.invalidationHandler;
     [connection resume]; return YES;
 }
 - (void)statusWithReply:(void (^)(NSDictionary *))reply {
-    NSXPCConnection *client=NSXPCConnection.currentConnection;
+    uint64_t client=ClientToken(NSXPCConnection.currentConnection);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.owner==client) [self.mode heartbeatAt:Clock()];
-        if (self.fanOwner==client) [self.fanBoost heartbeat:Clock()];
+        // Session orpheline (connexion précédente coupée) : le pair est forcément Status (signature vérifiée).
+        if (self.mode.active) [self.owner claim:client];
+        if ([self.owner isOwner:client]) [self.mode heartbeatAt:Clock()];
+        if ([self.fanOwner isOwner:client]) [self.fanBoost heartbeat:Clock()];
         reply([self snapshot]);
     });
 }
 - (void)startMinutes:(NSInteger)minutes reply:(void (^)(NSDictionary *))reply {
-    NSXPCConnection *client=NSXPCConnection.currentConnection;
+    uint64_t client=ClientToken(NSXPCConnection.currentConnection);
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.mode.active) [self.owner clear];  // session terminée d'elle-même : plus de propriétaire
         [self.mode startMinutes:minutes battery:Battery() thermal:NSProcessInfo.processInfo.thermalState now:Clock()];
-        if (self.mode.active && !self.owner) self.owner=client;
+        if (self.mode.active) [self.owner claim:client];
         reply([self snapshot]);
     });
 }
 - (void)stopWithReply:(void (^)(NSDictionary *))reply {
-    dispatch_async(dispatch_get_main_queue(), ^{ [self.mode stop:@"Arrêt demandé."]; self.owner=nil; reply([self snapshot]); });
+    dispatch_async(dispatch_get_main_queue(), ^{ [self.mode stop:@"Arrêt demandé."]; [self.owner clear]; reply([self snapshot]); });
 }
 - (void)startFanBoostMinutes:(NSInteger)minutes percent:(NSInteger)percent reply:(void (^)(NSDictionary *))reply {
-    NSXPCConnection *client=NSXPCConnection.currentConnection;
+    uint64_t client=ClientToken(NSXPCConnection.currentConnection);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.fanOwner || self.fanOwner==client) {
+        if (!self.fanBoost.active) [self.fanOwner clear];
+        if ([self.fanOwner claim:client]) {
             [self.fanBoost startMinutes:minutes percent:percent now:Clock()];
-            if (self.fanBoost.active) self.fanOwner=client;
+            if (!self.fanBoost.active) [self.fanOwner clear];
         }
         reply([self snapshot]);
     });
 }
 - (void)stopFanBoostWithReply:(void (^)(NSDictionary *))reply {
-    NSXPCConnection *client=NSXPCConnection.currentConnection;
+    uint64_t client=ClientToken(NSXPCConnection.currentConnection);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.fanOwner || self.fanOwner==client) {
+        if (!self.fanOwner.owner || [self.fanOwner isOwner:client]) {
             // Demande explicite : répare aussi un ventilateur resté en manuel hors boost.
             if (self.fanBoost.active || self.fanBoost.restorationPending) [self.fanBoost stop:@"Auto Apple."];
             else [self.fanBoost restoreAll:@"Auto Apple."];
-            self.fanOwner=nil;
+            [self.fanOwner clear];
         }
         reply([self snapshot]);
     });
@@ -193,7 +212,8 @@ int main(int argc,const char *argv[]) {
         [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) {
             [server.mode tickBattery:Battery() thermal:NSProcessInfo.processInfo.thermalState now:Clock()];
             [server.fanBoost tick:Clock() thermal:NSProcessInfo.processInfo.thermalState];
-            if (!server.fanBoost.active) server.fanOwner=nil;
+            if (!server.mode.active) [server.owner clear];
+            if (!server.fanBoost.active) [server.fanOwner clear];
         }];
         signal(SIGTERM,SIG_IGN); signal(SIGINT,SIG_IGN);
         dispatch_source_t term=dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL,SIGTERM,0,dispatch_get_main_queue());

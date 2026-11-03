@@ -79,6 +79,26 @@ int main(void){@autoreleasepool{
     Check(m.active&&m.deadline==14500,@"durée maximale de quatre heures");
     [m stop:@"test"];
     Check([b.power isEqual:@{@"sleepDisabled":@0,@"batteryMode":@0,@"acMode":@2}],@"arrêt anticipé de la durée maximale restaure");
+    // Propriété par jeton : un client sans session (jeton 0 ou étranger) ne libère jamais la session d'un autre.
+    TMLidOwnership *own=[TMLidOwnership new];
+    Check(![own releaseClient:1]&&![own releaseClient:0]&&![own isOwner:0],@"déconnexion sans session : aucun arrêt");
+    Check(![own claim:0]&&own.owner==0,@"jeton nul jamais propriétaire");
+    Check([own claim:2]&&[own isOwner:2]&&![own claim:3]&&own.owner==2,@"la session reste à son premier client");
+    Check(![own releaseClient:3]&&![own releaseClient:1]&&own.owner==2,@"un autre client qui se déconnecte n'arrête rien");
+    Check([own releaseClient:2]&&own.owner==0&&![own releaseClient:2],@"la déconnexion du propriétaire libère une seule fois");
+    // Ce que fait le service à la déconnexion : libérer la session sans l'arrêter (réouverture du capot),
+    // puis la confier à la connexion suivante de Status ; sans elle, le battement manquant l'arrête.
+    b=[FakePower new];m=Mode(b);Start(m);[own claim:7];
+    [own releaseClient:8];
+    Check(m.active&&[own isOwner:7],@"client sans session déconnecté : session intacte");
+    [own releaseClient:7];
+    Check(m.active&&own.owner==0,@"déconnexion du propriétaire : session conservée, sans propriétaire");
+    if(m.active)[own claim:9];
+    if([own isOwner:9])[m heartbeatAt:118];
+    [m tickBattery:80 thermal:0 now:130];
+    Check(m.active&&[own isOwner:9],@"la connexion suivante reprend la session et la maintient");
+    [own releaseClient:9];[m tickBattery:80 thermal:0 now:139];
+    Check(!m.active&&[m.message isEqualToString:@"Status ne répond plus."]&&[b.power[@"sleepDisabled"]isEqual:@0],@"sans reconnexion, l'absence de battement arrête et restaure");
     // Le binaire de test est ad hoc : il ne peut pas définir une autorité XPC valable.
     Check(TMLidPeerRequirement(@"com.raphael.status")==nil,@"signature ad hoc ne peut pas autoriser le service");
     printf("Capot fermé : %d vérifications, %d échecs (aucun réglage réel modifié).\n",checks,failures);

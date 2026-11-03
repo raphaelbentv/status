@@ -80,3 +80,15 @@ BOOL TMLidInstalledServiceReady(void) {
     }
     return ValidCode([NSURL fileURLWithPath:paths[2]],TMLidPeerRequirement(TMLidHelperIdentifier));
 }
+@implementation TMLidOwnership
+- (BOOL)isOwner:(uint64_t)client { return client!=0 && _owner==client; }
+- (BOOL)claim:(uint64_t)client {
+    if (client!=0 && _owner==0) _owner=client;
+    return [self isOwner:client];
+}
+- (BOOL)releaseClient:(uint64_t)client {
+    if (![self isOwner:client]) return NO;
+    _owner=0; return YES;
+}
+- (void)clear { _owner=0; }
+@end

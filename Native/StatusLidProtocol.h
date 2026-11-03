@@ -24,3 +24,16 @@ BOOL TMLidSigningReady(void);
 // Installation classique, approuvée par l’administrateur via Installer.app.
 BOOL TMLidInstallerReady(void);
 BOOL TMLidInstalledServiceReady(void);
+
+// Propriétaire d'une session, désigné par le jeton non nul attribué à sa connexion à l'acceptation.
+// Contrairement à une référence faible, une connexion déjà libérée garde son jeton : sa déconnexion
+// se reconnaît toujours, et un client sans session ne se confond jamais avec « aucun propriétaire ».
+@interface TMLidOwnership : NSObject
+@property (readonly) uint64_t owner;  // 0 : aucun propriétaire
+- (BOOL)isOwner:(uint64_t)client;
+// Attribue la session à ce client si elle est libre ; YES s'il en est (désormais) propriétaire.
+- (BOOL)claim:(uint64_t)client;
+// YES si ce client était le propriétaire, la session étant alors libérée.
+- (BOOL)releaseClient:(uint64_t)client;
+- (void)clear;
+@end

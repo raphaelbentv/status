@@ -573,7 +573,7 @@ static double TMFanClock(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC) /
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self.lidTimer invalidate];
     [self stopFansForTermination];
-    [self.lidMode invalidate];  // Le service indépendant restaure sur rupture XPC (ou après 20 s).
+    [self.lidMode invalidate];  // Le service indépendant restaure après 20 s sans battement.
     self.awake.enabled = NO;  // l'assertion mourrait avec le processus, mais la relâcher est explicite
     [self.keyboardLock forceUnlock];
     [self removeGlobalShortcut];
