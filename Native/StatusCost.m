@@ -366,3 +366,85 @@ NSDictionary *TMScanTerminalCosts(void) {
     return @{ @"claude": @{ @"buckets": claudeBuckets },
               @"codex":  @{ @"buckets": codexBuckets } };
 }
+
+
+#pragma mark - Export CSV
+
+// Semaine ISO « 2026-W44 » d'un instant, en UTC.
+static NSString *TMISOWeekLabel(NSTimeInterval t) {
+    static NSCalendar *cal;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cal = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierISO8601];
+        cal.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    });
+    NSDateComponents *c = [cal components:NSCalendarUnitYearForWeekOfYear | NSCalendarUnitWeekOfYear
+                                 fromDate:[NSDate dateWithTimeIntervalSince1970:t]];
+    return [NSString stringWithFormat:@"%04ld-W%02ld", (long)c.yearForWeekOfYear, (long)c.weekOfYear];
+}
+
+NSArray<NSDictionary *> *TMCostWeeklyRows(NSArray<NSDictionary *> *sources) {
+    NSMutableArray *rows = [NSMutableArray array];
+    for (NSDictionary *src in sources) {
+        if (![src isKindOfClass:NSDictionary.class]) continue;
+        // instant → dollars, quelle que soit la forme de la source
+        NSMutableArray<NSArray<NSNumber *> *> *points = [NSMutableArray array];
+        NSDictionary *daily = src[@"daily"], *buckets = src[@"buckets"];
+        if ([daily isKindOfClass:NSDictionary.class]) {
+            for (NSString *k in daily) if ([daily[k] isKindOfClass:NSNumber.class]) [points addObject:@[@(k.doubleValue), daily[k]]];
+        } else if ([buckets isKindOfClass:NSDictionary.class]) {
+            for (NSString *k in buckets) {
+                double c = TMCostSince(@{ k: buckets[k] }, 0);
+                if (c != 0) [points addObject:@[@(k.doubleValue), @(c)]];
+            }
+        }
+        if (!points.count) continue;
+        NSMutableDictionary<NSString *, NSNumber *> *weeks = [NSMutableDictionary dictionary];
+        NSTimeInterval lo = DBL_MAX, hi = 0;
+        for (NSArray *p in points) {
+            NSTimeInterval t = [p[0] doubleValue];
+            lo = MIN(lo, t); hi = MAX(hi, t);
+            NSString *w = TMISOWeekLabel(t);
+            weeks[w] = @([weeks[w] doubleValue] + [p[1] doubleValue]);
+        }
+        // Chaque semaine entre la première et la dernière, sans trou : pas de saut dans un tableur.
+        for (NSTimeInterval t = lo; ; t += 7 * 86400) {
+            NSString *w = TMISOWeekLabel(MIN(t, hi));
+            if (!weeks[w]) weeks[w] = @0;
+            if (t >= hi) break;
+        }
+        for (NSString *w in weeks)
+            [rows addObject:@{ @"provider": src[@"provider"] ?: @"", @"account": src[@"account"] ?: @"",
+                               @"week": w, @"cost": weeks[w], @"source": src[@"source"] ?: @"" }];
+    }
+    NSArray *keys = @[@"provider", @"account", @"week", @"source"];
+    [rows sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        for (NSString *k in keys) {
+            NSComparisonResult r = [a[k] compare:b[k]];
+            if (r != NSOrderedSame) return r;
+        }
+        return NSOrderedSame;
+    }];
+    return rows;
+}
+
+// Guillemets si la valeur contient « ; », un guillemet ou un saut de ligne. Une valeur qui
+// commence par = + - @ reçoit une apostrophe : Excel l'exécuterait sinon comme une formule.
+static NSString *TMCSVField(NSString *value) {
+    if (value.length && [@"=+-@\t\r" rangeOfString:[value substringToIndex:1]].location != NSNotFound) value = [@"'" stringByAppendingString:value];
+    if ([value rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@";\"\r\n"]].location == NSNotFound) return value;
+    return [NSString stringWithFormat:@"\"%@\"", [value stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""]];
+}
+
+NSData *TMCostRowsToCSV(NSArray<NSDictionary *> *rows, NSArray<NSString *> *headers) {
+    NSMutableString *csv = [NSMutableString string];
+    NSMutableArray *head = [NSMutableArray array];
+    for (NSString *h in headers) [head addObject:TMCSVField(h)];
+    [csv appendFormat:@"%@\r\n", [head componentsJoinedByString:@";"]];
+    for (NSDictionary *r in rows)
+        [csv appendFormat:@"%@;%@;%@;%@;USD;%@\r\n", TMCSVField(r[@"provider"]), TMCSVField(r[@"account"]), r[@"week"],
+         [NSString stringWithFormat:@"%.4f", [r[@"cost"] doubleValue]], TMCSVField(r[@"source"])];
+    NSMutableData *data = [NSMutableData dataWithBytes:"\xEF\xBB\xBF" length:3];
+    [data appendData:[csv dataUsingEncoding:NSUTF8StringEncoding]];
+    return data;
+}

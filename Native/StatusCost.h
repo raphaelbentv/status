@@ -65,6 +65,18 @@ NSArray<NSDictionary *> *TMModelBreakdownSince(NSDictionary *buckets, NSTimeInte
 // Retourne @{ @"claude": @{ @"buckets": {...} }, @"codex": {...} } au format nid ci-dessus.
 NSDictionary *TMScanTerminalCosts(void);
 
+// Export CSV (lecture seule). `sources` : liste de @{ provider, account, source, buckets } (tranches
+// horaires, comme ci-dessus) ou @{ …, daily } (jour UTC → dollars, comptes API). Retourne une ligne
+// par source et par semaine ISO (UTC) entre sa première et sa dernière semaine chiffrées — les
+// semaines sans coût y figurent à 0 —, triées par fournisseur, compte, semaine. Une source sans
+// aucun coût ne produit rien. Ligne : @{ provider, account, week "2026-W44", cost, source }.
+NSArray<NSDictionary *> *TMCostWeeklyRows(NSArray<NSDictionary *> *sources);
+
+// CSV Numbers/Excel FR : séparateur « ; », décimales en point, fin de ligne \r\n, valeurs
+// échappées entre guillemets si besoin, BOM UTF-8 en tête. `headers` : 6 libellés (fournisseur,
+// compte, semaine, coût, devise, source). La devise est toujours USD.
+NSData *TMCostRowsToCSV(NSArray<NSDictionary *> *rows, NSArray<NSString *> *headers);
+
 // Taux de change indicatif, daté comme la table de prix — pas d'appel réseau. Sert à afficher
 // l'équivalent en euros à côté du dollar. Approximatif et surchargeable, jamais présenté comme
 // un taux de facturation exact.

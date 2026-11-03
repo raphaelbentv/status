@@ -959,5 +959,12 @@
  "lid.auto.state.paused": "En pause jusqu’à la fin du travail en cours de Claude Code.",
  "lid.auto.state.unavailable": "Service macOS indisponible : autorisez-le pour le démarrage automatique.",
  "menu.lidAuto": "capot · auto · {n} min",
- "menu.lidAutoOn": "capot fermé · auto"
+ "menu.lidAutoOn": "capot fermé · auto",
+ "cost.export": "Exporter en CSV",
+ "cost.csv.provider": "Fournisseur",
+ "cost.csv.account": "Compte",
+ "cost.csv.week": "Semaine",
+ "cost.csv.cost": "Coût",
+ "cost.csv.currency": "Devise",
+ "cost.csv.source": "Source"
 }

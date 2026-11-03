@@ -959,5 +959,12 @@
  "lid.auto.state.paused": "En pausa hasta que Claude Code termine el trabajo en curso.",
  "lid.auto.state.unavailable": "Servicio de macOS no disponible: autorízalo para el inicio automático.",
  "menu.lidAuto": "tapa · auto · {n} min",
- "menu.lidAutoOn": "tapa cerrada · auto"
+ "menu.lidAutoOn": "tapa cerrada · auto",
+ "cost.export": "Exportar a CSV",
+ "cost.csv.provider": "Proveedor",
+ "cost.csv.account": "Cuenta",
+ "cost.csv.week": "Semana",
+ "cost.csv.cost": "Coste",
+ "cost.csv.currency": "Divisa",
+ "cost.csv.source": "Fuente"
 }

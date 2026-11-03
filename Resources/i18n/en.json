@@ -959,5 +959,12 @@
  "lid.auto.state.paused": "Paused until Claude Code finishes its current work.",
  "lid.auto.state.unavailable": "macOS service unavailable: authorize it to start automatically.",
  "menu.lidAuto": "lid · auto · {n} min",
- "menu.lidAutoOn": "closed lid · auto"
+ "menu.lidAutoOn": "closed lid · auto",
+ "cost.export": "Export as CSV",
+ "cost.csv.provider": "Provider",
+ "cost.csv.account": "Account",
+ "cost.csv.week": "Week",
+ "cost.csv.cost": "Cost",
+ "cost.csv.currency": "Currency",
+ "cost.csv.source": "Source"
 }

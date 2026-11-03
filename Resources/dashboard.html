@@ -241,6 +241,7 @@
   .cost-total-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .cost-period{margin-bottom:4px;flex:none}
   .cost-total-amount{font-size:22px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;line-height:1;cursor:help}
+  .cost-export{margin-top:10px}
   .cost-warn{color:var(--amber);font-size:12px;margin-top:6px}
   .model-table{width:100%;margin-top:11px;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
   .model-table th{text-align:left;font-weight:400;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:0 0 4px;border-bottom:1px solid var(--hair)}
@@ -719,7 +720,7 @@ function providerCostTotal(id){
   const unpriced=partial?`<div class="cost-warn">${t('cost.unpriced',{n:Math.round(p.unpricedTokens/1e6)})}</div>`:'';
   const title=tariffTitle(p.prices);
   const switcher=d.periods?`<span class="segmented cost-period">${COST_PERIODS.map(k=>`<button class="seg ${costPeriod===k?'on':''}" onclick="setCostPeriod('${k}')">${t('cost.'+k)}</button>`).join('')}</span>`:'';
-  return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">${t('cost.apiEquiv',{period:label})}${partial?t('cost.partial'):id==='openai'?t('cost.approx'):''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}<div class="summary-note">${t('cost.note')}${id==='openai'?t('cost.noteOpenAI'):''}</div>${modelBreakdown(p)}</div>`;
+  return `<div class="cost-total"><div class="cost-total-head"><div class="cost-total-label">${t('cost.apiEquiv',{period:label})}${partial?t('cost.partial'):id==='openai'?t('cost.approx'):''}</div>${switcher}</div><div class="cost-total-amount"${title?` title="${esc(title)}"`:''}>${id==='openai'?'~ ':''}${fmtDual(p.total)}</div>${unpriced}<div class="summary-note">${t('cost.note')}${id==='openai'?t('cost.noteOpenAI'):''}</div>${modelBreakdown(p)}<button class="button cost-export" onclick="send('exportCostsCSV')">${t('cost.export')}</button></div>`;
 }
 // Un compte dans la vue Volumes : ses fenêtres, sa fraîcheur, son erreur éventuelle.
 // Prochaine facturation de l'abonnement. « vers le » quand la date est reportée d'une échéance

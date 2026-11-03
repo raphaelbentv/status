@@ -2464,6 +2464,40 @@ static void TestCostSince(void) {
     Check(TMCostSince(@{}, 0) == 0, @"vide : zéro");
 }
 
+static void TestCostCSV(void) {
+    Section(@"TMCostWeeklyRows / TMCostRowsToCSV — export CSV des coûts");
+    // 2026-10-26 = lundi de la semaine 44 ; 2026-11-09 = lundi de la semaine 46 (la 45 est vide).
+    NSString *w44 = @"1792972800", *w46 = @"1794182400";
+    NSArray *src = @[
+        @{ @"provider": @"openai", @"account": @"Zeta", @"source": @"admin_api", @"daily": @{ w44: @1.5, @"1793059200": @0.25, w46: @2 } },
+        @{ @"provider": @"claude", @"account": @"terminal", @"source": @"terminal_logs",
+           @"buckets": @{ w44: @{ @"opus": @{ @"cost": @3, @"tokens": @10 }, @"inconnu": @{ @"tokens": @5 } } } },
+        @{ @"provider": @"anthropic", @"account": @"Vide", @"source": @"admin_api", @"daily": @{} } ];
+    NSArray *rows = TMCostWeeklyRows(src);
+    CheckEqual(@(rows.count), @4, @"4 lignes : claude(1) + openai(44, 45 vide, 46) ; compte vide absent");
+    CheckEqual(rows[0][@"provider"], @"claude", @"tri par fournisseur : claude d'abord");
+    CheckEqual(rows[0][@"week"], @"2026-W44", @"semaine ISO");
+    Check(fabs([rows[0][@"cost"] doubleValue] - 3) < 1e-9, @"modèle non tarifé ignoré");
+    CheckEqual(rows[1][@"week"], @"2026-W44", @"openai : semaine 44");
+    Check(fabs([rows[1][@"cost"] doubleValue] - 1.75) < 1e-9, @"deux jours de la même semaine additionnés");
+    CheckEqual(rows[2][@"week"], @"2026-W45", @"semaine vide comblée");
+    Check([rows[2][@"cost"] doubleValue] == 0, @"semaine vide à 0");
+    CheckEqual(rows[3][@"week"], @"2026-W46", @"semaine 46 en dernier");
+    CheckEqual(@(TMCostWeeklyRows(@[]).count), @0, @"aucune source : aucune ligne");
+
+    NSData *data = TMCostRowsToCSV(@[ @{ @"provider": @"openai", @"account": @"A;\"B\"", @"week": @"2026-W44", @"cost": @1.5, @"source": @"admin_api" },
+                                      @{ @"provider": @"x", @"account": @"=SUM(1)", @"week": @"2026-W45", @"cost": @0, @"source": @"s" } ],
+                                    @[@"Fournisseur", @"Compte", @"Semaine", @"Coût", @"Devise", @"Source"]);
+    const unsigned char *b = data.bytes;
+    Check(data.length > 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF, @"BOM UTF-8");
+    NSString *csv = [[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(3, data.length - 3)] encoding:NSUTF8StringEncoding];
+    NSArray *lines = [csv componentsSeparatedByString:@"\r\n"];
+    CheckEqual(lines[0], @"Fournisseur;Compte;Semaine;Coût;Devise;Source", @"en-tête avec « ; » et accent UTF-8");
+    CheckEqual(lines[1], @"openai;\"A;\"\"B\"\"\";2026-W44;1.5000;USD;admin_api", @"séparateur et guillemets échappés, décimale en point");
+    CheckEqual(lines[2], @"x;'=SUM(1);2026-W45;0.0000;USD;s", @"formule neutralisée");
+    CheckEqual(lines[3], @"", @"fin de ligne CRLF finale");
+}
+
 static void TestModelBreakdown(void) {
     Section(@"TMModelBreakdownSince — ventilation par modèle, triée");
     NSDictionary *buckets = SampleBuckets();
@@ -3314,6 +3348,7 @@ int main(void) {
         TestBatteryValues();
         TestSystemMonitorSnapshot();
         TestCostSince();
+        TestCostCSV();
         TestModelBreakdown();
         TestFxRefresh();
         TestCostCacheSemantics();

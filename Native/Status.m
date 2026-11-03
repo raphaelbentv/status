@@ -1730,6 +1730,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         [self pushData];
     }
     if ([action isEqualToString:@"exportHistoryCSV"]) [self exportHistoryCSV];
+    if ([action isEqualToString:@"exportCostsCSV"]) [self exportCostsCSV];
     if ([action isEqualToString:@"setMenuBarIconColor"]) {
         [NSUserDefaults.standardUserDefaults setObject:body[@"value"] forKey:@"menuBarIconColor"];
         [self updateStatusMenu];
@@ -2113,6 +2114,32 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
         NSError *error = nil;
         [csv writeToURL:panel.URL atomically:YES encoding:NSUTF8StringEncoding error:&error];
         if (error) NSLog(@"Export CSV échoué : %@", error);
+    }];
+}
+
+// Export des coûts en CSV : usage terminal (journaux) et comptes API (Admin API), une ligne par
+// semaine ISO et par compte. Données déjà en mémoire, aucun accès réseau.
+- (void)exportCostsCSV {
+    NSMutableArray *sources = [NSMutableArray array];
+    for (NSString *provider in @[@"claude", @"codex"])
+        [sources addObject:@{ @"provider": provider, @"account": @"terminal", @"source": @"terminal_logs",
+                              @"buckets": self.costScan[provider][@"buckets"] ?: @{} }];
+    for (NSString *provider in @[TMApiProviderAnthropic, TMApiProviderOpenAI])
+        [TMApiAccountsForProvider(self.apiRegistry, provider) enumerateObjectsUsingBlock:^(NSDictionary *account, NSUInteger i, BOOL *stop) {
+            [sources addObject:@{ @"provider": provider, @"account": TMApiAccountDisplayLabel(account, i), @"source": @"admin_api",
+                                  @"daily": self.apiDaily[account[@"accountId"]] ?: @{} }];
+        }];
+    NSData *csv = TMCostRowsToCSV(TMCostWeeklyRows(sources), @[TMT(@"cost.csv.provider"), TMT(@"cost.csv.account"),
+        TMT(@"cost.csv.week"), TMT(@"cost.csv.cost"), TMT(@"cost.csv.currency"), TMT(@"cost.csv.source")]);
+    NSDateFormatter *day = [NSDateFormatter new];
+    day.dateFormat = @"yyyy-MM-dd";
+    day.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    NSSavePanel *panel = [NSSavePanel savePanel];
+    panel.nameFieldStringValue = [NSString stringWithFormat:@"status-couts-%@.csv", [day stringFromDate:NSDate.date]];
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSModalResponseOK || !panel.URL) return;
+        NSError *error = nil;
+        if (![csv writeToURL:panel.URL options:NSDataWritingAtomic error:&error]) NSLog(@"Export CSV des coûts échoué : %@", error);
     }];
 }
 

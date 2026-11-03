@@ -20,7 +20,8 @@ En complément, deux suivis facultatifs côté API :
   depuis un solde saisi ou un budget mensuel, widgets `anthropicApi` / `openaiApi` et alerte
   « Crédit API bas ».
 - **Coût équivalent API** des usages terminal (Claude Code, Codex), estimé localement à partir
-  des logs ; aucun appel réseau.
+  des logs ; aucun appel réseau. Le bouton « Exporter en CSV » du panneau des coûts écrit une ligne
+  par semaine ISO et par compte (UTF-8, séparateur `;`).
 
 ## Plusieurs comptes par fournisseur
 
