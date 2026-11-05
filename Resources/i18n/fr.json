@@ -543,6 +543,7 @@
  "msg.lid.22": "Actif · économie d’énergie non imposée · veille déjà bloquée par un autre outil.",
  "msg.lid.23": "Actif · faible consommation imposée · veille déjà bloquée par un autre outil.",
  "msg.lid.24": "Blocage de veille de l’autre outil levé ; reprise impossible.",
+ "msg.lid.25": "Actif · économie d’énergie non imposée.",
  "msg.lid.3": "Pression thermique détectée par macOS.",
  "msg.lid.4": "Durée terminée.",
  "msg.lid.5": "Status ne répond plus.",

@@ -543,6 +543,7 @@
  "msg.lid.22": "Activo · ahorro de energía no impuesto · reposo ya bloqueado por otra herramienta.",
  "msg.lid.23": "Activo · bajo consumo impuesto · reposo ya bloqueado por otra herramienta.",
  "msg.lid.24": "La otra herramienta quitó su bloqueo del reposo; no se pudo retomar.",
+ "msg.lid.25": "Activo · ahorro de energía no impuesto.",
  "msg.lid.3": "Presión térmica detectada por macOS.",
  "msg.lid.4": "Duración terminada.",
  "msg.lid.5": "Status ya no responde.",

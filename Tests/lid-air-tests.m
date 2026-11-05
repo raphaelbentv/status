@@ -151,19 +151,15 @@ int main(void) { @autoreleasepool {
     [recovered recover];
     Check(!recovered.active && after.journal == nil && [after.power isEqual:@{@"sleepDisabled":@0, @"batteryMode":@0, @"acMode":@2}], @"service relancé après un crash en mode constant : réglages restaurés");
 
-    // ── Économie d'énergie : jamais imposée sur un Air, toujours sur un Pro ────────────────────────────
-    b = [AirPower new]; b.failLowPower = YES; m = ModeOn(Air, b);
-    [m startMinutes:0 battery:80 thermal:0 now:100];
-    Check(m.active, @"Air : un refus du mode faible consommation n'empêche rien (il n'est jamais demandé)");
-    [m stop:nil];
-    b = [AirPower new]; b.failLowPower = YES; m = ModeOn(Pro, b);
-    [m startMinutes:17 battery:80 thermal:0 now:100];
-    Check(!m.active, @"Pro : un refus du mode faible consommation annule la session, comme avant");
-    b = [AirPower new]; m = ModeOn(Pro, b);
-    [m startMinutes:17 battery:80 thermal:0 now:100];
-    Check([b.power isEqual:@{@"sleepDisabled":@1, @"batteryMode":@1, @"acMode":@1}] && [b.journal[@"lowPowerForced"] isEqual:@1], @"Pro : faible consommation imposée et journalisée");
-    [m stop:nil];
-    Check([b.power isEqual:@{@"sleepDisabled":@0, @"batteryMode":@0, @"acMode":@2}], @"Pro : restauration exacte inchangée");
+    // ── Économie d'énergie : jamais imposée, ni sur un Air ni sur un Pro ────────────────────────────────
+    for (NSString *model in @[Air, Pro]) {
+        b = [AirPower new]; b.failLowPower = YES; m = ModeOn(model, b);
+        [m startMinutes:(model == Air ? 0 : 17) battery:80 thermal:0 now:100];
+        Check(m.active && b.modeWrites == 0, @"un refus du mode faible consommation n'empêche rien (il n'est jamais demandé)");
+        Check([b.power isEqual:@{@"sleepDisabled":@1, @"batteryMode":@0, @"acMode":@2}] && [b.journal[@"lowPowerForced"] isEqual:@0], @"modes d'énergie inchangés, journal à lowPowerForced = 0");
+        [m stop:nil];
+        Check([b.power isEqual:@{@"sleepDisabled":@0, @"batteryMode":@0, @"acMode":@2}], @"restauration : seule la veille est rendue");
+    }
     // Sur un Air, l'utilisateur peut changer le mode d'énergie pendant la session : elle continue, et rien n'est « remis ».
     b = [AirPower new]; m = ModeOn(Air, b);
     [m startMinutes:0 battery:80 thermal:0 now:100];
@@ -177,12 +173,14 @@ int main(void) { @autoreleasepool {
     b.power[@"sleepDisabled"] = @0;   // un autre outil rend la veille
     [m heartbeatAt:105]; [m tickBattery:80 thermal:0 now:110];
     Check(!m.active, @"Air : si la veille n'est plus bloquée, la session s'arrête");
-    // Pro : comportement d'avant, un mode d'énergie changé pendant la session l'arrête.
+    // Pro : le mode d'énergie changé pendant la session ne l'arrête plus (Status ne l'impose pas).
     b = [AirPower new]; m = ModeOn(Pro, b);
     [m startMinutes:17 battery:80 thermal:0 now:100];
-    b.power[@"batteryMode"] = @0;
+    b.power[@"batteryMode"] = @1;
     [m heartbeatAt:105]; [m tickBattery:80 thermal:0 now:110];
-    Check(!m.active, @"Pro : le mode d'énergie modifié arrête toujours la session");
+    Check(m.active, @"Pro : le mode d'énergie modifié n'arrête pas la session");
+    [m stop:nil];
+    Check([b.power[@"batteryMode"] isEqual:@1], @"Pro : le choix de l'utilisateur est respecté à l'arrêt");
 
     // ── Récupération : le journal dit ce qui a été imposé ──────────────────────────────────────────────
     AirPower *crash = [AirPower new]; crash.power = [@{@"sleepDisabled":@1, @"batteryMode":@1, @"acMode":@1} mutableCopy];

@@ -543,6 +543,7 @@
  "msg.lid.22": "Attivo · risparmio energetico non imposto · stop già bloccato da un altro strumento.",
  "msg.lid.23": "Attivo · basso consumo imposto · stop già bloccato da un altro strumento.",
  "msg.lid.24": "L’altro strumento ha tolto il blocco dello stop; ripresa impossibile.",
+ "msg.lid.25": "Attivo · risparmio energetico non imposto.",
  "msg.lid.3": "Pressione termica rilevata da macOS.",
  "msg.lid.4": "Durata terminata.",
  "msg.lid.5": "Status non risponde più.",

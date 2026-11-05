@@ -295,7 +295,7 @@ puis choisir une durée de **1 à 240 minutes** et cliquer sur **Démarrer**.
 Le tableau de bord et le popup affichent le temps restant. Le mode température et
 la dépendance aux sondes SMC ont été retirés. L’autorisation ne démarre aucune session.
 
-Le service impose la faible consommation sur batterie et secteur, puis restaure les
+Le service n’impose jamais le mode économie d’énergie (aucune machine) ; il restaure les
 réglages d’origine à l’échéance ou avec **Arrêter maintenant**. Il vérifie les écritures
 `pmset` avant de confirmer l’activation. `disablesleep` affecte aussi la veille manuelle ;
 ce réglage n’est pas une API publique garantie et nécessite un test physique sur le Mac.

@@ -89,10 +89,10 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
     // Veille déjà bloquée par un autre outil : la session s'appuie sur ce blocage sans le prendre. Le journal
     // garde sleepDisabled = 1, et la restauration n'y touche jamais (l'autre outil reste maître de son réglage).
     BOOL inherited = [power[@"sleepDisabled"] isEqual:@1];
-    // MacBook Air : le mode économie d'énergie n'est pas imposé (sans ventilateur, il n'apporte rien et brident
-    // inutilement la machine). Le journal le dit, pour que la restauration — y compris après un crash du service —
-    // ne « remette » jamais un mode que Status n'a pas changé.
-    BOOL forceLowPower = !fanless;
+    // Le mode économie d'énergie n'est jamais imposé, sur aucune machine : il bride inutilement le Mac capot fermé.
+    // Le journal le dit, pour que la restauration — y compris après un crash du service — ne « remette » jamais un
+    // mode que Status n'a pas changé. Les anciens journaux à lowPowerForced = 1 restent restaurés (voir stop:).
+    BOOL forceLowPower = NO;
     NSDictionary *journal = @{@"version":@1, @"sleepDisabled":@(inherited), @"lowPowerForced":@(forceLowPower),
         @"batteryMode":power[@"batteryMode"] ?: @-1, @"acMode":power[@"acMode"] ?: @-1};
     if (![self validJournal:journal] || ![_backend saveJournal:journal]) {
@@ -114,8 +114,8 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
     if (fanless) _message = constant ? @"Actif · constant · économie d’énergie non imposée (MacBook Air)."
                          : inherited ? @"Actif · économie d’énergie non imposée · veille déjà bloquée par un autre outil."
                                      : @"Actif · économie d’énergie non imposée (MacBook Air).";
-    else _message = inherited ? @"Actif · faible consommation imposée · veille déjà bloquée par un autre outil."
-                              : @"Actif · faible consommation imposée.";
+    else _message = inherited ? @"Actif · économie d’énergie non imposée · veille déjà bloquée par un autre outil."
+                              : @"Actif · économie d’énergie non imposée.";
 }
 // L'autre outil a levé son blocage pendant la session : Status le reprend à son compte (journal d'abord),
 // pour que la session continue et que la restauration remette ensuite la veille.
@@ -141,8 +141,8 @@ NSDictionary *TMLidParsePowerSettings(NSString *text) {
         if (![self takeOverSleepBlock]) reason = @"Blocage de veille de l’autre outil levé ; reprise impossible.";
         power = [_backend powerSettings];
     }
-    // Un Air n'impose pas la faible consommation : l'utilisateur peut la changer sans que la session s'arrête.
-    BOOL lowPowerKept = _fanless || ([power[@"batteryMode"] isEqual:@1] && [power[@"acMode"] isEqual:@1]);
+    // Faible consommation non imposée : l'utilisateur peut la changer sans que la session s'arrête.
+    BOOL lowPowerKept = ![_journal[@"lowPowerForced"] isEqual:@1] || ([power[@"batteryMode"] isEqual:@1] && [power[@"acMode"] isEqual:@1]);
     if (!reason && (!power || ![power[@"sleepDisabled"] isEqual:@1] || !lowPowerKept))
         reason = @"Les réglages d’énergie ont changé ou ne sont plus lisibles.";
     if (reason) [self stop:reason];
