@@ -660,6 +660,13 @@ function manualResetLine(w,account){
   }
   return '';  // « aucun » ou « non vérifié » n'aide à rien décider
 }
+// Réinitialisations Fable (Claude) : liste propre, affichée comme les crédits de reset OpenAI.
+function fableResetBlock(account){
+  const reset=account.manualReset||{},credits=Array.isArray(reset.fableCredits)?reset.fableCredits:[];
+  const fresh=Number.isFinite(reset.observedAt)&&Date.now()/1000-reset.observedAt<600&&reset.observedAt<=Date.now()/1000+5;
+  if(account.provider!=='claude'||!fresh||!credits.length)return '';
+  return `<div class="manual-reset available">${t('reset.fable')}${t('reset.availableN',{n:credits.length})}${resetExpiries({credits})}</div>`;
+}
 // Expiration des resets manuels : date et délai de chaque crédit (OpenAI), ou la mention lue sur
 // la page Usage de Claude. Rien quand la source ne la donne pas — jamais de date supposée.
 // Jours calendaires locaux jusqu'à ts (secondes) : une échéance ce soir est « aujourd'hui », pas « demain ».
@@ -762,7 +769,7 @@ function accountBlock(account,history){
   const cards=windows.length?windows.map(w=>quotaCard(w,account,history)).join(''):`<div class="quota-empty">${connected?t('acct.noWindow'):`${t('acct.notConnected')}.<br><button class="account-action" onclick="goToView('connections')">${t('acct.openConnections')}</button>`}</div>`;
   const freshness=account.capturedAt?`<div class="freshness ${account.stale?'stale':''}">${account.liveSource?t('acct.live'):account.stale?t('acct.staleReading'):t('acct.lastReading')}${ageLabel(account.capturedAt)}</div>`:'';
   const identity=accountIdentity(account);
-  return `<div class="account-block" data-connected="${connected?1:0}" data-error="${account.error?1:0}"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?t('acct.attention'):t('acct.connected')):t('acct.notConnected')}</span></div>${freshness}${billingLine(account)}${switchLine(account)}<div class="quota-grid">${cards}</div>${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(I.tm(account.error))}</div>`:''}</div>`;
+  return `<div class="account-block" data-connected="${connected?1:0}" data-error="${account.error?1:0}"><div class="account-block-head"><strong>${esc(account.label)}${identity?`<span class="account-identity">${esc(identity)}</span>`:''}</strong><span class="status-label"><i></i>${connected?(account.error?t('acct.attention'):t('acct.connected')):t('acct.notConnected')}</span></div>${freshness}${billingLine(account)}${switchLine(account)}<div class="quota-grid">${cards}</div>${fableResetBlock(account)}${extraCreditsCard(account)}${account.error?`<div class="quota-error">${esc(I.tm(account.error))}</div>`:''}</div>`;
 }
 function providerBlock(provider,accounts,history){
   const blocks=accounts.length?accounts.map(a=>accountBlock(a,history)).join(''):`<div class="quota-empty">${t('acct.none',{name:provider.name})}<br><button class="account-action" onclick="goToView('connections')">${t('acct.add')}</button></div>`;

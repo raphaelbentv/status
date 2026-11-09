@@ -676,6 +676,7 @@
  "reset.available": "disponible",
  "reset.availableN.one": "{n} disponible",
  "reset.availableN.other": "{n} disponibles",
+ "reset.fable": "Reinicios de Fable: ",
  "reset.expires": "caduca el {date}",
  "reset.expiry": "caducidad: {text}",
  "reset.manual": "Reset manual: ",

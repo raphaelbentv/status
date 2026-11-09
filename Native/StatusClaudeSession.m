@@ -361,15 +361,17 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
         "if(text.length>240) { credits.push({usable:!b.disabled}); continue; } "
         "const exp=text.match(/(?:expiration|expire[sd]?|expires on|expire le)\\s*:?\\s*([^·|]{3,30}?)(?=\\s*(?:réinitialiser|reset for|$))/i); "
         "const title=text.split(/expiration|expire/i)[0].replace(match,'').replace(/[\\uE000-\\uF8FF]/g,'').trim().slice(0,60); "
-        "const scope=/5\\s*h|five.hour|session/i.test(text)?'session':/complète|full|hebdo|week/i.test(text)?'weekly':'unknown'; "
-        "credits.push({title, expiryText:exp?exp[1].trim():'', expiresAt:exp?parseDay(exp[1]):null, scope, usable:!(b.disabled||b.getAttribute('aria-disabled')==='true')}); } "
+        "const scope=/fable/i.test(text)?'fable':/5\\s*h|five.hour|session/i.test(text)?'session':/complète|full|hebdo|week/i.test(text)?'weekly':'unknown'; "
+        // Une ligne peut porter un effectif (« Réinitialisation Fable · 3 ») : un seul bouton, plusieurs crédits.
+        "const cm=title.match(/\\s*[·•×x]\\s*(\\d{1,2})$/i), count=cm?+cm[1]:1, clean=cm?title.slice(0,cm.index).trim():title; "
+        "credits.push({title:clean, count, expiryText:exp?exp[1].trim():'', expiresAt:exp?parseDay(exp[1]):null, scope, usable:!(b.disabled||b.getAttribute('aria-disabled')==='true')}); } "
         "const section=/réinitialisation de la limite|limit reset/i.test(body); "
         "return {ready:true, section, credits};";
     [self.webView callAsyncJavaScript:script arguments:@{@"expectedUsed": @(expectedUsed)} inFrame:nil
                        inContentWorld:WKContentWorld.pageWorld completionHandler:^(id result, NSError *error) {
         if (!error && [result isKindOfClass:NSDictionary.class] && [result[@"ready"] boolValue]) {
             NSArray *raw = [result[@"credits"] isKindOfClass:NSArray.class] ? result[@"credits"] : @[];
-            NSMutableArray *credits = [NSMutableArray array];
+            NSMutableArray *credits = [NSMutableArray array], *fableCredits = [NSMutableArray array];
             for (NSDictionary *credit in raw) {
                 if (![credit isKindOfClass:NSDictionary.class]) continue;
                 NSMutableDictionary *row = [NSMutableDictionary dictionary];
@@ -377,16 +379,29 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
                 if ([credit[@"expiresAt"] isKindOfClass:NSNumber.class] && [credit[@"expiresAt"] doubleValue] > 0) row[@"expiresAt"] = @([credit[@"expiresAt"] longLongValue]);
                 else if ([credit[@"expiryText"] isKindOfClass:NSString.class] && [credit[@"expiryText"] length]) row[@"expiryText"] = credit[@"expiryText"];
                 if ([credit[@"usable"] isKindOfClass:NSNumber.class] && ![credit[@"usable"] boolValue]) row[@"usable"] = @NO;
-                [credits addObject:row];
+                // Une ligne « · N » vaut N crédits : on la déplie pour que le décompte soit exact.
+                NSInteger copies = [credit[@"count"] isKindOfClass:NSNumber.class] ? MIN(MAX([credit[@"count"] integerValue], 1), 20) : 1;
+                // Les crédits Fable forment leur propre liste : ils ne comptent pas dans le reset général.
+                for (NSInteger i = 0; i < copies; i++) {
+                    if ([credit[@"scope"] isEqual:@"fable"]) [fableCredits addObject:row]; else [credits addObject:row];
+                }
             }
             long long observed = (long long)NSDate.date.timeIntervalSince1970;
+            NSMutableDictionary *availability = nil;
             if (credits.count) {
-                NSString *scope = [raw.firstObject isKindOfClass:NSDictionary.class] && [@[@"weekly", @"session"] containsObject:raw.firstObject[@"scope"]] ? raw.firstObject[@"scope"] : @"unknown";
-                completion(@{@"status": @"available", @"scope": scope, @"count": @(credits.count), @"credits": credits, @"observedAt": @(observed)});
+                NSArray *general = [raw filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id c, NSDictionary *b) {
+                    return [c isKindOfClass:NSDictionary.class] && ![c[@"scope"] isEqual:@"fable"]; }]];
+                NSString *scope = [general.firstObject isKindOfClass:NSDictionary.class] && [@[@"weekly", @"session"] containsObject:general.firstObject[@"scope"]] ? general.firstObject[@"scope"] : @"unknown";
+                availability = [@{@"status": @"available", @"scope": scope, @"count": @(credits.count), @"credits": credits, @"observedAt": @(observed)} mutableCopy];
+            } else if ([result[@"section"] boolValue] || fableCredits.count) {
+                // Section lue sans bouton général : aucun reset, affirmé seulement quand la section existe.
+                availability = [@{@"status": @"none", @"observedAt": @(observed)} mutableCopy];
+            }
+            if (availability) {
+                if (fableCredits.count) availability[@"fableCredits"] = fableCredits;
+                completion(availability);
                 return;
             }
-            // Section lue sans bouton actif : aucun reset, affirmé seulement quand la section existe.
-            if ([result[@"section"] boolValue]) { completion(@{@"status": @"none", @"observedAt": @(observed)}); return; }
         }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self probeManualResetForExpectedUsed:expectedUsed attempts:attempts - 1 completion:completion];
