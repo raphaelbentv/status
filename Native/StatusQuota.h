@@ -33,6 +33,16 @@ NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSD
 // Crédits de reset manuel disponibles (Codex rateLimitResetCredits.credits) : expiresAt, title,
 // resetType, triés par expiration. nil quand le détail n'est pas fourni.
 NSArray *TMResetCreditDetails(id raw);
+// Resets manuels d'un compte Claude, à partir des lignes lues sur la page Utilisation
+// (Resources/claude-reset-probe.js). Les crédits Fable forment leur propre liste (fableCredits) et
+// ne comptent pas dans le reset général ; une ligne « · N » vaut N crédits.
+// { status: available|none, scope, count, credits, fableCredits?, observedAt }.
+NSDictionary *TMClaudeResetAvailability(NSArray *rawCredits, NSTimeInterval now);
+// Durée pendant laquelle un état de reset observé reste affichable (même borne côté tableau de bord).
+extern const NSTimeInterval TMManualResetMaxAge;
+// Une lecture ratée (« unknown ») n'efface pas le dernier état observé tant qu'il est assez récent :
+// les resets ne disparaissent pas de l'affichage entre deux lectures réussies.
+NSDictionary *TMStickyManualReset(NSDictionary *fresh, NSDictionary *previous, NSTimeInterval now);
 // Prochaine facturation de l'abonnement : { status:"known", nextAt, estimated, plan? } ou
 // { status:"unknown" }. Une échéance passée est reportée de mois en mois (estimated:YES) plutôt
 // que d'afficher une date révolue : le jeton local n'est rafraîchi qu'épisodiquement.

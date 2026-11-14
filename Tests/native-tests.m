@@ -338,6 +338,41 @@ static void TestResetCredits(void) {
     Check(c[2][@"expiresAt"] == nil, @"sans expiration : en dernier, jamais une fausse date");
 }
 
+static void TestClaudeResetAvailability(void) {
+    Section(@"Resets Claude — lignes de la page Utilisation");
+    NSTimeInterval now = 1794660000;
+    NSDictionary *fable = @{@"title":@"Réinitialisation Fable", @"count":@1, @"expiresAt":@1804751940, @"scope":@"fable", @"usable":@NO};
+    NSDictionary *weekly = @{@"title":@"Réinitialisation hebdomadaire", @"count":@1, @"expiresAt":@1796940000, @"scope":@"weekly", @"usable":@YES};
+    NSDictionary *both = TMClaudeResetAvailability(@[fable, weekly], now);
+    CheckEqual(both[@"status"], @"available", @"reset général disponible");
+    CheckEqual(both[@"count"], @1, @"le crédit Fable ne compte pas dans le reset général");
+    CheckEqual(both[@"scope"], @"weekly", @"portée lue sur le crédit général, même placé après le Fable");
+    CheckEqual(both[@"credits"][0][@"title"], @"Réinitialisation hebdomadaire", @"titre du crédit général");
+    Check(both[@"credits"][0][@"usable"] == nil, @"crédit utilisable : pas de marque");
+    CheckEqual(@([both[@"fableCredits"] count]), @1, @"crédit Fable dans sa propre liste");
+    CheckEqual(both[@"fableCredits"][0][@"usable"], @NO, @"crédit Fable désactivé marqué");
+    CheckEqual(both[@"observedAt"], @1794660000, @"observation horodatée");
+    NSDictionary *onlyFable = TMClaudeResetAvailability(@[@{@"title":@"Réinitialisation Fable", @"count":@3, @"scope":@"fable", @"expiryText":@"bientôt"}], now);
+    CheckEqual(onlyFable[@"status"], @"none", @"Fable seul : aucun reset général");
+    CheckEqual(@([onlyFable[@"fableCredits"] count]), @3, @"une ligne « · 3 » vaut trois crédits");
+    CheckEqual(onlyFable[@"fableCredits"][0][@"expiryText"], @"bientôt", @"mention non datée conservée");
+    NSDictionary *none = TMClaudeResetAvailability(@[], now);
+    CheckEqual(none[@"status"], @"none", @"aucune ligne : aucun reset");
+    Check(none[@"fableCredits"] == nil && none[@"credits"] == nil, @"aucune liste vide inventée");
+    CheckEqual(TMClaudeResetAvailability(@[@{@"usable":@NO}], now)[@"scope"], @"unknown", @"ligne illisible : portée inconnue");
+
+    Section(@"Resets manuels — le dernier état survit à une lecture ratée");
+    NSDictionary *unknown = @{@"status":@"unknown", @"reason":@"gauges"};
+    Check(TMStickyManualReset(none, both, now) == none, @"une lecture réussie remplace toujours l'ancienne");
+    Check(TMStickyManualReset(unknown, both, now + 1800) == both, @"lecture ratée : état d'il y a 30 min conservé");
+    Check(TMStickyManualReset(nil, both, now + 7199) == both, @"conservé jusqu'à deux heures");
+    Check(TMStickyManualReset(unknown, both, now + 7200) == unknown, @"au-delà : inconnu, avec sa raison");
+    CheckEqual(TMStickyManualReset(nil, nil, now)[@"status"], @"unknown", @"rien de connu : inconnu");
+    Check(TMStickyManualReset(unknown, unknown, now) == unknown, @"un inconnu ne ressuscite pas un inconnu");
+    Check(TMStickyManualReset(nil, unknown, now) == unknown, @"sans nouvelle lecture, l'inconnu garde sa raison");
+    Check(TMStickyManualReset(unknown, @{@"status":@"available", @"observedAt":@(now + 600)}, now) == unknown, @"observation datée du futur écartée");
+}
+
 static void TestHistoryForDisplay(void) {
     Section(@"TMHistoryForDisplay — historique allégé pour l'interface");
     NSTimeInterval now = 1791100000;
@@ -3401,7 +3436,8 @@ int main(void) {
         TestClaudeWebIdentity();
         TestParseClaudeLine();
         TestParseCodex();
-        TestBilling(); TestResetCredits(); TestHistoryForDisplay(); TestExtraCredits();
+        TestBilling(); TestResetCredits();
+        TestClaudeResetAvailability(); TestHistoryForDisplay(); TestExtraCredits();
         TestHistoryCSV();
         TestStaleAlert();
         TestWatchdog();

@@ -646,10 +646,15 @@ const fmtDual=v=>{const r=appData?.costs?.eurPerUsd; if(v==null)return ''; retur
 // Le coût équivalent API vient des logs locaux de `claude` et `codex`, qui ne portent aucune
 // identité de compte : il est à l'échelle de la machine. L'afficher sur chaque carte le ferait
 // compter plusieurs fois ; il reste donc au niveau du fournisseur, explicitement étiqueté.
+// Un état de reset reste affichable deux heures après son observation (TMManualResetMaxAge côté
+// natif) : la page Utilisation de Claude n'est relue qu'une fois par demi-heure, et une lecture
+// ratée ne doit pas faire disparaître des crédits qui existent toujours.
+const RESET_MAX_AGE=7200;
+const resetFresh=reset=>Number.isFinite(reset.observedAt)&&Date.now()/1000-reset.observedAt<RESET_MAX_AGE&&reset.observedAt<=Date.now()/1000+5;
 function manualResetLine(w,account){
   const primary=account.provider==='openai'?w.primaryLimit!==false&&isWeekly(w):!isScopedWeekly(w)&&(isWeekly(w)||String(w.windowId)==='five_hour');
   if(!primary)return '';
-  const reset=account.manualReset||{},fresh=Number.isFinite(reset.observedAt)&&Date.now()/1000-reset.observedAt<600&&reset.observedAt<=Date.now()/1000+5;
+  const reset=account.manualReset||{},fresh=resetFresh(reset);
   const status=fresh?reset.status:'unknown';
   if(status==='available'){
     if(account.provider==='claude'&&reset.scope==='weekly'&&!isWeekly(w))return '';
@@ -663,9 +668,9 @@ function manualResetLine(w,account){
 // Réinitialisations Fable (Claude) : liste propre, affichée comme les crédits de reset OpenAI.
 function fableResetBlock(account){
   const reset=account.manualReset||{},credits=Array.isArray(reset.fableCredits)?reset.fableCredits:[];
-  const fresh=Number.isFinite(reset.observedAt)&&Date.now()/1000-reset.observedAt<600&&reset.observedAt<=Date.now()/1000+5;
-  if(account.provider!=='claude'||!fresh||!credits.length)return '';
-  return `<div class="manual-reset available">${t('reset.fable')}${t('reset.availableN',{n:credits.length})}${resetExpiries({credits})}</div>`;
+  if(account.provider!=='claude'||!resetFresh(reset)||!credits.length)return '';
+  // Le titre de chaque crédit (« Réinitialisation Fable ») répéterait l'en-tête de la liste.
+  return `<div class="manual-reset available">${t('reset.fable')}${t('reset.availableN',{n:credits.length})}${resetExpiries({credits:credits.map(({title,...c})=>c)})}</div>`;
 }
 // Expiration des resets manuels : date et délai de chaque crédit (OpenAI), ou la mention lue sur
 // la page Usage de Claude. Rien quand la source ne la donne pas — jamais de date supposée.
@@ -676,7 +681,9 @@ function resetExpiries(reset){
   const credits=Array.isArray(reset.credits)?reset.credits:[];
   if(credits.length){
     const fmt=ts=>{const days=calendarDays(ts);
-      return `${I.date(ts*1000,{day:'numeric',month:'short'})} (${days<=0?t('d.today'):days===1?t('d.tomorrow'):t('d.inDays',{n:days})})`;};
+      // L'année n'est écrite que si elle diffère de l'année en cours (« 9 mars 2027 »).
+      const far=new Date(ts*1000).getFullYear()!==new Date().getFullYear();
+      return `${I.date(ts*1000,{day:'numeric',month:'short',...(far?{year:'numeric'}:{})})} (${days<=0?t('d.today'):days===1?t('d.tomorrow'):t('d.inDays',{n:days})})`;};
     // « sans expiration » n'a de sens que pour OpenAI (champ explicite) ; une mention Claude non
     // convertie en date est reprise telle quelle, et une ligne sans information est omise.
     const rows=credits.map(c=>{const title=(c.title?esc(c.title)+' · ':'')+(c.usable===false?'<span class="reset-later">'+t('reset.unusable')+'</span> · ':'');

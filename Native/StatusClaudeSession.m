@@ -31,6 +31,9 @@ static NSError *TMSessionError(NSString *message) {
 // lire la page Utilisation, puis la session y revient (« park »).
 @property BOOL needsFullPage;
 @property double lastProbeAt;
+@property double lastProbeUsed;      // jauge hebdo au moment de la dernière lecture réussie
+@property double lastFailedProbeAt;  // dernière lecture ratée de la page Utilisation
+@property (nullable) NSDictionary *lastFailure;  // son résultat, raison comprise
 @property (nullable) NSDictionary *lastAvailability;
 @end
 
@@ -301,110 +304,107 @@ static NSString *const TMClaudeUsageURL = @"https://claude.ai/settings/usage";
     }];
 }
 
-- (void)checkManualResetAvailabilityForWeeklyUsedPercent:(double)expectedUsed
-                                              completion:(void (^)(NSDictionary *availability))completion {
+// Script de lecture de la page Utilisation (Resources/claude-reset-probe.js), chargé une fois.
+static NSString *TMResetProbeScript(void) {
+    static NSString *script;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSURL *url = [NSBundle.mainBundle URLForResource:@"claude-reset-probe" withExtension:@"js"];
+        script = url ? [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil] : nil;
+    });
+    return script;
+}
+
+// Un même identifiant claude.ai peut appartenir à plusieurs organisations (deux abonnements Max,
+// par exemple) : la page Utilisation affiche celle du cookie lastActiveOrg, pas forcément celle de
+// CE compte. On le cale donc sur l'organisation du compte avant de charger la page. Le magasin de
+// cookies est propre au compte : rien ne change dans le navigateur de l'utilisateur.
+- (void)selectOrganization:(NSString *)orgId completion:(void (^)(void))completion {
+    if (![[NSUUID alloc] initWithUUIDString:orgId ?: @""]) { completion(); return; }
+    WKHTTPCookieStore *store = [self ensureWebView].configuration.websiteDataStore.httpCookieStore;
+    [store getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
+        NSHTTPCookie *current = nil;
+        for (NSHTTPCookie *cookie in cookies)
+            if ([cookie.name isEqual:@"lastActiveOrg"] && [cookie.domain hasSuffix:@"claude.ai"]) { current = cookie; break; }
+        if ([current.value isEqual:orgId]) { completion(); return; }
+        NSMutableDictionary *properties = current ? [current.properties mutableCopy] : [@{
+            NSHTTPCookieName: @"lastActiveOrg", NSHTTPCookieDomain: @".claude.ai", NSHTTPCookiePath: @"/",
+            NSHTTPCookieSecure: @"TRUE", NSHTTPCookieExpires: [NSDate dateWithTimeIntervalSinceNow:365 * 86400] } mutableCopy];
+        properties[NSHTTPCookieValue] = orgId;
+        NSHTTPCookie *selected = [NSHTTPCookie cookieWithProperties:properties];
+        if (!selected) { completion(); return; }
+        [store setCookie:selected completionHandler:completion];
+    }];
+}
+
+- (void)checkManualResetAvailabilityForOrganization:(NSString *)orgId weeklyUsedPercent:(double)expectedUsed
+                                         completion:(void (^)(NSDictionary *availability))completion {
     NSDictionary *unknown = @{@"status": @"unknown"};
     if (!isfinite(expectedUsed) || expectedUsed < 0 || expectedUsed > 100) { [self park]; completion(unknown); return; }
     // Les crédits de reset et leurs expirations bougent rarement : la page Utilisation (l'application
     // complète, lourde) n'est relue qu'une fois par demi-heure ; entre-temps, le dernier état connu.
+    // Exception : une jauge hebdo qui chute signale un reset tout juste consommé, donc une relecture.
     double now = NSDate.date.timeIntervalSince1970;
-    if (self.lastAvailability && now - self.lastProbeAt < 1800 && !self.loginVisible) {
+    BOOL resetConsumed = expectedUsed < self.lastProbeUsed - 10;
+    if (self.lastAvailability && now - self.lastProbeAt < 1800 && !resetConsumed && !self.loginVisible) {
         [self park]; completion(self.lastAvailability); return;
     }
+    // Après une lecture ratée, la page lourde n'est pas rechargée à chaque sondage : nouvel essai
+    // cinq minutes plus tard. L'appelant garde entre-temps le dernier état connu.
+    if (now - self.lastFailedProbeAt < 300 && !self.loginVisible) { [self park]; completion(self.lastFailure ?: unknown); return; }
     // La page est une SPA. Un sondage JSON des quotas ne met pas forcément son DOM à jour ; on
     // recharge la page Usage avant de lire l'offre, sauf si l'utilisateur y navigue lui-même.
     if (!self.loginVisible) { self.loaded = NO; self.needsFullPage = YES; }
+    [self selectOrganization:orgId completion:^{ [self loadAndProbeManualResetForExpectedUsed:expectedUsed completion:completion]; }];
+}
+
+- (void)loadAndProbeManualResetForExpectedUsed:(double)expectedUsed completion:(void (^)(NSDictionary *availability))completion {
     [self ensureLoaded:^(BOOL ok) {
-        if (!ok) { [self park]; completion(unknown); return; }
-        [self probeManualResetForExpectedUsed:expectedUsed attempts:12 completion:^(NSDictionary *availability) {
-            if (![availability[@"status"] isEqual:@"unknown"]) { self.lastAvailability = availability; self.lastProbeAt = NSDate.date.timeIntervalSince1970; }
+        if (!ok) {
+            self.lastFailedProbeAt = NSDate.date.timeIntervalSince1970;
+            self.lastFailure = @{@"status": @"unknown", @"reason": @"load"};
+            [self park]; completion(self.lastFailure); return;
+        }
+        [self probeManualResetForExpectedUsed:expectedUsed attempts:25 emptyReads:0 lastWhy:@"script" completion:^(NSDictionary *availability) {
+            double done = NSDate.date.timeIntervalSince1970;
+            if ([availability[@"status"] isEqual:@"unknown"]) { self.lastFailedProbeAt = done; self.lastFailure = availability; }
+            else { self.lastAvailability = availability; self.lastProbeAt = done; self.lastProbeUsed = expectedUsed; self.lastFailedProbeAt = 0; }
             [self park];
             completion(availability);
         }];
     }];
 }
 
+// La navigation initiale /settings/usage redirige vers /new#settings/usage. Une exécution JS lancée
+// pendant cette redirection est annulée : chaque sonde est donc courte et réessayée, sans jamais
+// interpréter un échec comme « aucun reset ». `emptyReads` compte les lectures stables d'une page
+// prête mais sans section de reset ; `why` garde la raison du dernier échec, pour le diagnostic.
 - (void)probeManualResetForExpectedUsed:(double)expectedUsed attempts:(NSInteger)attempts
-                              completion:(void (^)(NSDictionary *availability))completion {
-    if (attempts <= 0) { completion(@{@"status": @"unknown"}); return; }
-    // La navigation initiale /settings/usage redirige vers /new#settings/usage. Une exécution JS
-    // asynchrone lancée pendant cette redirection est annulée : chaque sonde est donc courte et
-    // réessayée après navigation, sans jamais interpréter un échec comme « aucun reset ».
-    // Lecture de la section « Réinitialisation de la limite » : une ligne par crédit, avec son titre
-    // (« Réinitialisation complète ») et sa mention « Expiration : 22 oct. ». Rien n'est cliqué.
-    NSString *script = @"if(location.origin!=='https://claude.ai' || "
-        "!(location.pathname.startsWith('/settings/usage') || location.hash.startsWith('#settings/usage'))) "
-        "return {ready:false}; "
-        "const body=(document.body?.innerText||''); "
-        "if(!/cette semaine|this week/i.test(body)) return {ready:false}; "
-        // Garde de fraîcheur : si la jauge hebdo est lisible, elle doit refléter le relevé JSON.
-        "const meters=[...document.querySelectorAll('[role=progressbar],[role=meter],progress')]; "
-        "const name=e=>{ const id=e.getAttribute('aria-labelledby'); "
-        "return e.getAttribute('aria-label') || (id&&document.getElementById(id)?.textContent) || e.parentElement?.textContent || ''; }; "
-        "const meter=meters.find(e=>/^(cette semaine|this week|weekly usage)\\b/i.test(name(e).trim())); "
-        "const used=parseFloat(meter?.getAttribute('aria-valuenow') ?? meter?.value ?? meter?.getAttribute('aria-valuetext')); "
-        "if(meter && Number.isFinite(used) && Math.abs(used-expectedUsed)>3) return {ready:false}; "
-        "const match=/reset\\s+for\\s+free|r[ée]initialiser\\s+gratuitement/i; "
-        "const months={janv:0,jan:0,févr:1,fevr:1,feb:1,mars:2,mar:2,avr:3,apr:3,mai:4,may:4,juin:5,jun:5,juil:6,jul:6,août:7,aout:7,aug:7,sept:8,sep:8,oct:9,nov:10,déc:11,dec:11}; "
-        "const parseDay=t=>{ const m=t.match(/(\\d{1,2})\\s+([a-zéû]+)\\.?(?:\\s+(\\d{4}))?|([a-z]+)\\.?\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?/i); if(!m) return null; "
-        "const day=+(m[1]||m[5]), key=(m[2]||m[4]||'').toLowerCase(), month=months[key]??months[key.slice(0,4)]??months[key.slice(0,3)]; "
-        "if(month==null||!(day>=1&&day<=31)) return null; const now=new Date(); let year=+(m[3]||m[6])||now.getFullYear(); "
-        "let d=new Date(year,month,day,23,59,59); if(!(m[3]||m[6]) && d<now-86400000) d=new Date(year+1,month,day,23,59,59); return Math.floor(d/1000); }; "
-        "const credits=[]; "
-        "for(const b of document.querySelectorAll('button,[role=button]')){ "
-        // Un bouton désactivé reste un crédit détenu (claude.ai ne l'active qu'à certains moments) :
-        // il est compté, marqué non utilisable pour l'instant.
-        "if(b.closest('[aria-hidden=true]') || getComputedStyle(b).display==='none') continue; "
-        "if(!match.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||''))) continue; "
-        "let row=b.parentElement; for(let n=0;row&&n<4&&!/expir/i.test(row.innerText||'');n++) row=row.parentElement; "
-        "const text=((row||b.parentElement)?.innerText||'').replace(/\\s+/g,' ').trim(); "
-        "if(text.length>240) { credits.push({usable:!b.disabled}); continue; } "
-        "const exp=text.match(/(?:expiration|expire[sd]?|expires on|expire le)\\s*:?\\s*([^·|]{3,30}?)(?=\\s*(?:réinitialiser|reset for|$))/i); "
-        "const title=text.split(/expiration|expire/i)[0].replace(match,'').replace(/[\\uE000-\\uF8FF]/g,'').trim().slice(0,60); "
-        "const scope=/fable/i.test(text)?'fable':/5\\s*h|five.hour|session/i.test(text)?'session':/complète|full|hebdo|week/i.test(text)?'weekly':'unknown'; "
-        // Une ligne peut porter un effectif (« Réinitialisation Fable · 3 ») : un seul bouton, plusieurs crédits.
-        "const cm=title.match(/\\s*[·•×x]\\s*(\\d{1,2})$/i), count=cm?+cm[1]:1, clean=cm?title.slice(0,cm.index).trim():title; "
-        "credits.push({title:clean, count, expiryText:exp?exp[1].trim():'', expiresAt:exp?parseDay(exp[1]):null, scope, usable:!(b.disabled||b.getAttribute('aria-disabled')==='true')}); } "
-        "const section=/réinitialisation de la limite|limit reset/i.test(body); "
-        "return {ready:true, section, credits};";
+                             emptyReads:(NSInteger)emptyReads lastWhy:(NSString *)why
+                             completion:(void (^)(NSDictionary *availability))completion {
+    NSString *script = TMResetProbeScript();
+    if (attempts <= 0 || !script.length) {
+        completion(@{@"status": @"unknown", @"reason": script.length ? why : @"resource"}); return;
+    }
     [self.webView callAsyncJavaScript:script arguments:@{@"expectedUsed": @(expectedUsed)} inFrame:nil
                        inContentWorld:WKContentWorld.pageWorld completionHandler:^(id result, NSError *error) {
-        if (!error && [result isKindOfClass:NSDictionary.class] && [result[@"ready"] boolValue]) {
-            NSArray *raw = [result[@"credits"] isKindOfClass:NSArray.class] ? result[@"credits"] : @[];
-            NSMutableArray *credits = [NSMutableArray array], *fableCredits = [NSMutableArray array];
-            for (NSDictionary *credit in raw) {
-                if (![credit isKindOfClass:NSDictionary.class]) continue;
-                NSMutableDictionary *row = [NSMutableDictionary dictionary];
-                if ([credit[@"title"] isKindOfClass:NSString.class] && [credit[@"title"] length]) row[@"title"] = credit[@"title"];
-                if ([credit[@"expiresAt"] isKindOfClass:NSNumber.class] && [credit[@"expiresAt"] doubleValue] > 0) row[@"expiresAt"] = @([credit[@"expiresAt"] longLongValue]);
-                else if ([credit[@"expiryText"] isKindOfClass:NSString.class] && [credit[@"expiryText"] length]) row[@"expiryText"] = credit[@"expiryText"];
-                if ([credit[@"usable"] isKindOfClass:NSNumber.class] && ![credit[@"usable"] boolValue]) row[@"usable"] = @NO;
-                // Une ligne « · N » vaut N crédits : on la déplie pour que le décompte soit exact.
-                NSInteger copies = [credit[@"count"] isKindOfClass:NSNumber.class] ? MIN(MAX([credit[@"count"] integerValue], 1), 20) : 1;
-                // Les crédits Fable forment leur propre liste : ils ne comptent pas dans le reset général.
-                for (NSInteger i = 0; i < copies; i++) {
-                    if ([credit[@"scope"] isEqual:@"fable"]) [fableCredits addObject:row]; else [credits addObject:row];
+        NSInteger empty = emptyReads;
+        NSString *reason = @"script";
+        if (!error && [result isKindOfClass:NSDictionary.class]) {
+            reason = [result[@"why"] isKindOfClass:NSString.class] ? result[@"why"] : @"empty";
+            if ([result[@"ready"] boolValue]) {
+                NSArray *raw = [result[@"credits"] isKindOfClass:NSArray.class] ? result[@"credits"] : @[];
+                // Page prête, jauges lues, mais ni section ni bouton : un compte sans crédit n'affiche
+                // pas la section. Affirmé « aucun » seulement après plusieurs lectures concordantes.
+                BOOL sectionSeen = [result[@"section"] boolValue] || raw.count > 0;
+                if (sectionSeen || ++empty >= 5) {
+                    completion(TMClaudeResetAvailability(raw, NSDate.date.timeIntervalSince1970));
+                    return;
                 }
-            }
-            long long observed = (long long)NSDate.date.timeIntervalSince1970;
-            NSMutableDictionary *availability = nil;
-            if (credits.count) {
-                NSArray *general = [raw filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id c, NSDictionary *b) {
-                    return [c isKindOfClass:NSDictionary.class] && ![c[@"scope"] isEqual:@"fable"]; }]];
-                NSString *scope = [general.firstObject isKindOfClass:NSDictionary.class] && [@[@"weekly", @"session"] containsObject:general.firstObject[@"scope"]] ? general.firstObject[@"scope"] : @"unknown";
-                availability = [@{@"status": @"available", @"scope": scope, @"count": @(credits.count), @"credits": credits, @"observedAt": @(observed)} mutableCopy];
-            } else if ([result[@"section"] boolValue] || fableCredits.count) {
-                // Section lue sans bouton général : aucun reset, affirmé seulement quand la section existe.
-                availability = [@{@"status": @"none", @"observedAt": @(observed)} mutableCopy];
-            }
-            if (availability) {
-                if (fableCredits.count) availability[@"fableCredits"] = fableCredits;
-                completion(availability);
-                return;
             }
         }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self probeManualResetForExpectedUsed:expectedUsed attempts:attempts - 1 completion:completion];
+            [self probeManualResetForExpectedUsed:expectedUsed attempts:attempts - 1 emptyReads:empty lastWhy:reason completion:completion];
         });
     }];
 }

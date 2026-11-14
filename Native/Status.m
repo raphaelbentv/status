@@ -3149,6 +3149,9 @@ static NSDictionary *TMAlertDefaults(void) {
                 payload[@"liveSource"] = @YES;
                 self.lastQuotaRefreshAt = now;
             }
+            // Une lecture ratée ne fait pas disparaître les crédits de reset déjà observés.
+            payload[@"manualReset"] = TMStickyManualReset(payload[@"manualReset"], [self knownPayload:accountId][@"manualReset"],
+                                                          NSDate.date.timeIntervalSince1970);
             [self setPayload:payload forAccount:accountId];
             [self pushData];
             [self releaseCodexServer:server forAccount:accountId];
@@ -3347,7 +3350,7 @@ static NSDictionary *TMAlertDefaults(void) {
             @"manualReset":@{@"status":@"unknown"}, @"error":@""} forAccount:accountId];
         [session finishLogin];
         [self recordHistoryAndNotify]; [self pushData];
-        [session checkManualResetAvailabilityForWeeklyUsedPercent:weeklyUsed completion:^(NSDictionary *availability) {
+        [session checkManualResetAvailabilityForOrganization:orgId weeklyUsedPercent:weeklyUsed completion:^(NSDictionary *availability) {
             NSDictionary *latest = TMAccountWithID(self.accountRegistry, accountId);
             if (![latest[@"claudeSource"] isEqual:@"web"] || ![latest[@"orgId"] isEqual:orgId]) return;
             [self mergePayload:@{@"manualReset": availability} forAccount:accountId];
@@ -3464,7 +3467,7 @@ static NSDictionary *TMAlertDefaults(void) {
             @"billing": [self claudeBillingFrom:json live:live account:accountId],
             @"stale": @(!live && capturedAt > 0 && age > 1800), @"liveSource": @(live),
             @"cookieConfigured": @(!web), @"connected": @(live || [[self knownPayload:accountId][@"connected"] boolValue]), @"orgId": orgId,
-            @"manualReset": @{@"status": @"unknown"},
+            @"manualReset": TMStickyManualReset(nil, [self knownPayload:accountId][@"manualReset"], NSDate.date.timeIntervalSince1970),
             @"error": error.localizedDescription ?: @""
         } forAccount:accountId];
         [self pushData];
@@ -3473,11 +3476,14 @@ static NSDictionary *TMAlertDefaults(void) {
         double weeklyUsed = -1;
         if (live) for (NSDictionary *window in windows)
             if (TMWindowIsPrimaryWeekly(window)) weeklyUsed = TMNumber(window[@"usedPercent"]);
-        if (weeklyUsed >= 0) [session checkManualResetAvailabilityForWeeklyUsedPercent:weeklyUsed completion:^(NSDictionary *availability) {
+        if (weeklyUsed >= 0) [session checkManualResetAvailabilityForOrganization:orgId weeklyUsedPercent:weeklyUsed completion:^(NSDictionary *availability) {
             NSDictionary *latest = TMAccountWithID(self.accountRegistry, accountId);
             if (!latest || ![(latest[@"claudeSource"] ?: @"") isEqual:(entry[@"claudeSource"] ?: @"")] ||
                 ![latest[@"orgId"] isEqual:orgId]) return;
-            [self mergePayload:@{@"manualReset": availability} forAccount:accountId];
+            NSDictionary *reset = TMStickyManualReset(availability, [self knownPayload:accountId][@"manualReset"], NSDate.date.timeIntervalSince1970);
+            // Rien de neuf : pas de nouvelle poussée vers les surfaces web (pushData est coûteux).
+            if ([reset isEqual:[self knownPayload:accountId][@"manualReset"]]) return;
+            [self mergePayload:@{@"manualReset": reset} forAccount:accountId];
             [self pushData];
         }];
         else [session park];  // pas de lecture de la page Utilisation : libérer claude.ai tout de suite

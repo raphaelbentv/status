@@ -158,6 +158,46 @@ NSArray *TMResetCreditDetails(id raw) {
     return credits;
 }
 
+NSDictionary *TMClaudeResetAvailability(NSArray *rawCredits, NSTimeInterval now) {
+    NSMutableArray *credits = [NSMutableArray array], *fableCredits = [NSMutableArray array];
+    NSString *scope = nil;
+    for (NSDictionary *credit in [rawCredits isKindOfClass:NSArray.class] ? rawCredits : @[]) {
+        if (![credit isKindOfClass:NSDictionary.class]) continue;
+        NSMutableDictionary *row = [NSMutableDictionary dictionary];
+        if ([credit[@"title"] isKindOfClass:NSString.class] && [credit[@"title"] length]) row[@"title"] = credit[@"title"];
+        if ([credit[@"expiresAt"] isKindOfClass:NSNumber.class] && [credit[@"expiresAt"] doubleValue] > 0) row[@"expiresAt"] = @([credit[@"expiresAt"] longLongValue]);
+        else if ([credit[@"expiryText"] isKindOfClass:NSString.class] && [credit[@"expiryText"] length]) row[@"expiryText"] = credit[@"expiryText"];
+        if ([credit[@"usable"] isKindOfClass:NSNumber.class] && ![credit[@"usable"] boolValue]) row[@"usable"] = @NO;
+        BOOL fable = [credit[@"scope"] isEqual:@"fable"];
+        // La portée du reset général est celle de son premier crédit, jamais celle d'un crédit Fable.
+        if (!fable && !scope) scope = [@[@"weekly", @"session"] containsObject:credit[@"scope"]] ? credit[@"scope"] : @"unknown";
+        NSInteger copies = [credit[@"count"] isKindOfClass:NSNumber.class] ? MIN(MAX([credit[@"count"] integerValue], 1), 20) : 1;
+        for (NSInteger i = 0; i < copies; i++) [fable ? fableCredits : credits addObject:row];
+    }
+    NSMutableDictionary *availability = credits.count
+        ? [@{@"status": @"available", @"scope": scope ?: @"unknown", @"count": @(credits.count), @"credits": credits} mutableCopy]
+        : [@{@"status": @"none"} mutableCopy];
+    availability[@"observedAt"] = @((long long)now);
+    if (fableCredits.count) availability[@"fableCredits"] = fableCredits;
+    return availability;
+}
+
+const NSTimeInterval TMManualResetMaxAge = 7200;
+
+NSDictionary *TMStickyManualReset(NSDictionary *fresh, NSDictionary *previous, NSTimeInterval now) {
+    BOOL known = [fresh isKindOfClass:NSDictionary.class] && [fresh[@"status"] isKindOfClass:NSString.class]
+        && ![fresh[@"status"] isEqual:@"unknown"];
+    if (known) return fresh;
+    if ([previous isKindOfClass:NSDictionary.class] && [previous[@"status"] isKindOfClass:NSString.class]
+        && ![previous[@"status"] isEqual:@"unknown"] && [previous[@"observedAt"] isKindOfClass:NSNumber.class]) {
+        double observed = [previous[@"observedAt"] doubleValue];
+        if (observed > 0 && observed <= now + 5 && now - observed < TMManualResetMaxAge) return previous;
+    }
+    // Rien de neuf et rien de récent : l'inconnu précédent est gardé tel quel, avec sa raison.
+    if ([fresh isKindOfClass:NSDictionary.class]) return fresh;
+    return [previous isKindOfClass:NSDictionary.class] && [previous[@"status"] isEqual:@"unknown"] ? previous : @{@"status": @"unknown"};
+}
+
 NSDictionary *TMClaudeExtraCredits(NSDictionary *usage, NSDictionary *spend, NSDictionary *grant) {
     NSDictionary *extra = [usage[@"extra_usage"] isKindOfClass:NSDictionary.class] ? usage[@"extra_usage"] : @{};
     NSDictionary *source = [spend isKindOfClass:NSDictionary.class] && spend.count ? spend : extra;

@@ -932,8 +932,41 @@ section('reset manuel — chaque jauge principale et état vérifié');
   check(dashboard('manualResetLine')(weekly,{...claude,manualReset:{status:'available',scope:'weekly',count:1,observedAt:now,credits:[{expiryText:'bientôt'}]}}).includes('expiration : bientôt'),'mention non datée reprise telle quelle');
   checkEqual(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'none',observedAt:now}}),'',
     'aucun reset : pas de ligne inutile');
-  checkEqual(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now-700}}),'',
-    'ancien relevé positif jamais présenté comme actuel');
+  check(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now-1500}}).includes('2 disponibles'),
+    'relevé de 25 min toujours affiché : la page Claude n’est relue qu’une fois par demi-heure');
+  checkEqual(dashboard('manualResetLine')(primary,{...openai,manualReset:{status:'available',count:2,observedAt:now-7300}}),'',
+    'relevé de plus de deux heures jamais présenté comme actuel');
+  const far=new Date(new Date().getFullYear()+1,2,9,8,59).getTime()/1000;
+  const fable=dashboard('fableResetBlock')({...claude,manualReset:{status:'none',observedAt:now-1500,fableCredits:[{title:'Réinitialisation Fable',expiresAt:far,usable:false}]}});
+  check(fable.includes('Réinitialisations Fable')&&fable.includes('1 disponible'),'reset Fable listé même sans reset général');
+  check(fable.includes(String(new Date().getFullYear()+1)),'expiration d’une autre année : année écrite');
+  check(!fable.includes('Réinitialisation Fable ·'),'titre du crédit Fable non répété sous l’en-tête');
+  check(fable.includes('pas utilisable pour l’instant'),'crédit Fable désactivé signalé');
+  checkEqual(dashboard('fableResetBlock')({...claude,manualReset:{status:'none',observedAt:now-7300,fableCredits:[{expiresAt:far}]}}),'','reset Fable trop ancien masqué');
+}
+
+section('lecture de la page Utilisation de Claude — lignes de reset');
+{
+  const AsyncFunction=(async()=>{}).constructor;
+  const probe=await new AsyncFunction('__resetProbeTest',readFileSync(join(root,'Resources','claude-reset-probe.js'),'utf8'))(true);
+  const now=Date.UTC(2026,10,14,12,0,0);
+  // Lignes réelles de claude.ai (novembre 2026).
+  const fable=probe.parseCredit(['Réinitialisation Fable','Expiration : 9 mars 2027, 08:59 UTC+1',
+    'Recharge votre quota Fable et vous rend l’utilisation de Fable décomptée de votre limite hebdomadaire.',
+    'Il n’y a pour le moment aucune utilisation de Fable à réinitialiser.'],'',true,now);
+  checkEqual([fable.title,fable.scope,fable.count,fable.usable],['Réinitialisation Fable','fable',1,false],'ligne Fable : titre, portée, bouton désactivé');
+  checkEqual(fable.expiresAt,Date.UTC(2027,2,9,7,59)/1000,'expiration Fable : instant exact (08:59 UTC+1)');
+  const weekly=probe.parseCredit(['Réinitialisation hebdomadaire','Expiration : 10 déc., 23:00 UTC+1'],'',false,now);
+  checkEqual([weekly.title,weekly.scope,weekly.usable],['Réinitialisation hebdomadaire','weekly',true],'ligne hebdomadaire');
+  checkEqual(weekly.expiresAt,Date.UTC(2026,11,10,22,0)/1000,'expiration sans année : prochaine occurrence, heure exacte');
+  checkEqual(probe.parseExpiry('3 janv., 09:00 UTC+1',now),Date.UTC(2027,0,3,8,0)/1000,'date déjà passée cette année : année suivante');
+  checkEqual(probe.parseExpiry('Dec 10, 11:00 PM GMT+1',now),Date.UTC(2026,11,10,22,0)/1000,'format anglais 12 h');
+  checkEqual(probe.parseExpiry('Mar 9, 2027, 8:59 AM UTC-5:30',now),Date.UTC(2027,2,9,14,29)/1000,'décalage négatif avec minutes');
+  checkEqual(probe.parseExpiry('22 oct. 2027',now),Math.floor(new Date(2027,9,22,23,59,59).getTime()/1000),'sans heure : fin de la journée locale');
+  checkEqual(probe.parseExpiry('bientôt',now),null,'mention non datée : aucune date inventée');
+  checkEqual(probe.parseCredit(['Réinitialisation Fable · 3','Expiration : 9 mars 2027'],'',false,now).count,3,'effectif « · 3 » lu');
+  const flat=probe.parseCredit([],'Réinitialisation complète Expiration : 22 oct. Réinitialiser gratuitement',false,now);
+  checkEqual([flat.title,flat.scope,flat.expiryText],['Réinitialisation complète','weekly','22 oct.'],'repli sur le texte à plat');
 }
 
 // Les sous-quotas « scoped » (7 j · Fable) ne pilotent aucun chiffre agrégé : ni le héros du

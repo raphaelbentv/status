@@ -50,10 +50,12 @@ NS_ASSUME_NONNULL_BEGIN
 // GET /api/organizations/{orgId}/usage — les fenêtres de quota du compte.
 - (void)fetchUsage:(NSString *)orgId completion:(void (^)(NSDictionary * _Nullable json, NSError * _Nullable error))completion;
 
-// Observe seulement le bouton « Reset for free » de la page Usage de CE compte. Ne déclenche
-// jamais la réinitialisation. Une page illisible ou un bouton absent reste « unknown ».
-- (void)checkManualResetAvailabilityForWeeklyUsedPercent:(double)expectedUsed
-                                              completion:(void (^)(NSDictionary *availability))completion;
+// Lit la section « Réinitialisation de la limite » de la page Utilisation de CE compte, sans jamais
+// déclencher de réinitialisation. La page n'est relue qu'une fois par demi-heure (ou dès que la
+// jauge hebdo chute) ; une page illisible donne « unknown », avec la raison de l'échec.
+// `orgId` : l'organisation du compte, que la page doit afficher (un identifiant peut en avoir plusieurs).
+- (void)checkManualResetAvailabilityForOrganization:(NSString *)orgId weeklyUsedPercent:(double)expectedUsed
+                                         completion:(void (^)(NSDictionary *availability))completion;
 
 // Ramène la session sur le document léger (robots.txt) pour libérer l'application claude.ai.
 // À appeler après un relevé qui ne sera pas suivi d'une lecture de la page Utilisation.
