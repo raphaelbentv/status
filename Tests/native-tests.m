@@ -2485,6 +2485,91 @@ static void TestPriceTable(void) {
     Check(!TMPricesForModel(@"gpt-5.4", &p), @"modèle sans tarif : refusé, pas de prix inventé");
     Check(!TMPricesForModel(@"", &p), @"chaîne vide refusée");
     Check(!TMPricesForModel(nil, &p), @"nil refusé");
+
+    Section(@"TMPricesForModel — tarifs de novembre 2026, une ligne par version");
+    Check(TMPricesForModel(@"claude-opus-5-5", &p) && p.input == 4 && p.output == 20 && p.cacheRead == 0.20 && p.cacheWrite == 5 && p.cacheWrite1h == 8,
+          @"opus 5.5 : 4 / 20, lecture 0,20, écritures 5 et 8");
+    Check(TMPricesForModel(@"claude-fable-5-2", &p) && p.input == 8 && p.output == 40 && p.cacheRead == 0.20 && p.cacheWrite1h == 16,
+          @"fable 5.2 : 8 / 40, lecture de cache 0,20 (pas le 1 $ de fable 5)");
+    Check(TMPricesForModel(@"claude-fable-5-1", &p) && p.input == 10 && p.cacheRead == 0.25, @"fable 5.1 : lecture de cache 0,25");
+    Check(TMPricesForModel(@"claude-sonnet-5-5", &p) && p.input == 2 && p.cacheRead == 0.10, @"sonnet 5.5 : lecture de cache 0,10 (pas le 0,20 de sonnet 5)");
+    Check(TMPricesForModel(@"claude-sonnet-5", &p) && p.cacheRead == 0.2, @"sonnet 5 inchangé");
+    Check(TMPricesForModel(@"claude-haiku-5-5", &p) && p.input == 0.10 && p.output == 0.50 && p.cacheRead == 0.01, @"haiku 5.5 : 0,10 / 0,50");
+    Check(TMPricesForModel(@"gpt-6.1-sol", &p) && p.input == 2 && p.output == 10 && p.cacheRead == 0.10, @"gpt-6.1-sol : 2 / 10, cache 0,10");
+    Check(TMPricesForModel(@"gpt-6.1-terra", &p) && p.input == 1 && p.output == 5 && p.cacheRead == 0.05, @"gpt-6.1-terra : 1 / 5, cache 0,05");
+    Check(TMPricesForModel(@"claude-haiku-4-5-20251001", &p) && p.output == 5, @"suffixe de date toléré");
+    Check(TMPricesForModel(@"gpt-6.1-sol-2026-10-01", &p) && p.output == 10, @"date à tirets tolérée");
+    Check(!TMPricesForModel(@"claude-opus-5-6", &p), @"version inconnue : n'hérite pas du tarif d'opus 5");
+    Check(!TMPricesForModel(@"claude-fable-5-3", &p), @"version inconnue : n'hérite pas du tarif de fable 5");
+    Check(!TMPricesForModel(@"gpt-6.1-sol-mini", &p), @"variante inconnue refusée");
+
+    Section(@"TMPricesForRequest — paliers par requête et mode rapide");
+    TMTokens small = { .input = 1000, .cacheRead = 90000, .output = 500 }, large = { .input = 1000, .cacheRead = 99500, .output = 500 };
+    Check(TMPricesForRequest(@"claude-haiku-5-5", TMCostProviderClaude, small, NO, &p) && p.input == 0.10 && p.cacheRead == 0.01, @"haiku 5.5, prompt de 91 000 tokens : tarif de base");
+    Check(TMPricesForRequest(@"claude-haiku-5-5", TMCostProviderClaude, large, NO, &p) && fabs(p.input - 0.50) < 1e-12 && fabs(p.output - 2.50) < 1e-12 && fabs(p.cacheRead - 0.05) < 1e-12 && fabs(p.cacheWrite1h - 1.0) < 1e-12,
+          @"haiku 5.5, prompt de 100 500 tokens (cache compris) : 0,50 / 2,50 / 0,05");
+    Check(TMPricesForRequest(@"claude-opus-5-5", TMCostProviderClaude, large, NO, &p) && p.input == 4, @"pas de palier de taille sur opus");
+    Check(TMPricesForRequest(@"claude-opus-5-5", TMCostProviderClaude, small, YES, &p) && p.input == 8 && p.output == 40 && p.cacheRead == 0.40, @"opus 5.5 rapide : 8 / 40, cache compris");
+    TMTokens shortCtx = { .input = 272000, .cacheRead = 200000, .output = 1000 }, longCtx = { .input = 272001, .cacheRead = 200000, .output = 1000 };
+    Check(TMPricesForRequest(@"gpt-6.1-sol", TMCostProviderOpenAI, shortCtx, NO, &p) && p.input == 2 && p.output == 10, @"gpt-6.1-sol à 272 000 tokens d'entrée : contexte court");
+    Check(TMPricesForRequest(@"gpt-6.1-sol", TMCostProviderOpenAI, longCtx, NO, &p) && p.input == 4 && p.output == 15 && p.cacheRead == 0.20, @"au-delà : 4 / 15, cache 0,20");
+    Check(TMPricesForRequest(@"gpt-6.1-sol", TMCostProviderOpenAI, shortCtx, YES, &p) && p.input == 4 && p.output == 20 && p.cacheRead == 0.20, @"gpt-6.1-sol Fast : 4 / 20, cache 0,20");
+    Check(TMPricesForRequest(@"gpt-5.5", TMCostProviderOpenAI, shortCtx, YES, &p) && p.input == 12.5 && p.output == 75, @"gpt-5.5 Fast : 12,50 / 75");
+    Check(!TMPricesForRequest(@"gpt-9", TMCostProviderOpenAI, shortCtx, NO, &p), @"modèle inconnu : toujours refusé");
+
+    Section(@"Journaux — une réponse Claude comptée une fois, Codex requête par requête");
+    NSString *dir = NSTemporaryDirectory();
+    NSString * (^writeLog)(NSString *, NSArray *) = ^NSString *(NSString *name, NSArray *lines) {
+        NSMutableString *text = [NSMutableString string];
+        for (id line in lines) [text appendFormat:@"%@\n", [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:line options:0 error:nil] encoding:NSUTF8StringEncoding]];
+        NSString *path = [dir stringByAppendingPathComponent:name];
+        [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return path;
+    };
+    NSDictionary * (^claudeLine)(NSString *, NSString *, double, NSString *) = ^NSDictionary *(NSString *mid, NSString *rid, double output, NSString *ts) {
+        return @{ @"type": @"assistant", @"timestamp": ts, @"requestId": rid,
+                  @"message": @{ @"id": mid, @"model": @"claude-opus-5-5",
+                                 @"usage": @{ @"input_tokens": @10, @"output_tokens": @(output), @"cache_read_input_tokens": @1000000,
+                                              @"cache_creation": @{ @"ephemeral_5m_input_tokens": @0, @"ephemeral_1h_input_tokens": @0 }, @"speed": @"standard" } } };
+    };
+    NSString *claudeLog = writeLog(@"status-cost-claude.jsonl", @[
+        claudeLine(@"msg_1", @"req_1", 100, @"2026-11-14T10:00:01.000Z"),   // bloc de réflexion
+        claudeLine(@"msg_1", @"req_1", 1000, @"2026-11-14T10:00:05.000Z"),  // même réponse, relevé final
+        claudeLine(@"msg_1", @"req_1", 1000, @"2026-11-14T10:00:05.500Z"),  // même réponse, troisième bloc
+        claudeLine(@"msg_2", @"req_2", 2000, @"2026-11-14T11:30:00.000Z")]);
+    NSDictionary *cb = TMScanClaudeLogFile(claudeLog)[@"buckets"];
+    double claudeTokens = 0;
+    for (NSString *hour in cb) claudeTokens += [cb[hour][@"claude-opus-5-5"][@"tokens"] doubleValue];
+    CheckEqual(@(claudeTokens), @(2 * 1000010 + 3000), @"deux réponses, pas quatre lignes : tokens comptés une fois");
+    CheckEqual(@(cb.count), @2, @"chaque réponse dans la tranche de son heure");
+    Check(fabs(TMCostSince(cb, 0) - (2 * (10 * 4 + 1000000 * 0.20) + 3000 * 20) / 1e6) < 1e-9, @"coût : relevé final de chaque réponse, au tarif opus 5.5");
+
+    NSDictionary * (^codexCount)(NSString *, NSArray *, NSArray *) = ^NSDictionary *(NSString *ts, NSArray *total, NSArray *last) {
+        NSDictionary * (^usage)(NSArray *) = ^NSDictionary *(NSArray *u) {
+            return @{ @"input_tokens": u[0], @"cached_input_tokens": u[1], @"output_tokens": u[2], @"total_tokens": @([u[0] doubleValue] + [u[2] doubleValue]) }; };
+        return @{ @"timestamp": ts, @"type": @"event_msg", @"payload": @{ @"type": @"token_count",
+                  @"info": @{ @"total_token_usage": usage(total), @"last_token_usage": usage(last) } } };
+    };
+    NSDictionary * (^codexSettings)(NSString *, NSString *) = ^NSDictionary *(NSString *model, NSString *tier) {
+        return @{ @"timestamp": @"2026-11-14T10:00:00.000Z", @"type": @"event_msg",
+                  @"payload": @{ @"type": @"thread_settings_applied", @"thread_settings": @{ @"model": model, @"service_tier": tier } } };
+    };
+    NSString *codexLog = writeLog(@"status-cost-codex.jsonl", @[
+        codexSettings(@"gpt-6.1-sol", @"default"),
+        codexCount(@"2026-11-14T10:05:00.000Z", @[@100000, @0, @1000], @[@100000, @0, @1000]),
+        codexCount(@"2026-11-14T10:05:01.000Z", @[@100000, @0, @1000], @[@100000, @0, @1000]),          // événement répété
+        codexCount(@"2026-11-14T10:06:00.000Z", @[@400000, @200000, @2000], @[@300000, @200000, @1000]),  // contexte long
+        codexSettings(@"gpt-6.1-terra", @"priority"),
+        codexCount(@"2026-11-14T12:00:00.000Z", @[@500000, @200000, @3000], @[@100000, @0, @1000])]);
+    NSDictionary *xb = TMScanCodexLogFile(codexLog)[@"buckets"];
+    NSDictionary *h10 = xb[@"1794650400"], *h12 = xb[@"1794657600"];
+    CheckEqual(h10[@"gpt-6.1-sol"][@"tokens"], @(101000 + 301000), @"Sol : deux requêtes, l'événement répété n'est pas recompté");
+    double solCost = (100000 * 2.0 + 1000 * 10.0) / 1e6 + (100000 * 4.0 + 200000 * 0.20 + 1000 * 15.0) / 1e6;
+    Check(fabs([h10[@"gpt-6.1-sol"][@"cost"] doubleValue] - solCost) < 1e-9, @"Sol : contexte court puis long, cache en sous-ensemble");
+    CheckEqual(h12[@"gpt-6.1-terra"][@"tokens"], @101000, @"Terra : sa requête à son heure, sous son propre nom");
+    Check(fabs([h12[@"gpt-6.1-terra"][@"cost"] doubleValue] - (100000 * 2.0 + 1000 * 10.0) / 1e6) < 1e-9, @"Terra en palier Fast : 2 / 10");
+    [NSFileManager.defaultManager removeItemAtPath:claudeLog error:nil];
+    [NSFileManager.defaultManager removeItemAtPath:codexLog error:nil];
 }
 
 static void TestParseClaudeLine(void) {

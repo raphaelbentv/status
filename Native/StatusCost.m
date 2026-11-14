@@ -1,7 +1,7 @@
 #import "StatusCost.h"
 #import "StatusQuota.h"  // TMNumber
 
-NSString *const TMPricesAsOfDate = @"19 juillet 2026 · Astra : 9 septembre 2026";
+NSString *const TMPricesAsOfDate = @"14 novembre 2026";
 const double TMEurPerUsd = 0.92;            // 1 $ ≈ 0,92 € — taux indicatif du 19 juillet 2026
 NSString *const TMFxAsOfDate = @"19 juillet 2026";
 
@@ -46,60 +46,103 @@ BOOL TMParseClaudeUsageLine(NSDictionary *line, TMTokens *outTokens, NSString **
     return YES;
 }
 
+static TMTokens TMCodexTokens(NSDictionary *usage);
+
 BOOL TMParseCodexTokenCount(NSDictionary *info, TMTokens *outTokens, NSString **outModel) {
     if (![info isKindOfClass:NSDictionary.class]) return NO;
     NSDictionary *total = [info[@"total_token_usage"] isKindOfClass:NSDictionary.class] ? info[@"total_token_usage"] : nil;
     if (!total) return NO;
-    if (outTokens) *outTokens = (TMTokens){
-        .input = TMNumber(total[@"input_tokens"]),                                  // total, cache inclus
-        // output_tokens INCLUT déjà reasoning_output_tokens (vérifié : input+output == total_tokens).
-        // Le réadditionner double-compterait le raisonnement (sur-facturation).
-        .output = TMNumber(total[@"output_tokens"]),
-        .cacheRead = TMNumber(total[@"cached_input_tokens"]),                        // sous-ensemble
-        .cacheWrite = 0,
-        .cacheWrite1h = 0,
-    };
+    if (outTokens) *outTokens = TMCodexTokens(total);
     if (outModel) *outModel = [info[@"model"] isKindOfClass:NSString.class] ? info[@"model"] : nil;
     return YES;
 }
 
+// Un identifiant porte parfois une date en suffixe (claude-haiku-4-5-20251001, gpt-…-2026-10-01).
+static BOOL TMIsDateSuffix(NSString *suffix) {
+    static NSRegularExpression *re; static dispatch_once_t once;
+    dispatch_once(&once, ^{ re = [NSRegularExpression regularExpressionWithPattern:@"^-(\\d{8}|\\d{4}-\\d{2}-\\d{2})$" options:0 error:nil]; });
+    return [re numberOfMatchesInString:suffix options:0 range:NSMakeRange(0, suffix.length)] == 1;
+}
+
 BOOL TMPricesForModel(NSString *model, TMPrices *outPrices) {
     if (![model isKindOfClass:NSString.class] || !model.length) return NO;
-    // Tarifs par 1M de tokens, relevés le 19 juillet 2026 (voir la spec pour les sources).
+    // Tarifs standard par 1M de tokens, relevés le 14 novembre 2026 sur les pages officielles :
+    //   https://platform.claude.com/docs/en/about-claude/pricing
+    //   https://developers.openai.com/api/docs/pricing
     // Modèle inconnu → NO, jamais un prix fabriqué : ses tokens seront comptés à part.
     static NSDictionary<NSString *, NSArray<NSNumber *> *> *table;  // [input, output, cacheRead, write5m, write1h]
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        // Tarifs vérifiés sur les pages officielles Anthropic et OpenAI (juillet 2026). L'écriture
-        // de cache 1 h vaut 2× l'input ; la 5 min 1,25×. Côté OpenAI, write1h est inutilisé.
+        // Claude : écriture de cache 5 min à 1,25× l'input, 1 h à 2×. La lecture de cache n'est plus
+        // un multiple fixe : 0,1× en général, 0,05× sur Opus 5.5 et Sonnet 5.5, 0,025× sur Fable
+        // 5.1 et 5.2 — d'où une ligne par version, jamais un tarif hérité de la version précédente.
+        // OpenAI : pas d'écriture de cache facturée (colonnes inutilisées, laissées à 0).
         table = @{
+            @"claude-fable-5-2":  @[@8.0,  @40.0, @0.20,  @10.0,   @16.0],
+            @"claude-fable-5-1":  @[@10.0, @50.0, @0.25,  @12.50,  @20.0],
+            @"claude-fable-5":    @[@10.0, @50.0, @1.0,   @12.50,  @20.0],
+            @"claude-opus-5-5":   @[@4.0,  @20.0, @0.20,  @5.0,    @8.0],
+            @"claude-opus-5":     @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
             @"claude-opus-4-8":   @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
             @"claude-opus-4-7":   @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
-            @"claude-sonnet-5":   @[@2.0,  @10.0, @0.2,   @2.50,   @4.0],    // tarif d'intro jusqu'au 31/08/2026
+            @"claude-opus-4-6":   @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
+            @"claude-opus-4-5":   @[@5.0,  @25.0, @0.5,   @6.25,   @10.0],
+            @"claude-sonnet-5-5": @[@2.0,  @10.0, @0.10,  @2.50,   @4.0],
+            @"claude-sonnet-5":   @[@2.0,  @10.0, @0.2,   @2.50,   @4.0],    // le tarif d'introduction est devenu le tarif normal
             @"claude-sonnet-4-6": @[@3.0,  @15.0, @0.3,   @3.75,   @6.0],
-            @"claude-fable-5":    @[@10.0, @50.0, @1.0,   @12.50,  @20.0],
+            @"claude-sonnet-4-5": @[@3.0,  @15.0, @0.3,   @3.75,   @6.0],
+            // Haiku 5.5 : tarif des prompts jusqu'à 100 000 tokens ; au-delà, voir TMPricesForRequest.
+            @"claude-haiku-5-5":  @[@0.10, @0.50, @0.01,  @0.125,  @0.20],
             @"claude-haiku-4-5":  @[@1.0,  @5.0,  @0.1,   @1.25,   @2.0],
-            // Standard API, vérifié le 09/09/2026 : https://developers.openai.com/api/docs/models/gpt-6-astra
-            @"gpt-6-astra":       @[@10.0, @50.0, @1.0, @12.5, @20.0],
-            @"gpt-5.6-sol":       @[@5.0,  @30.0, @0.5,   @6.25,   @10.0],
-            @"gpt-5.6-terra":     @[@2.5,  @15.0, @0.25,  @3.125,  @5.0],
-            @"gpt-5.6-luna":      @[@1.0,  @6.0,  @0.1,   @1.25,   @2.0],
-            @"gpt-5.5":           @[@5.0,  @30.0, @0.5,   @6.25,   @10.0],
-            @"gpt-5.3-codex-spark": @[@1.75, @14.0, @0.175, @2.1875, @3.50],
+            // OpenAI, contexte court (≤ 272 000 tokens d'entrée) ; au-delà, voir TMPricesForRequest.
+            @"gpt-6-astra":       @[@10.0, @50.0, @1.0,   @0, @0],
+            @"gpt-6.1-sol":       @[@2.0,  @10.0, @0.10,  @0, @0],
+            @"gpt-6.1-terra":     @[@1.0,  @5.0,  @0.05,  @0, @0],
+            @"gpt-5.6-sol":       @[@4.0,  @20.0, @0.4,   @0, @0],
+            @"gpt-5.6-terra":     @[@2.0,  @12.0, @0.2,   @0, @0],
+            @"gpt-5.6-luna":      @[@0.2,  @1.2,  @0.02,  @0, @0],
+            @"gpt-5.5":           @[@5.0,  @30.0, @0.5,   @0, @0],
+            @"gpt-5.3-codex-spark": @[@1.75, @14.0, @0.175, @0, @0],         // relevé de juillet 2026, absent de la page depuis
         };
     });
-    // Certains modèles Claude portent un suffixe de date (claude-haiku-4-5-20251001) : on tolère
-    // le préfixe pour ne pas rater un tarif à cause d'un horodatage.
+    // Seul un suffixe de date est toléré. Un simple préfixe ferait hériter « claude-opus-5-6 » du
+    // tarif de « claude-opus-5 » : c'est ainsi que Fable 5.2 et Sonnet 5.5 ont été chiffrés au
+    // tarif de leur prédécesseur. Une version inconnue reste « non tarifée », donc visible.
     NSArray<NSNumber *> *prices = table[model];
     if (!prices) {
         for (NSString *known in table) {
-            if ([model hasPrefix:known]) { prices = table[known]; break; }
+            if ([model hasPrefix:known] && TMIsDateSuffix([model substringFromIndex:known.length])) { prices = table[known]; break; }
         }
     }
     if (!prices) return NO;
     if (outPrices) *outPrices = (TMPrices){ prices[0].doubleValue, prices[1].doubleValue,
                                             prices[2].doubleValue, prices[3].doubleValue,
                                             prices[4].doubleValue };
+    return YES;
+}
+
+static TMPrices TMScalePrices(TMPrices p, double input, double output) {
+    return (TMPrices){ p.input * input, p.output * output, p.cacheRead * input, p.cacheWrite * input, p.cacheWrite1h * input };
+}
+
+BOOL TMPricesForRequest(NSString *model, TMCostProvider provider, TMTokens t, BOOL fast, TMPrices *outPrices) {
+    TMPrices p;
+    if (!TMPricesForModel(model, &p)) return NO;
+    if (provider == TMCostProviderClaude) {
+        // Haiku 5.5 : une requête dont le prompt (entrée + lectures + écritures de cache) dépasse
+        // 100 000 tokens paie cinq fois le tarif, sur tous les compartiments.
+        if ([model hasPrefix:@"claude-haiku-5-5"] && t.input + t.cacheRead + t.cacheWrite + t.cacheWrite1h > 100000)
+            p = TMScalePrices(p, 5, 5);
+        // Mode rapide (usage.speed = "fast") : 2× le tarif standard, cache compris.
+        if (fast) p = TMScalePrices(p, 2, 2);
+    } else {
+        // Contexte long : plus de 272 000 tokens d'entrée → entrée et cache à 2×, sortie à 1,5×.
+        if (t.input > 272000) p = TMScalePrices(p, 2, 1.5);
+        // Palier « Fast » (service_tier priority) : 2× le standard, 2,5× sur gpt-5.5. La page ne
+        // donne pas de tarif Fast en contexte long : on cumule les deux majorations.
+        if (fast) { double k = [model hasPrefix:@"gpt-5.5"] ? 2.5 : 2; p = TMScalePrices(p, k, k); }
+    }
+    if (outPrices) *outPrices = p;
     return YES;
 }
 
@@ -192,13 +235,16 @@ static NSString *TMHourKey(NSTimeInterval epoch) {
     return [NSString stringWithFormat:@"%lld", (long long)(epoch - fmod(epoch, 3600))];
 }
 
-// Accumule un lot de tokens dans la tranche heure → modèle → {cost?, tokens}. Un modèle sans tarif
-// connu garde ses tokens et son nom, mais aucune clé `cost` (distingue « pas de prix » de « nul »).
+// Accumule les tokens d'UNE requête dans la tranche heure → modèle → {cost?, tokens}. Le tarif se
+// décide par requête (palier de taille, mode rapide). Un modèle sans tarif connu garde ses tokens
+// et son nom, mais aucune clé `cost` (distingue « pas de prix » de « nul »).
 static void TMAccumulate(NSMutableDictionary *buckets, TMTokens t, NSString *model,
-                         TMCostProvider provider, NSTimeInterval epoch) {
+                         TMCostProvider provider, NSTimeInterval epoch, BOOL fast) {
     NSString *hour = TMHourKey(epoch);
     NSString *modelKey = (model.length ? model : @"(inconnu)");
-    double tokens = t.input + t.output + t.cacheRead + t.cacheWrite + t.cacheWrite1h;
+    // OpenAI : cacheRead est un sous-ensemble d'input, il ne s'ajoute pas au volume.
+    double tokens = provider == TMCostProviderOpenAI ? t.input + t.output
+                                                     : t.input + t.output + t.cacheRead + t.cacheWrite + t.cacheWrite1h;
 
     NSMutableDictionary *models = buckets[hour];
     if (!models) { models = [NSMutableDictionary dictionary]; buckets[hour] = models; }
@@ -207,33 +253,67 @@ static void TMAccumulate(NSMutableDictionary *buckets, TMTokens t, NSString *mod
     entry[@"tokens"] = @([entry[@"tokens"] doubleValue] + tokens);
 
     TMPrices prices;
-    if (model && TMPricesForModel(model, &prices)) {
+    if (model && TMPricesForRequest(model, provider, t, fast, &prices)) {
         double cost = TMCostForTokens(t, prices, provider);
         entry[@"cost"] = @([entry[@"cost"] doubleValue] + cost);  // absent → 0 → présent : devient tarifé
     }
 }
 
-// Un fichier Claude : une ligne = un message additif. Chaque usage est chiffré à son heure.
-static NSDictionary *TMScanClaudeFile(NSString *path) {
+// Un fichier Claude. Claude Code écrit une ligne par bloc de contenu (réflexion, texte, appel
+// d'outil) et répète sur chacune l'usage de la réponse entière : une même réponse (message.id +
+// requestId) apparaît donc deux fois ou plus. Chaque réponse n'est comptée qu'une fois, avec son
+// relevé le plus complet (la sortie grossit pendant le flux).
+NSDictionary *TMScanClaudeLogFile(NSString *path) {
     NSMutableDictionary *buckets = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSArray *> *responses = [NSMutableDictionary dictionary];  // clé → [tokens, modèle, instant, rapide]
     TMEnumerateMatchingLines(path, "\"usage\"", ^(NSDictionary *line) {
         TMTokens t; NSString *model = nil;
         if (!TMParseClaudeUsageLine(line, &t, &model)) return;
         NSString *ts = [line[@"timestamp"] isKindOfClass:NSString.class] ? line[@"timestamp"] : nil;
-        TMAccumulate(buckets, t, model, TMCostProviderClaude, TMParseISO(ts));
+        NSDictionary *message = line[@"message"];
+        BOOL fast = [message[@"usage"][@"speed"] isEqual:@"fast"];
+        NSString *messageId = [message[@"id"] isKindOfClass:NSString.class] ? message[@"id"] : nil;
+        if (!messageId.length) { TMAccumulate(buckets, t, model, TMCostProviderClaude, TMParseISO(ts), fast); return; }
+        NSString *requestId = [line[@"requestId"] isKindOfClass:NSString.class] ? line[@"requestId"] : @"";
+        NSString *key = [NSString stringWithFormat:@"%@|%@", messageId, requestId];
+        NSArray *seen = responses[key];
+        TMTokens previous; [seen[0] getValue:&previous];
+        if (seen && previous.output >= t.output) return;
+        responses[key] = @[[NSValue valueWithBytes:&t objCType:@encode(TMTokens)], model ?: @"",
+                           seen ? seen[2] : @(TMParseISO(ts)), @(fast)];
     });
+    for (NSArray *response in responses.allValues) {
+        TMTokens t; [response[0] getValue:&t];
+        TMAccumulate(buckets, t, [response[1] length] ? response[1] : nil, TMCostProviderClaude,
+                     [response[2] doubleValue], [response[3] boolValue]);
+    }
     return @{ @"buckets": buckets };
 }
 
-// Un fichier Codex : total_token_usage est CUMULÉ par session. On retient le dernier, avec le
-// modèle vu en cours de route (absent du token_count lui-même), à l'heure du dernier événement.
+static TMTokens TMCodexTokens(NSDictionary *usage) {
+    return (TMTokens){
+        .input = TMNumber(usage[@"input_tokens"]),                                  // total, cache inclus
+        // output_tokens INCLUT déjà reasoning_output_tokens (vérifié : input+output == total_tokens).
+        // Le réadditionner double-compterait le raisonnement (sur-facturation).
+        .output = TMNumber(usage[@"output_tokens"]),
+        .cacheRead = TMNumber(usage[@"cached_input_tokens"]),                        // sous-ensemble
+        .cacheWrite = 0,
+        .cacheWrite1h = 0,
+    };
+}
+
+// Un fichier Codex. Chaque événement token_count porte le total CUMULÉ de la session et l'usage de
+// la dernière requête (last_token_usage). Chaque requête est chiffrée à son heure, avec le modèle
+// et le palier de service en vigueur à ce moment-là : une session peut changer de modèle en route,
+// et le tarif dépend de la taille de chaque requête. Vérifié sur les journaux réels : la somme des
+// last_token_usage est égale au dernier total. Un événement répété (même total) n'est pas recompté.
 // Balayage octets à deux marqueurs, pour ne parser que les lignes portant un modèle ou un total.
-static NSDictionary *TMScanCodexFile(NSString *path) {
+NSDictionary *TMScanCodexLogFile(NSString *path) {
     NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
     NSMutableDictionary *buckets = [NSMutableDictionary dictionary];
     if (!data.length) return @{ @"buckets": buckets };
     const char *bytes = data.bytes; NSUInteger len = data.length, start = 0;
-    NSString *model = nil; NSDictionary *lastTotal = nil; NSString *lastTs = nil;
+    NSString *model = nil; NSDictionary *previousTotal = nil; BOOL fast = NO;
     for (NSUInteger i = 0; i <= len; i++) {
         if (i != len && bytes[i] != '\n') continue;
         NSUInteger lineLen = i - start;
@@ -244,20 +324,29 @@ static NSDictionary *TMScanCodexFile(NSString *path) {
             NSDictionary *line = [NSJSONSerialization JSONObjectWithData:lineData options:0 error:nil];
             if ([line isKindOfClass:NSDictionary.class]) {
                 NSDictionary *payload = [line[@"payload"] isKindOfClass:NSDictionary.class] ? line[@"payload"] : nil;
-                NSString *m = [line[@"model"] isKindOfClass:NSString.class] ? line[@"model"] : payload[@"model"];
-                if ([m isKindOfClass:NSString.class]) model = m;
+                // Réglages du fil (thread_settings_applied) : modèle et palier de service.
+                NSDictionary *settings = [payload[@"thread_settings"] isKindOfClass:NSDictionary.class] ? payload[@"thread_settings"] : nil;
+                NSString *m = settings ? settings[@"model"] : [line[@"model"] isKindOfClass:NSString.class] ? line[@"model"] : payload[@"model"];
+                if ([m isKindOfClass:NSString.class] && m.length) model = m;
+                if ([settings[@"service_tier"] isKindOfClass:NSString.class])
+                    fast = [@[@"priority", @"fast"] containsObject:settings[@"service_tier"]];
                 NSDictionary *info = [payload[@"info"] isKindOfClass:NSDictionary.class] ? payload[@"info"] : nil;
-                if (info[@"total_token_usage"]) {
-                    lastTotal = info;
-                    lastTs = [line[@"timestamp"] isKindOfClass:NSString.class] ? line[@"timestamp"] : lastTs;
+                NSDictionary *total = [info[@"total_token_usage"] isKindOfClass:NSDictionary.class] ? info[@"total_token_usage"] : nil;
+                if (total && ![total isEqual:previousTotal]) {
+                    NSDictionary *last = [info[@"last_token_usage"] isKindOfClass:NSDictionary.class] ? info[@"last_token_usage"] : nil;
+                    TMTokens t = TMCodexTokens(last ?: total);
+                    if (!last && previousTotal) {  // anciens journaux sans last_token_usage : écart entre deux totaux
+                        TMTokens before = TMCodexTokens(previousTotal);
+                        t = (TMTokens){ MAX(t.input - before.input, 0), MAX(t.output - before.output, 0), MAX(t.cacheRead - before.cacheRead, 0), 0, 0 };
+                    }
+                    previousTotal = total;
+                    NSString *ts = [line[@"timestamp"] isKindOfClass:NSString.class] ? line[@"timestamp"] : nil;
+                    NSString *tokenModel = [info[@"model"] isKindOfClass:NSString.class] ? info[@"model"] : model;
+                    TMAccumulate(buckets, t, tokenModel, TMCostProviderOpenAI, TMParseISO(ts), fast);
                 }
             }
         }
         start = i + 1;
-    }
-    TMTokens t; NSString *tokenModel = nil;
-    if (lastTotal && TMParseCodexTokenCount(lastTotal, &t, &tokenModel)) {
-        TMAccumulate(buckets, t, tokenModel ?: model, TMCostProviderOpenAI, TMParseISO(lastTs));
     }
     return @{ @"buckets": buckets };
 }
@@ -327,7 +416,8 @@ static void TMMergeBuckets(NSMutableDictionary *dst, NSDictionary *src) {
 // double-comptage du reasoning Codex. Un cache d'une autre version est ignoré (rescan complet),
 // pas migré — les coûts mémorisés d'une version antérieure seraient faux.
 // v4 : rescanner aussi les anciens fichiers pour valoriser les tokens Astra déjà enregistrés.
-static NSInteger const TMCostCacheVersion = 4;
+// v5 : réponses Claude dédoublonnées, Codex chiffré requête par requête, tarifs de novembre 2026.
+static NSInteger const TMCostCacheVersion = 5;
 
 NSDictionary *TMScanTerminalCosts(void) {
     NSDictionary *cache = [NSJSONSerialization JSONObjectWithData:
@@ -348,7 +438,7 @@ NSDictionary *TMScanTerminalCosts(void) {
             NSString *fp = TMFileFingerprint(path);
             NSDictionary *prev = cachedFiles[path];
             if ([prev[@"fp"] isEqualToString:fp]) { files[path] = prev; continue; }  // inchangé : réutilisé
-            NSDictionary *parsed = [provider isEqualToString:@"claude"] ? TMScanClaudeFile(path) : TMScanCodexFile(path);
+            NSDictionary *parsed = [provider isEqualToString:@"claude"] ? TMScanClaudeLogFile(path) : TMScanCodexLogFile(path);
             files[path] = @{ @"fp": fp, @"provider": provider, @"buckets": parsed[@"buckets"] };
         }
     }

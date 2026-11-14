@@ -43,10 +43,22 @@ BOOL TMParseClaudeUsageLine(NSDictionary *line, TMTokens *outTokens, NSString * 
 // Sémantique OpenAI : input total avec cached_input en sous-ensemble, reasoning compté en sortie.
 BOOL TMParseCodexTokenCount(NSDictionary *info, TMTokens *outTokens, NSString * _Nullable * _Nullable outModel);
 
-// Table de prix de référence, datée. nil si le modèle n'a pas de tarif connu — l'appelant compte
+// Table de prix de référence, datée (tarif standard). Seul un suffixe de date est toléré après un
+// identifiant connu : une version inconnue n'hérite jamais du tarif d'une autre. NO si le modèle n'a pas de tarif connu — l'appelant compte
 // alors ses tokens à part sans jamais fabriquer un prix. `outHasPrice` distingue « prix nul »
 // (impossible) de « modèle inconnu ».
 BOOL TMPricesForModel(NSString *model, TMPrices *outPrices);
+
+// Tarif réellement applicable à UNE requête : le tarif de base du modèle, majoré selon la taille
+// de la requête (Haiku 5.5 au-delà de 100 000 tokens de prompt, OpenAI au-delà de 272 000 tokens
+// d'entrée) et selon le mode rapide (`fast` : usage.speed = "fast" côté Claude, service_tier
+// "priority" côté Codex). `tokens` suit la sémantique du fournisseur. NO si le modèle est inconnu.
+BOOL TMPricesForRequest(NSString *model, TMCostProvider provider, TMTokens tokens, BOOL fast, TMPrices *outPrices);
+
+// Tranches horaires d'un journal Claude Code / Codex (I/O). Une réponse Claude répétée sur
+// plusieurs lignes n'est comptée qu'une fois ; Codex est chiffré requête par requête.
+NSDictionary *TMScanClaudeLogFile(NSString *path);
+NSDictionary *TMScanCodexLogFile(NSString *path);
 
 // Somme des coûts des tranches horaires postérieures à `startEpoch`. Pure. Chaque tranche est un
 // nid heure_epoch(chaîne) → modèle → @{ @"cost": prix, @"tokens": total } ; un modèle sans clé

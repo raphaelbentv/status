@@ -2146,7 +2146,7 @@ static CGEventRef TMBrightnessTapCallback(CGEventTapProxy proxy, CGEventType typ
 // avec « calcul en cours ». Les suivants sont incrémentaux (~0,2 s) grâce au cache token-usage.json.
 - (void)refreshCostsInBackground {
     if (self.costScanning || (self.costScanCompletedAt > 0 &&
-        NSDate.date.timeIntervalSince1970 - self.costScanCompletedAt < 300)) return;
+        NSDate.date.timeIntervalSince1970 - self.costScanCompletedAt < 120)) return;
     self.costScanning = YES;
     [self pushData];  // affiche « calcul en cours » au premier passage
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -3654,7 +3654,7 @@ static NSDictionary *TMAlertDefaults(void) {
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
         self.refreshing = NO;
         [self recordHistoryAndNotify];
-        [self refreshCostsInBackground];  // limité à 5 min, indépendamment des quotas
+        [self refreshCostsInBackground];  // limité à 2 min, indépendamment des quotas
         [self pushData];
     });
 }
