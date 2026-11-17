@@ -21,6 +21,24 @@ TMLockState TMLockStateAfterToggle(TMLockState current, BOOL permissionGranted) 
     return permissionGranted ? TMLockStateLocked : TMLockStateBlocked;
 }
 
+NSArray<NSNumber *> *TMStuckModifierKeyCodes(uint64_t sessionFlags, uint64_t hardwareFlags) {
+    // Codes de touche de la moitié gauche : seule la valeur du drapeau compte pour la session.
+    static const struct { uint64_t mask; uint16_t keyCode; } modifiers[] = {
+        { kCGEventFlagMaskCommand, 0x37 },      // kVK_Command
+        { kCGEventFlagMaskShift, 0x38 },        // kVK_Shift
+        { kCGEventFlagMaskAlternate, 0x3A },    // kVK_Option
+        { kCGEventFlagMaskControl, 0x3B },      // kVK_Control
+        { kCGEventFlagMaskSecondaryFn, 0x3F },  // kVK_Function
+    };
+    NSMutableArray<NSNumber *> *stuck = [NSMutableArray array];
+    for (size_t i = 0; i < sizeof modifiers / sizeof modifiers[0]; i++) {
+        BOOL heldForSession = (sessionFlags & modifiers[i].mask) != 0;
+        BOOL heldForReal = (hardwareFlags & modifiers[i].mask) != 0;
+        if (heldForSession && !heldForReal) [stuck addObject:@(modifiers[i].keyCode)];
+    }
+    return stuck;
+}
+
 #pragma mark - Overlay
 
 @class TMKeyboardLock;
@@ -94,6 +112,10 @@ TMLockState TMLockStateAfterToggle(TMLockState current, BOOL permissionGranted) 
 @implementation TMKeyboardLock {
     CFMachPortRef _tap;
     CFRunLoopSourceRef _tapSource;
+    CFRunLoopRef _tapRunLoop;              // boucle du thread dédié au tap
+    dispatch_semaphore_t _tapThreadExited; // signalé quand ce thread a fini son dernier callback
+    NSRunningApplication *_lastOtherApp;   // dernière app active autre que Status
+    NSRunningApplication *_appToRestore;   // à qui rendre le clavier à la sortie
     NSArray<NSWindow *> *_overlays;
     NSTimer *_holdTimer;      // 30 Hz pendant le maintien, anime l'anneau
     NSTimer *_countdownTimer; // 1 Hz, met à jour « levée automatique dans … »
@@ -104,18 +126,36 @@ TMLockState TMLockStateAfterToggle(TMLockState current, BOOL permissionGranted) 
 
 // Le tap avale tout ce qui vient du clavier — touches, modificateurs, touches média. Les deux
 // événements de désactivation doivent traverser : les avaler laisserait le tap mort sans le savoir.
+// S'exécute sur le thread dédié et ne fait rien d'autre que répondre : c'est ce qui l'empêche
+// d'expirer. _tap reste valide tant que ce thread tourne : teardownLock attend la fin du thread
+// avant de le libérer.
 static CGEventRef TMLockTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *context) {
-    TMKeyboardLock *lock = (__bridge TMKeyboardLock *)context;
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
-        // Réarmer : un timeout ponctuel (machine chargée) ne doit pas lever silencieusement le
-        // verrou. Si l'app est réellement figée, ce code ne s'exécute pas — c'est le filet de la spec.
-        [lock reenableTap];
+        // Réarmer : une coupure ponctuelle ne doit pas lever silencieusement le verrou. Si l'app
+        // est réellement figée, ce code ne s'exécute pas — c'est le filet de la spec.
+        TMKeyboardLock *lock = (__bridge TMKeyboardLock *)context;
+        if (lock->_tap) CGEventTapEnable(lock->_tap, true);
         return event;
     }
     return NULL;
 }
 
-- (void)reenableTap { if (_tap) CGEventTapEnable(_tap, true); }
+- (instancetype)init {
+    if (!(self = [super init])) return nil;
+    // Le clic qui ouvre le popover rend Status active : au moment du verrou, l'app frontale est
+    // souvent Status elle-même. On retient donc la dernière autre app active pour lui rendre la main.
+    __weak typeof(self) weakSelf = self;
+    [NSWorkspace.sharedWorkspace.notificationCenter
+        addObserverForName:NSWorkspaceDidActivateApplicationNotification object:nil
+                     queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        NSRunningApplication *app = note.userInfo[NSWorkspaceApplicationKey];
+        if (app && app.processIdentifier != NSProcessInfo.processInfo.processIdentifier)
+            [weakSelf rememberOtherApp:app];
+    }];
+    return self;
+}
+
+- (void)rememberOtherApp:(NSRunningApplication *)app { _lastOtherApp = app; }
 
 - (void)toggle {
     // Le panneau de demande ne s'affiche qu'à la première tentative ; ensuite macOS rend la
@@ -147,7 +187,31 @@ static CGEventRef TMLockTapCallback(CGEventTapProxy proxy, CGEventType type, CGE
                             mask, TMLockTapCallback, (__bridge void *)self);
     if (!_tap) return NO;  // permission listée mais pas effective : arrive après un re-cochage
     _tapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, _tap, 0);
-    CFRunLoopAddSource(CFRunLoopGetMain(), _tapSource, kCFRunLoopCommonModes);
+
+    // Thread dédié, même modèle que le tap des touches luminosité : la boucle principale est
+    // régulièrement occupée, et chaque frappe du système attend la réponse de ce tap.
+    CFRunLoopSourceRef source = _tapSource;
+    dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+    dispatch_semaphore_t exited = dispatch_semaphore_create(0);
+    __block CFRunLoopRef runLoop = NULL;
+    NSThread *thread = [[NSThread alloc] initWithBlock:^{
+        runLoop = CFRunLoopGetCurrent();
+        CFRunLoopAddSource(runLoop, source, kCFRunLoopCommonModes);
+        dispatch_semaphore_signal(ready);
+        CFRunLoopRun();  // rend la main quand teardownLock arrête la boucle
+        dispatch_semaphore_signal(exited);
+    }];
+    thread.name = @"com.raphael.status.keyboard-lock";
+    thread.qualityOfService = NSQualityOfServiceUserInteractive;
+    [thread start];
+    dispatch_semaphore_wait(ready, DISPATCH_TIME_FOREVER);
+    _tapRunLoop = (CFRunLoopRef)CFRetain(runLoop);
+    _tapThreadExited = exited;
+    CGEventTapEnable(_tap, true);
+
+    NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
+    _appToRestore = (front && front.processIdentifier != NSProcessInfo.processInfo.processIdentifier)
+                  ? front : _lastOtherApp;
 
     _lockedAt = [NSDate date];
     NSMutableArray *overlays = [NSMutableArray array];
@@ -186,8 +250,54 @@ static CGEventRef TMLockTapCallback(CGEventTapProxy proxy, CGEventType type, CGE
     [_backstopTimer invalidate]; _backstopTimer = nil;
     for (NSWindow *window in _overlays) [window orderOut:nil];
     _overlays = nil;
-    if (_tapSource) { CFRunLoopRemoveSource(CFRunLoopGetMain(), _tapSource, kCFRunLoopCommonModes); CFRelease(_tapSource); _tapSource = NULL; }
-    if (_tap) { CGEventTapEnable(_tap, false); CFRelease(_tap); _tap = NULL; }
+
+    // Ordre imposé : désactiver d'abord (macOS cesse d'envoyer des frappes au tap), laisser le
+    // thread finir son callback en cours, puis invalider le port. L'ancien ordre retirait la source
+    // avant de désactiver et n'invalidait jamais : une frappe déjà envoyée restait sans réponse et
+    // tout le clavier attendait l'expiration du tap.
+    if (_tap) CGEventTapEnable(_tap, false);
+    if (_tapRunLoop) {
+        CFRunLoopStop(_tapRunLoop);
+        // Borné : un thread qui ne rend pas la main ne doit pas figer l'app ; le port invalidé
+        // ensuite suffit à couper le tap.
+        dispatch_semaphore_wait(_tapThreadExited, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC / 2)));
+        CFRelease(_tapRunLoop); _tapRunLoop = NULL;
+        _tapThreadExited = nil;
+    }
+    if (_tap) { CFMachPortInvalidate(_tap); }
+    if (_tapSource) { CFRunLoopSourceInvalidate(_tapSource); CFRelease(_tapSource); _tapSource = NULL; }
+    if (_tap) { CFRelease(_tap); _tap = NULL; }
+
+    [self resyncModifiers];
+    [self restoreFocus];
+}
+
+// Un relâchement de modificateur avalé pendant le verrou laisse la session croire la touche
+// tenue. On compare à l'état matériel réel et on relâche ce qui ne l'est plus.
+- (void)resyncModifiers {
+    CGEventFlags hardware = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState);
+    CGEventFlags session = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+    NSArray<NSNumber *> *stuck = TMStuckModifierKeyCodes(session, hardware);
+    if (!stuck.count) return;
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    for (NSNumber *keyCode in stuck) {
+        CGEventRef event = CGEventCreateKeyboardEvent(source, (CGKeyCode)keyCode.unsignedShortValue, false);
+        if (!event) continue;
+        CGEventSetType(event, kCGEventFlagsChanged);
+        CGEventSetFlags(event, hardware);
+        CGEventPost(kCGHIDEventTap, event);
+        CFRelease(event);
+    }
+    if (source) CFRelease(source);
+}
+
+// Le clic maintenu qui déverrouille rend Status active : sans cela, les frappes suivantes
+// partent vers Status, qui n'a aucune fenêtre pour les recevoir.
+- (void)restoreFocus {
+    NSRunningApplication *app = _appToRestore;
+    _appToRestore = nil;
+    if (!app || app.terminated) return;
+    [app activateWithOptions:0];
 }
 
 - (void)updateCountdown {

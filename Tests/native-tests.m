@@ -772,6 +772,24 @@ static void TestLockStateMachine(void) {
           @"permission révoquée pendant le verrou : on sort quand même");
 }
 
+static void TestStuckModifiers(void) {
+    printf("\n\033[1mTMStuckModifierKeyCodes\033[0m\n");
+    CheckEqual(TMStuckModifierKeyCodes(0, 0), @[], @"rien d'appuyé : rien à relâcher");
+    CheckEqual(TMStuckModifierKeyCodes(kCGEventFlagMaskCommand, 0), @[@0x37],
+               @"⌘ tenu pour la session, relâché pour de vrai : on relâche ⌘");
+    CheckEqual(TMStuckModifierKeyCodes(kCGEventFlagMaskCommand, kCGEventFlagMaskCommand), @[],
+               @"⌘ réellement tenu : on n'y touche pas");
+    CheckEqual(TMStuckModifierKeyCodes(kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate
+                                       | kCGEventFlagMaskSecondaryFn, kCGEventFlagMaskAlternate),
+               (@[@0x37, @0x3F]), @"plusieurs coincés : seuls ceux relâchés pour de vrai");
+    CheckEqual(TMStuckModifierKeyCodes(kCGEventFlagMaskShift | kCGEventFlagMaskControl, 0),
+               (@[@0x38, @0x3B]), @"⇧ et ⌃ coincés");
+    CheckEqual(TMStuckModifierKeyCodes(kCGEventFlagMaskAlphaShift, 0), @[],
+               @"Verr. Maj est un état basculé : jamais relâché artificiellement");
+    CheckEqual(TMStuckModifierKeyCodes(0, kCGEventFlagMaskCommand), @[],
+               @"tenu physiquement mais pas pour la session : rien à faire");
+}
+
 #pragma mark - Moniteur système
 
 static void TestMetricRing(void) {
@@ -3507,6 +3525,7 @@ int main(void) {
         TestSleepInfo();
         TestHoldFraction();
         TestLockStateMachine();
+        TestStuckModifiers();
         TestMetricRing();
         TestRatePerSecond();
         TestCPUPercent();

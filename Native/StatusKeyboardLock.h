@@ -9,6 +9,11 @@
 //   — l'overlay recouvre la barre des menus, donc Pomme > Forcer à quitter est hors d'atteinte.
 // Filets de sécurité : si l'app se fige, macOS désactive le tap tout seul ; et le verrou se lève
 // inconditionnellement au bout de TMLockBackstopSeconds.
+//
+// Le tap tourne sur son propre thread, jamais sur le thread principal : chaque frappe attend la
+// réponse du tap, et un thread principal occupé (WebView, sondages) faisait expirer le tap.
+// Pendant la coupure, des frappes passaient ; un ⌘ appuyé passé puis relâché avalé laissait la
+// session croire ⌘ tenu, et toutes les lettres devenaient des raccourcis après la sortie.
 
 #import <Foundation/Foundation.h>
 
@@ -35,6 +40,13 @@ typedef NS_ENUM(NSInteger, TMLockState) {
 // Déverrouiller est toujours possible, même sans permission : elle peut être révoquée pendant le
 // verrou, et l'utilisateur ne doit pas se retrouver enfermé pour autant.
 TMLockState TMLockStateAfterToggle(TMLockState current, BOOL permissionGranted);
+
+// Modificateurs que la session croit encore appuyés alors que le clavier physique les a relâchés.
+// Leur relâchement a été avalé par le verrou (un appui passé pendant une coupure du tap, ou posté
+// par un autre outil) : sans correction, chaque lettre tapée après la sortie arrive comme un
+// raccourci. Rend les codes de touche à relâcher artificiellement, dans un ordre stable.
+// Verr. Maj est exclu : c'est un état basculé, pas une touche tenue.
+NSArray<NSNumber *> * _Nonnull TMStuckModifierKeyCodes(uint64_t sessionFlags, uint64_t hardwareFlags);
 
 #pragma mark - Contrôleur (tap HID + overlay — lit la machine, pas de tests unitaires)
 
